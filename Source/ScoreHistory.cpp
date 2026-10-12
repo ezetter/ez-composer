@@ -1,5 +1,7 @@
 #include "ScoreHistory.h"
 
+#include <algorithm>
+
 ScoreHistory::ScoreHistory (Piece& pieceToUse)
     : piece (pieceToUse),
       current (capture())
@@ -119,17 +121,32 @@ void ScoreHistory::restore (const State& state, const State& from)
 {
     const juce::ScopedValueSetter<bool> setter (restoring, true);
 
-    // The page being edited, if it's changed, or else the first page that has
+    // The page being edited, if it's changed, or else the first page that has. If the pages have
+    // just been put in another order, it's the same page, wherever it is now.
     const auto differs = [&] (int page) { return (size_t) page >= from.size() || state[(size_t) page] != from[(size_t) page]; };
-    auto pageToEdit = juce::jlimit (0, (int) state.size() - 1, piece.getCurrentPage());
+    const auto editedPage = piece.getCurrentPage();
+    auto pageToEdit = juce::jlimit (0, (int) state.size() - 1, editedPage);
 
-    if (! differs (pageToEdit))
+    if (juce::isPositiveAndBelow (editedPage, (int) from.size()) && state.size() == from.size()
+        && std::is_permutation (state.begin(), state.end(), from.begin()))
+    {
+        if (state[(size_t) pageToEdit] != from[(size_t) editedPage])
+            for (int page = 0; page < (int) state.size(); ++page)
+                if (state[(size_t) page] == from[(size_t) editedPage])
+                {
+                    pageToEdit = page;
+                    break;
+                }
+    }
+    else if (! differs (pageToEdit))
+    {
         for (int page = 0; page < (int) state.size(); ++page)
             if (differs (page))
             {
                 pageToEdit = page;
                 break;
             }
+    }
 
     piece.restorePages (state, pageToEdit);
 }

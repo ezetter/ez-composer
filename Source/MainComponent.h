@@ -302,6 +302,9 @@ private:
     /** Takes out a page, after asking, unless it's the only one. */
     void deletePage (int page);
 
+    /** Moves a page to another place, counting places as they are once it's moved, and goes to it. */
+    void movePage (int from, int to);
+
     /** Starts recording what's played into the active part, playing the score if it isn't
         already, or stops recording, playing on.
     */

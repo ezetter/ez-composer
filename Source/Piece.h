@@ -59,6 +59,11 @@ public:
     */
     void removePage (int);
 
+    /** Moves a page to another place among them, counting places in the order they're in after
+        it's moved. The page being edited stays the one edited, wherever it is now.
+    */
+    void movePage (int from, int to);
+
     /** Called after another page has been chosen to edit, or pages have been added or taken out. */
     std::function<void()> onPagesChanged;
 

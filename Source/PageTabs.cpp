@@ -6,6 +6,7 @@ namespace
     constexpr int tabGap = 2;
     constexpr int tabTop = 5;
     constexpr int addButtonSize = 22;
+    constexpr int dragThreshold = 4;        // how far a tab has to be dragged before it moves, rather than being clicked
 }
 
 PageTabs::PageTabs()
@@ -59,21 +60,98 @@ void PageTabs::paint (juce::Graphics& g)
     }
 }
 
-void PageTabs::resized()
+int PageTabs::getTabWidth() const
 {
     // As wide as they can be, down to a minimum, leaving room for the +
     const auto room = getWidth() - firstTabLeft - addButtonSize - 16;
-    const auto width = tabs.isEmpty() ? tabWidth
-                                      : juce::jlimit (minTabWidth, tabWidth, (room - (tabs.size() - 1) * tabGap) / tabs.size());
-    auto x = firstTabLeft;
+    return tabs.isEmpty() ? tabWidth : juce::jlimit (minTabWidth, tabWidth, (room - (tabs.size() - 1) * tabGap) / tabs.size());
+}
 
-    for (auto* tab : tabs)
+int PageTabs::getTabX (int place) const
+{
+    return firstTabLeft + place * (getTabWidth() + tabGap);
+}
+
+void PageTabs::resized()
+{
+    for (int place = 0; place < tabs.size(); ++place)
+        tabs[place]->setBounds (getTabX (place), tabTop, getTabWidth(), getHeight() - tabTop);
+
+    addButton.setBounds (getTabX (tabs.size()) + 6, (getHeight() - addButtonSize) / 2 + 1, addButtonSize, addButtonSize);
+
+    if (draggedPage.has_value() && dragMoved)
+        layOutDragging();
+}
+
+//==============================================================================
+void PageTabs::startDragging (int page, juce::Point<int> mouse)
+{
+    draggedPage = page;
+    dragStartX = mouse.x;
+    dragOffset = mouse.x - getTabX (page);
+    dragX = getTabX (page);
+    dragPlace = page;
+    dragMoved = false;
+}
+
+void PageTabs::dragTo (juce::Point<int> mouse)
+{
+    if (! draggedPage.has_value() || tabs.size() < 2 || (! dragMoved && std::abs (mouse.x - dragStartX) < dragThreshold))
+        return;
+
+    // Along the row of tabs, no further than the first place or the last
+    dragMoved = true;
+    dragX = juce::jlimit (getTabX (0), getTabX (tabs.size() - 1), mouse.x - dragOffset);
+    dragPlace = juce::jlimit (0, tabs.size() - 1, juce::roundToInt ((float) (dragX - firstTabLeft) / (float) (getTabWidth() + tabGap)));
+    layOutDragging();
+}
+
+void PageTabs::layOutDragging()
+{
+    // The other tabs in order, leaving a gap where the dragged one would go
+    auto place = 0;
+
+    for (int page = 0; page < tabs.size(); ++page)
     {
-        tab->setBounds (x, tabTop, width, getHeight() - tabTop);
-        x += width + tabGap;
+        if (page == *draggedPage)
+            continue;
+
+        if (place == dragPlace)
+            ++place;
+
+        tabs[page]->setTopLeftPosition (getTabX (place), tabTop);
+        ++place;
     }
 
-    addButton.setBounds (x + 6, (getHeight() - addButtonSize) / 2 + 1, addButtonSize, addButtonSize);
+    auto& dragged = *tabs[*draggedPage];
+    dragged.setTopLeftPosition (dragX, tabTop);
+    dragged.toFront (false);
+    dragged.setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+    repaint();
+}
+
+bool PageTabs::finishDragging()
+{
+    const auto moved = draggedPage.has_value() && dragMoved;
+    const auto from = draggedPage.value_or (0), to = dragPlace;
+
+    if (draggedPage.has_value() && juce::isPositiveAndBelow (*draggedPage, tabs.size()))
+        tabs[*draggedPage]->setMouseCursor (juce::MouseCursor::NormalCursor);
+
+    draggedPage.reset();
+    dragMoved = false;
+    resized();
+    repaint();
+
+    // Once the mouse has been dealt with, as moving the page shows the tabs again
+    if (moved && from != to)
+        juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer (this), from, to]
+        {
+            if (safeThis != nullptr && safeThis->onMovePage != nullptr)
+                safeThis->onMovePage (from, to);
+        });
+
+    return moved;
 }
 
 juce::PopupMenu PageTabs::createMenu (int page) const
@@ -107,7 +185,9 @@ PageTabs::Tab::Tab (PageTabs& ownerToUse, int pageToShow)
       page (pageToShow)
 {
     setWantsKeyboardFocus (false);
-    onClick = [this] { if (owner.onPageChosen != nullptr) owner.onPageChosen (page); };
+
+    // A tab that's been dragged isn't clicked, as it's let go.
+    onClick = [this] { if (! owner.ignoringClick && owner.onPageChosen != nullptr) owner.onPageChosen (page); };
 }
 
 void PageTabs::Tab::mouseDown (const juce::MouseEvent& e)
@@ -118,7 +198,24 @@ void PageTabs::Tab::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    owner.startDragging (page, e.getEventRelativeTo (&owner).getPosition());
     juce::Button::mouseDown (e);
+}
+
+void PageTabs::Tab::mouseDrag (const juce::MouseEvent& e)
+{
+    juce::Button::mouseDrag (e);
+
+    if (! e.mods.isPopupMenu())
+        owner.dragTo (e.getEventRelativeTo (&owner).getPosition());
+}
+
+void PageTabs::Tab::mouseUp (const juce::MouseEvent& e)
+{
+    // A drag isn't a click as well. The page is moved once the mouse has been dealt with.
+    owner.ignoringClick = owner.finishDragging();
+    juce::Button::mouseUp (e);
+    owner.ignoringClick = false;
 }
 
 void PageTabs::Tab::paintButton (juce::Graphics& g, bool highlighted, bool down)

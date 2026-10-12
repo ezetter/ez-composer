@@ -125,6 +125,30 @@ void Piece::removePage (int page)
     pagesChanged (true);
 }
 
+void Piece::movePage (int from, int to)
+{
+    if (from == to || ! juce::isPositiveAndBelow (from, getNumPages()) || ! juce::isPositiveAndBelow (to, getNumPages()))
+        return;
+
+    // The editing score stays the page it is, which just has another number now.
+    auto page = std::move (pages[(size_t) from]);
+    pages.erase (pages.begin() + from);
+    pages.insert (pages.begin() + to, std::move (page));
+
+    auto text = std::move (captured[(size_t) from]);
+    captured.erase (captured.begin() + from);
+    captured.insert (captured.begin() + to, std::move (text));
+
+    if (current == from)
+        current = to;
+    else if (from < current && to >= current)
+        --current;
+    else if (from > current && to <= current)
+        ++current;
+
+    pagesChanged (true);
+}
+
 void Piece::pagesChanged (bool changedPiece)
 {
     if (changedPiece)

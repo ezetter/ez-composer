@@ -359,6 +359,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     pageTabs.onAddPage = [this] { piece.addPage(); };
     pageTabs.onCopyPage = [this] (int page) { copyPage (page); };
     pageTabs.onDeletePage = [this] (int page) { deletePage (page); };
+    pageTabs.onMovePage = [this] (int from, int to) { movePage (from, to); };
     piece.onPagesChanged = [this] { pagesChanged(); };
     addAndMakeVisible (pageTabs);
 
@@ -709,6 +710,34 @@ void MainComponent::deletePage (int page)
 
                                       safeThis->piece.removePage (page);
                                   });
+}
+
+void MainComponent::movePage (int from, int to)
+{
+    const auto numPages = piece.getNumPages();
+
+    if (from == to || ! juce::isPositiveAndBelow (from, numPages) || ! juce::isPositiveAndBelow (to, numPages))
+        return;
+
+    // Each page keeps where it plays from.
+    if ((int) playbackStarts.size() == numPages)
+    {
+        const auto start = playbackStarts[(size_t) from];
+        playbackStarts.erase (playbackStarts.begin() + from);
+        playbackStarts.insert (playbackStarts.begin() + to, start);
+    }
+
+    // The page being edited is still the one shown, though it may have another number now.
+    if (shownPage == from)
+        shownPage = to;
+    else if (from < shownPage && to >= shownPage)
+        --shownPage;
+    else if (from > shownPage && to <= shownPage)
+        ++shownPage;
+
+    // The page moved is the one edited, as it's been picked up.
+    piece.movePage (from, to);
+    piece.choosePage (to);
 }
 
 //==============================================================================
