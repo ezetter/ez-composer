@@ -6,6 +6,8 @@
 #include "InstrumentPanel.h"
 #include "MidiInputs.h"
 #include "DynamicPicker.h"
+#include "EffectRack.h"
+#include "EffectsWindow.h"
 #include "EraserButton.h"
 #include "NoteLengthPicker.h"
 #include "PianoKeyboard.h"
@@ -178,6 +180,18 @@ private:
     /** Gives each track's controls its part's number, e.g. in their tooltips. */
     void numberTracks();
 
+    /** What a part's called: its number and its instrument, e.g. "Instrument 1 · Pianoteq". */
+    juce::String getPartTitle (int part) const;
+
+    /** Opens the effects page, or brings it to the front. */
+    void showEffects();
+
+    /** Keeps the effects, and where everything goes, in the settings, for next time. */
+    void saveEffects();
+
+    /** Says which effects couldn't be loaded, if any. */
+    static void reportFailedEffects (const juce::StringArray& failed, const juce::String& from);
+
     /** Adds a part after the last, makes it the active one, and scrolls down to it. */
     void addPart();
 
@@ -301,6 +315,7 @@ private:
     juce::AudioDeviceManager audioDeviceManager;
     InstrumentHost instrumentHost;
     MidiInputs midiInputs { audioDeviceManager, instrumentHost, settings };
+    EffectRack effectRack { instrumentHost };
 
     /** The MIDI inputs the MIDI menu showed, the last time it was opened */
     std::vector<MidiInputs::Device> midiMenuDevices;
@@ -320,6 +335,7 @@ private:
     juce::TextEditor tempoEditor;
     controls::StepButton tempoUpButton { true }, tempoDownButton { false };     // beside it, stacked
     juce::ComboBox partBox;             // the active part
+    juce::TextButton effectsButton { "Effects" };     // at the right of the toolbar, opening the effects page
     std::vector<Track> tracks;          // for each part, in order; only the active part's instrument panel shows
 
     ScorePanel scorePanel { score };
@@ -355,6 +371,9 @@ private:
 
     // Last, so it goes before the score it edits
     std::unique_ptr<ChordWindow> chordWindow;
+
+    // And before the effects it shows
+    std::unique_ptr<EffectsWindow> effectsWindow;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

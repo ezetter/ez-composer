@@ -25,6 +25,8 @@ target_sources(AnthropoceneMusic
     PRIVATE
         Source/ChordEditor.cpp
         Source/DynamicPicker.cpp
+        Source/EffectRack.cpp
+        Source/EffectsWindow.cpp
         Source/EraserButton.cpp
         Source/InstrumentHost.cpp
         Source/InstrumentPanel.cpp

@@ -153,6 +153,243 @@ void InstrumentHost::setMuted (int part, bool shouldBeMuted)
     slots[(size_t) part]->muted = shouldBeMuted;
 }
 
+//==============================================================================
+InstrumentHost::Bus* InstrumentHost::findBus (int busId) const
+{
+    for (auto& bus : buses)
+        if (bus->id == busId)
+            return bus.get();
+
+    return nullptr;
+}
+
+void InstrumentHost::allocateBusBuffer (Bus& bus)
+{
+    auto channels = 2;
+
+    for (const auto& effect : bus.effects)
+        channels = juce::jmax (channels, effect.plugin->getTotalNumInputChannels(), effect.plugin->getTotalNumOutputChannels());
+
+    bus.buffer.setSize (channels, juce::jmax (blockSize, 1));
+    bus.buffer.clear();
+}
+
+void InstrumentHost::prepareEffect (juce::AudioPluginInstance& effect)
+{
+    double currentSampleRate = 0.0;
+    int currentBlockSize = 0;
+
+    {
+        const juce::ScopedLock sl (lock);
+        currentSampleRate = sampleRate;
+        currentBlockSize = blockSize;
+    }
+
+    effect.setPlayHead (this);
+
+    if (currentSampleRate > 0.0)
+    {
+        effect.setRateAndBufferSizeDetails (currentSampleRate, currentBlockSize);
+        effect.prepareToPlay (currentSampleRate, currentBlockSize);
+    }
+}
+
+int InstrumentHost::addBus()
+{
+    auto bus = std::make_unique<Bus>();
+    const juce::ScopedLock sl (lock);
+    bus->id = nextBusId++;
+    allocateBusBuffer (*bus);
+    buses.push_back (std::move (bus));
+    return buses.back()->id;
+}
+
+void InstrumentHost::removeBus (int busId)
+{
+    std::unique_ptr<Bus> removed;
+
+    {
+        const juce::ScopedLock sl (lock);
+        const auto found = std::find_if (buses.begin(), buses.end(), [busId] (const auto& bus) { return bus->id == busId; });
+
+        if (found == buses.end())
+            return;
+
+        removed = std::move (*found);
+        buses.erase (found);
+
+        for (auto& slot : slots)
+            if (slot->output == busId)
+                slot->output = mainOutput;
+
+        for (auto& bus : buses)
+            if (bus->output == busId)
+                bus->output = mainOutput;
+    }
+
+    // Its effects are released and deleted outside the lock.
+    for (auto& effect : removed->effects)
+        effect.plugin->releaseResources();
+}
+
+void InstrumentHost::removeAllBuses()
+{
+    for (auto id : getBuses())
+        removeBus (id);
+}
+
+std::vector<int> InstrumentHost::getBuses() const
+{
+    std::vector<int> ids;
+
+    for (const auto& bus : buses)
+        ids.push_back (bus->id);
+
+    return ids;
+}
+
+int InstrumentHost::getBusOutput (int busId) const
+{
+    const auto* bus = findBus (busId);
+    return bus != nullptr ? bus->output : mainOutput;
+}
+
+void InstrumentHost::setBusOutput (int busId, int output)
+{
+    const juce::ScopedLock sl (lock);
+    auto* bus = findBus (busId);
+
+    if (bus == nullptr)
+        return;
+
+    // Only to a bus after it, so nothing goes round in a loop
+    const auto placeOf = [this] (int id) { return std::find_if (buses.begin(), buses.end(), [id] (const auto& b) { return b->id == id; }) - buses.begin(); };
+
+    if (output == mainOutput || (findBus (output) != nullptr && placeOf (output) > placeOf (busId)))
+        bus->output = output;
+}
+
+int InstrumentHost::getPartOutput (int part) const
+{
+    return juce::isPositiveAndBelow (part, (int) slots.size()) ? slots[(size_t) part]->output : mainOutput;
+}
+
+void InstrumentHost::setPartOutput (int part, int output)
+{
+    const juce::ScopedLock sl (lock);
+
+    if (juce::isPositiveAndBelow (part, (int) slots.size()) && (output == mainOutput || findBus (output) != nullptr))
+        slots[(size_t) part]->output = output;
+}
+
+int InstrumentHost::getNumEffects (int busId) const
+{
+    const auto* bus = findBus (busId);
+    return bus != nullptr ? (int) bus->effects.size() : 0;
+}
+
+juce::AudioPluginInstance* InstrumentHost::getEffect (int busId, int index) const
+{
+    const auto* bus = findBus (busId);
+    return bus != nullptr && juce::isPositiveAndBelow (index, (int) bus->effects.size()) ? bus->effects[(size_t) index].plugin.get() : nullptr;
+}
+
+void InstrumentHost::insertEffect (int busId, int index, std::unique_ptr<juce::AudioPluginInstance> effect)
+{
+    if (effect == nullptr || findBus (busId) == nullptr)
+        return;
+
+    prepareEffect (*effect);
+
+    const juce::ScopedLock sl (lock);
+
+    if (auto* bus = findBus (busId))
+    {
+        bus->effects.insert (bus->effects.begin() + juce::jlimit (0, (int) bus->effects.size(), index), Effect { std::move (effect), false });
+        allocateBusBuffer (*bus);
+    }
+}
+
+void InstrumentHost::removeEffect (int busId, int index)
+{
+    std::unique_ptr<juce::AudioPluginInstance> removed;
+
+    {
+        const juce::ScopedLock sl (lock);
+        auto* bus = findBus (busId);
+
+        if (bus == nullptr || ! juce::isPositiveAndBelow (index, (int) bus->effects.size()))
+            return;
+
+        removed = std::move (bus->effects[(size_t) index].plugin);
+        bus->effects.erase (bus->effects.begin() + index);
+        allocateBusBuffer (*bus);
+    }
+
+    removed->releaseResources();
+}
+
+void InstrumentHost::moveEffect (int busId, int from, int to)
+{
+    const juce::ScopedLock sl (lock);
+    auto* bus = findBus (busId);
+
+    if (bus == nullptr || ! juce::isPositiveAndBelow (from, (int) bus->effects.size()) || ! juce::isPositiveAndBelow (to, (int) bus->effects.size()))
+        return;
+
+    auto effect = std::move (bus->effects[(size_t) from]);
+    bus->effects.erase (bus->effects.begin() + from);
+    bus->effects.insert (bus->effects.begin() + to, std::move (effect));
+}
+
+bool InstrumentHost::isEffectBypassed (int busId, int index) const
+{
+    const auto* bus = findBus (busId);
+    return bus != nullptr && juce::isPositiveAndBelow (index, (int) bus->effects.size()) && bus->effects[(size_t) index].bypassed;
+}
+
+void InstrumentHost::setEffectBypassed (int busId, int index, bool bypassed)
+{
+    const juce::ScopedLock sl (lock);
+
+    if (auto* bus = findBus (busId); bus != nullptr && juce::isPositiveAndBelow (index, (int) bus->effects.size()))
+        bus->effects[(size_t) index].bypassed = bypassed;
+}
+
+void InstrumentHost::processBuses (juce::AudioBuffer<float>& output, int numSamples)
+{
+    for (auto& busPointer : buses)
+    {
+        auto& bus = *busPointer;
+
+        for (auto& effect : bus.effects)
+        {
+            if (effect.bypassed)
+                continue;
+
+            auto& plugin = *effect.plugin;
+            const juce::ScopedLock effectLock (plugin.getCallbackLock());
+
+            if (plugin.isSuspended())
+                continue;
+
+            // Just the channels the effect has, of the bus's
+            const auto channels = juce::jmax (plugin.getTotalNumInputChannels(), plugin.getTotalNumOutputChannels());
+            juce::AudioBuffer<float> through (bus.buffer.getArrayOfWritePointers(), juce::jmin (channels, bus.buffer.getNumChannels()), numSamples);
+            effectMidi.clear();
+            plugin.processBlock (through, effectMidi);
+        }
+
+        // On to the main output, through every channel, or to the bus it goes to
+        auto* next = bus.output != mainOutput ? findBus (bus.output) : nullptr;
+        auto& destination = next != nullptr ? next->buffer : output;
+        const auto channels = next != nullptr ? 2 : output.getNumChannels();
+
+        for (int channel = 0; channel < channels; ++channel)
+            destination.addFrom (channel, 0, bus.buffer, juce::jmin (channel, 1), 0, numSamples);
+    }
+}
+
 double InstrumentHost::getSampleRate() const
 {
     const juce::ScopedLock sl (lock);
@@ -528,6 +765,17 @@ void InstrumentHost::prepareToPlay (double newSampleRate, int maximumBlockSize)
             allocateInstrumentBuffer (slot);
         }
     }
+
+    for (auto& bus : buses)
+    {
+        for (auto& effect : bus->effects)
+        {
+            effect.plugin->setRateAndBufferSizeDetails (sampleRate, blockSize);
+            effect.plugin->prepareToPlay (sampleRate, blockSize);
+        }
+
+        allocateBusBuffer (*bus);
+    }
 }
 
 void InstrumentHost::releaseResources()
@@ -541,6 +789,10 @@ void InstrumentHost::releaseResources()
 
         slot->scoreNotesOn.reset();
     }
+
+    for (auto& bus : buses)
+        for (auto& effect : bus->effects)
+            effect.plugin->releaseResources();
 
     sampleRate = 0.0;
     midiInputReady = false;
@@ -573,6 +825,12 @@ void InstrumentHost::audioDeviceIOCallbackWithContext (const float* const*, int,
 
     for (auto& slot : slots)
         slot->midi.clear();
+
+    for (auto& bus : buses)
+    {
+        bus->buffer.setSize (bus->buffer.getNumChannels(), numSamples, false, false, true);
+        bus->buffer.clear();
+    }
 
     // The keyboard's notes stop on the instrument it was playing when another part becomes active.
     if (const auto part = activePart.load(); part != keyboardPart)
@@ -616,11 +874,19 @@ void InstrumentHost::audioDeviceIOCallbackWithContext (const float* const*, int,
         slot.gain.applyGain (slot.buffer, numSamples);
 
         // The instruments are mixed together, each at its volume, a mono one playing through every
-        // output channel.
+        // output channel, or through both of its bus's, if it goes to one.
         if (const auto numInstrumentOutputs = instrument->getTotalNumOutputChannels(); numInstrumentOutputs > 0)
-            for (int channel = 0; channel < numOutputChannels; ++channel)
-                output.addFrom (channel, 0, slot.buffer, juce::jmin (channel, numInstrumentOutputs - 1), 0, numSamples);
+        {
+            auto* bus = slot.output != mainOutput ? findBus (slot.output) : nullptr;
+            auto& destination = bus != nullptr ? bus->buffer : output;
+            const auto channels = bus != nullptr ? 2 : numOutputChannels;
+
+            for (int channel = 0; channel < channels; ++channel)
+                destination.addFrom (channel, 0, slot.buffer, juce::jmin (channel, numInstrumentOutputs - 1), 0, numSamples);
+        }
     }
+
+    processBuses (output, numSamples);
 
     addMetronome (output, numSamples);
     advancePlayback();

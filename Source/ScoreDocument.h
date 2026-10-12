@@ -29,6 +29,12 @@ public:
     */
     std::function<void (int part, const juce::var&)> loadInstrument;
 
+    /** Supplies the effects, and where everything goes, to save with the score, as JSON. */
+    std::function<juce::var()> getEffectsToSave;
+
+    /** Loads the effects an opened score was saved with. Scores saved without them leave them as they are. */
+    std::function<void (const juce::var&)> loadEffects;
+
     /** Supplies a part's volume to save with the score, in decibels. */
     std::function<float (int part)> getVolumeToSave;
 

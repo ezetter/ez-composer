@@ -107,6 +107,9 @@ juce::Result ScoreDocument::loadDocument (const juce::File& file)
             if (const auto& value = muted->getReference (part); value.isBool())
                 loadMuted (part, (bool) value);
 
+    if (const auto effects = json.getProperty ("effects", {}); result.wasOk() && effects.isObject() && loadEffects != nullptr)
+        loadEffects (effects);
+
     if (result.wasOk())
         rememberRecentScore (file);
 
@@ -127,6 +130,10 @@ juce::Result ScoreDocument::saveDocument (const juce::File& file)
 
         json.getDynamicObject()->setProperty ("instruments", instruments);
     }
+
+    // The effects, and where the instruments go
+    if (getEffectsToSave != nullptr)
+        json.getDynamicObject()->setProperty ("effects", getEffectsToSave());
 
     // Each part's volume, in decibels
     if (getVolumeToSave != nullptr)

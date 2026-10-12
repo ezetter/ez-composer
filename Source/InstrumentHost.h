@@ -63,6 +63,53 @@ public:
     void setMuted (int part, bool);
     bool isMuted (int part) const noexcept { return slots[(size_t) part]->muted; }
 
+    //==============================================================================
+    /** Effect buses: chains of effect plugins. A bus takes in the instruments sent to it, plays
+        them through its effects one after another, and sends what comes out on to the main output,
+        or to a bus after it, so buses can be chained. Each is known by an id, which stays the same
+        as buses come and go; the main output's is mainOutput.
+    */
+    static constexpr int mainOutput = 0;
+
+    /** Adds a bus after the others, without effects, going to the main output, and returns its id. */
+    int addBus();
+
+    /** Takes out a bus, deleting its effects. The instruments and buses going to it go to the
+        main output instead.
+    */
+    void removeBus (int busId);
+
+    /** Takes out every bus. */
+    void removeAllBuses();
+
+    /** The buses' ids, in order. */
+    std::vector<int> getBuses() const;
+
+    /** Where a bus goes: the main output, or a bus after it. */
+    int getBusOutput (int busId) const;
+    void setBusOutput (int busId, int output);
+
+    /** Where a part's instrument goes: the main output, or a bus. */
+    int getPartOutput (int part) const;
+    void setPartOutput (int part, int output);
+
+    /** A bus's effects, in the order they play. */
+    int getNumEffects (int busId) const;
+    juce::AudioPluginInstance* getEffect (int busId, int index) const;
+
+    /** Puts an effect in a bus's chain, before the one at an index, or at the end. */
+    void insertEffect (int busId, int index, std::unique_ptr<juce::AudioPluginInstance>);
+
+    /** Takes an effect out of a bus's chain, deleting it. */
+    void removeEffect (int busId, int index);
+
+    /** Moves an effect along its bus's chain, to another index. */
+    void moveEffect (int busId, int from, int to);
+
+    /** Whether an effect is passed over, as if it weren't there. */
+    bool isEffectBypassed (int busId, int index) const;
+    void setEffectBypassed (int busId, int index, bool);
+
     /** The sample rate and block size to create a new instrument with. */
     double getSampleRate() const;
     int getBlockSize() const;
@@ -178,6 +225,7 @@ private:
         std::atomic<float> volume { 0.0f };                 // in decibels
         std::atomic<bool> muted { false };
         juce::SmoothedValue<float> gain { 1.0f };           // following the volume, so changes don't click
+        int output = mainOutput;                            // the main output, or a bus
     };
 
     /** A metronome sound playing, and how far it's got. */
@@ -210,6 +258,30 @@ private:
     void catchUp (bool keepNotesSounding);
     void recordKeys (const juce::MidiBuffer&);
     void allocateInstrumentBuffer (Slot&);
+
+    /** An effect in a bus's chain. */
+    struct Effect
+    {
+        std::unique_ptr<juce::AudioPluginInstance> plugin;
+        bool bypassed = false;
+    };
+
+    /** A chain of effects, and what's going through it. */
+    struct Bus
+    {
+        int id = 0;
+        std::vector<Effect> effects;
+        int output = mainOutput;
+        juce::AudioBuffer<float> buffer;    // as many channels as its effects need, at least two
+    };
+
+    /** A bus by its id, or null. Call with the lock held, or on the message thread. */
+    Bus* findBus (int busId) const;
+    void allocateBusBuffer (Bus&);
+    void prepareEffect (juce::AudioPluginInstance&);
+
+    /** Plays the buses' effects, and sends what comes out of each where it goes. */
+    void processBuses (juce::AudioBuffer<float>& output, int numSamples);
     void addScoreEvents (int numSamples);
     void letGoOfKeyboardNotes (Slot&);
     void advancePlayback();
@@ -237,6 +309,9 @@ private:
     std::atomic<bool> metronome { false };
     std::vector<float> clickSound, clangSound;
     std::array<MetronomeVoice, 6> metronomeVoices;
+    std::vector<std::unique_ptr<Bus>> buses;        // in order, each going to the main output or a bus after it
+    int nextBusId = 1;
+    juce::MidiBuffer effectMidi;                    // nothing, for the effects
     int64_t position = 0;               // in samples since this time through started, at the start of the block being played
     int64_t nextPosition = 0;           // where the next block starts, once this one's been played
     bool looping = false;

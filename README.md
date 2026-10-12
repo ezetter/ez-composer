@@ -41,7 +41,21 @@ Each instrument has a **volume dial** to the left of its staves, setting how lou
 - **BPM** sets the tempo in quarter notes per minute, from 20 to 300, fractions allowed. The default is 120. Type it, or step it with the up and down arrows beside it, a beat per minute at a time (from a fraction, to the whole number either side); holding an arrow down goes on stepping, and is undone in one go. While typing in it, the up and down arrow keys step it too. An arrow is greyed out at the end of the range. A change while the score plays takes over straight away, from the beat it's got to.
 - The instrument menu (**Instrument 1**, **Instrument 2** and so on) chooses the active instrument.
 - **Load Instrument…** loads a VST3 instrument plugin for the active instrument, such as one from `/Library/Audio/Plug-Ins/VST3`. **Edit [plugin]**, named for the loaded plugin (e.g. **Edit Pigments**), opens the plugin's own window, where you can choose its sounds. The instruments can use different plugins, or the same one with different sounds.
+- **Effects**, at the right of the toolbar, opens the effects page, for playing the instruments through VST3 effect plugins (see [Effects](#effects)).
 - Each instrument's plugin is saved with the score (see [Saving and opening](#saving-and-opening)). It's also loaded again the next time the app starts, with the sound it had. It's saved when you load it, when you close its editor, and when you quit, in `~/Library/Application Support/Anthropocene Music`. If it can't be loaded, say because it's been uninstalled, the app tells you and forgets it.
+
+### Effects
+
+**Effects**, at the right of the toolbar, opens the effects page, in a window of its own. Effects go in **buses**: chains of effect plugins, through which instruments can be sent.
+
+- **Instruments**, at the top, lists each instrument, with where it goes: **Main output**, straight to the speakers, as before there were effects, or a bus. Each instrument goes to one place, and any number can go to the same bus.
+- **Buses** lists the buses, each as a card. **Add Bus** adds one; its bin takes it out, with its effects, and whatever went to it goes to the main output instead.
+- Each bus's effects are shown in order, joined by arrows, as the sound goes through them: what comes out of one goes into the next. **Add Effect…** loads a VST3 effect, such as one from `/Library/Audio/Plug-Ins/VST3`, at the end of the chain; a file with several effects in it offers a menu of them, and an instrument plugin isn't an effect, so it isn't loaded. On each effect, **Edit** opens the plugin's own window, to change its settings; **Bypass** passes over it, as if it weren't there, while keeping its place and settings, and the effect is greyed out while it's bypassed; the triangles move it earlier or later in the chain; and the cross takes it out.
+- Each bus **goes to** the main output, or on to a bus after it, so buses can be chained: an instrument can go through one bus's effects and then another's. A bus can only go to one after it, so nothing goes round in a loop.
+
+An instrument's volume and muting apply before its effects. The effects play all the time, whether or not the score is playing, so a reverb or delay rings on after Stop, and they hear the score's tempo, for effects that keep time with it. The metronome goes straight to the main output, not through the effects.
+
+The effects, their settings and where everything goes are saved with the score, and kept for the next time the app starts, as the instruments are. Changing them, or an effect's settings in its window, counts as a change to the score that needs saving, though not one Undo undoes. Instruments added or taken out keep where they go. An effect that can't be loaded, say because it's been uninstalled, is left out, and the app says which.
 
 ### Saving and opening
 
@@ -56,6 +70,7 @@ The **File** menu saves and opens scores:
 | **Save As…** | ⇧⌘S | Saves the score to a new file, which it then keeps using. |
 
 - Scores are saved as `.amscore` files, which are JSON. A file keeps everything about the score, and the plugins it's played on and their volumes: the key, time signature, tempo, and for each instrument its alternate staff, its measures and their notes, and each measure's chord with all its settings. That includes notes you've added to or taken out of a chord, and the order a Random chord plays in. Notes on beats hidden by a shorter time signature are kept too.
+- The effects are saved with the score too, with their settings, the buses they're in, and where each instrument and bus goes (see [Effects](#effects)). Opening a score saved with effects puts them in place of the ones you had; one saved without them leaves yours as they are.
 - Each instrument's plugin is saved with the score, with its sound: whatever you've chosen in its editor. Opening the score loads the plugins again, or just gives it the saved sound if it's the one already loaded. A plugin's sound can be large, so a score can be too; Pigments adds about half a megabyte.
 - Loading a different instrument, or changing its sound in its editor, counts as a change that needs saving, and the title shows it within half a second. It goes by what the instrument reports: a change to one of its parameters, its program, or its other settings. Just opening the editor, or playing, isn't a change, even though some instruments (Pigments, for one) save details of their editor window along with their sound.
 - If a score's plugin can't be loaded, say because it isn't installed, the score still opens, you're told, and the plugin you had stays loaded. An instrument saved without a plugin also leaves the one it has as it is, and so does New. Scores saved before there were two instruments open as instrument 1, with their plugin, and an empty instrument 2.
@@ -239,11 +254,13 @@ The **MIDI** menu lists the MIDI inputs, ticked when they're on. Choose one to t
 | `Source/NoteLengthPicker.*` | The whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th and 32nd note buttons for choosing the length of the notes clicks add, and the notes drawn on them, which a note's menu shows too |
 | `Source/PianoKeyboard.*` | The on-screen piano |
 | `Source/Controls.h` | Colours and helpers shared by the controls, and the play, stop, record, loop and metronome buttons |
-| `Source/InstrumentHost.*` | Hosts each instrument's plugin, and plays them from the piano, MIDI controllers and the score, once or looping, with the metronome's clang and click, noting the keys played while recording |
+| `Source/InstrumentHost.*` | Hosts each instrument's plugin, and plays them from the piano, MIDI controllers and the score, once or looping, through the buses' chains of effects, with the metronome's clang and click, noting the keys played while recording |
 | `Source/PositionRuler.*` | The ruler along the top of the staves, with the measures and beats, for choosing where the score plays from |
 | `Source/Recorder.*` | Writes the keys played while recording into the score as notes, tied across barlines |
 | `Source/MidiInputs.*` | Connects MIDI controllers, as they're plugged in, and the MIDI menu's settings |
 | `Source/InstrumentPanel.*` | Loads an instrument's plugin and opens its editor, and saves and loads it with the score |
+| `Source/EffectRack.*` | Loads effect plugins into the buses, opens their editors, and saves and loads the effects and where everything goes |
+| `Source/EffectsWindow.*` | The effects page: where each instrument goes, and the buses with their chains of effects |
 | `Source/PluginWindow.*` | The window for an instrument's editor |
 | `Resources/Icon.png` | The app's icon, a staff with two quarter notes, from which the build makes the Mac icon |
 

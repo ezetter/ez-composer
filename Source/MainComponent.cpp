@@ -42,6 +42,9 @@ namespace
     // And the metronome
     const char* const metronomeKey = "metronome";
 
+    // And the effects, as JSON
+    const char* const effectsKey = "effects";
+
     // The MIDI menu's items are numbered from here, in the order of the inputs they're for.
     constexpr int firstMidiInputItem = 1000;
 
@@ -348,6 +351,30 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     numberTracks();
     updatePartBox();
 
+    // The effects, and where the instruments go, as they were last time, saved with the score and
+    // loaded with it. Changes to them count as changes to the score, which needs saving.
+    effectsButton.setTooltip ("Effects: chains of effect plugins, called buses, and which instruments go through them");
+    effectsButton.setWantsKeyboardFocus (false);
+    effectsButton.onClick = [this] { showEffects(); };
+    addAndMakeVisible (effectsButton);
+
+    effectRack.onChanged = [this] (bool byUser)
+    {
+        if (byUser)
+            document.changed();
+
+        saveEffects();
+
+        if (effectsWindow != nullptr)
+            effectsWindow->refresh();
+    };
+
+    if (const auto saved = juce::JSON::parse (settings.getValue (effectsKey)); saved.isObject())
+        reportFailedEffects (effectRack.loadJSON (saved), "were used last time");
+
+    document.getEffectsToSave = [this] { return effectRack.toJSON(); };
+    document.loadEffects = [this] (const juce::var& json) { reportFailedEffects (effectRack.loadJSON (json), "the score was saved with"); };
+
     document.getVolumeToSave = [this] (int part) { return instrumentHost.getVolume (part); };
     document.loadVolume = [this] (int part, float decibels) { setVolume (part, decibels, false); };
     document.getMutedToSave = [this] (int part) { return instrumentHost.isMuted (part); };
@@ -392,6 +419,10 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
 MainComponent::~MainComponent()
 {
+    // The effects page goes, and the effects are kept, as they may have been changed in their editors.
+    effectsWindow = nullptr;
+    saveEffects();
+
     // The menu bar stops watching the command manager before the manager goes, which is before
     // the menu bar is.
     juce::MenuBarModel::setMacMainMenu (nullptr);
@@ -456,6 +487,9 @@ void MainComponent::resized()
     toolbar.removeFromLeft (20);
     partBox.setBounds (toolbar.removeFromLeft (150));
     toolbar.removeFromLeft (20);
+
+    effectsButton.setBounds (toolbar.removeFromRight (84));
+    toolbar.removeFromRight (8);
 
     for (auto& track : tracks)
         track.panel->setBounds (toolbar);
@@ -983,8 +1017,43 @@ void MainComponent::setEditing (bool shouldEdit)
 void MainComponent::showPartTitles()
 {
     for (size_t part = 0; part < tracks.size(); ++part)
-        staffSystems.views[part]->setTitle ("Instrument " + juce::String (part + 1) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))
-                                            + tracks[part].panel->getStatus());
+        staffSystems.views[part]->setTitle (getPartTitle ((int) part));
+
+    // The effects page names the instruments too.
+    if (effectsWindow != nullptr)
+        effectsWindow->refresh();
+}
+
+juce::String MainComponent::getPartTitle (int part) const
+{
+    return "Instrument " + juce::String (part + 1) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + tracks[(size_t) part].panel->getStatus();
+}
+
+void MainComponent::showEffects()
+{
+    if (effectsWindow != nullptr)
+    {
+        effectsWindow->toFront (true);
+        return;
+    }
+
+    effectsWindow = std::make_unique<EffectsWindow> (effectRack,
+                                                     [this] (int part) { return juce::isPositiveAndBelow (part, (int) tracks.size()) ? getPartTitle (part) : juce::String(); },
+                                                     [this] { effectsWindow = nullptr; });
+}
+
+void MainComponent::saveEffects()
+{
+    settings.setValue (effectsKey, juce::JSON::toString (effectRack.toJSON(), true));
+    settings.saveIfNeeded();
+}
+
+void MainComponent::reportFailedEffects (const juce::StringArray& failed, const juce::String& from)
+{
+    if (! failed.isEmpty())
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Couldn't load some effects",
+                                                "These effects " + from + ", but couldn't be loaded, so they've been left out: "
+                                                    + failed.joinIntoString (", ") + ".");
 }
 
 void MainComponent::setVolume (int part, float decibels, bool changedOnDial)
@@ -1597,6 +1666,10 @@ void MainComponent::saveChangesThen (std::function<void()> action)
     // An instrument's sound may have been changed in its editor, which might still be open.
     for (auto& track : tracks)
         track.panel->checkForSoundChanges();
+
+    // So may an effect's, in its editor.
+    if (effectRack.checkForSoundChanges())
+        document.changed();
 
     document.saveIfNeededAndUserAgreesAsync ([safeThis = juce::Component::SafePointer (this), action] (juce::FileBasedDocument::SaveResult result)
     {
