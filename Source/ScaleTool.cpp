@@ -39,15 +39,15 @@ ScalePanel::ScalePanel (const ScaleSettings& settings)
 
     directionBox.addItemList ({ "Ascending", "Descending" }, 1);
     directionBox.setSelectedId (settings.ascending ? 1 : 2, juce::dontSendNotification);
-    directionBox.setTooltip ("Which way the notes go through the scale, for Sequence");
+    directionBox.setTooltip ("Which way the notes go through the scale, for Scale");
     addAndMakeVisible (directionBox);
 
-    sequenceButton.setTooltip ("Then click on a staff: the notes go up or down the scale from the note clicked, one after another");
+    scaleButton.setTooltip ("Then click on a staff: the notes go up or down the scale from the note clicked, one after another");
     randomButton.setTooltip ("Then click on a staff: the notes are picked from the scale at random, one after another, from where you click");
-    sequenceButton.onClick = [this] { if (onPlace != nullptr) onPlace (getSettings (false)); };
+    scaleButton.onClick = [this] { if (onPlace != nullptr) onPlace (getSettings (false)); };
     randomButton.onClick = [this] { if (onPlace != nullptr) onPlace (getSettings (true)); };
 
-    for (auto* button : { &sequenceButton, &randomButton })
+    for (auto* button : { &scaleButton, &randomButton })
     {
         button->setWantsKeyboardFocus (false);
         addAndMakeVisible (button);
@@ -81,7 +81,7 @@ void ScalePanel::resized()
 
     bounds.removeFromTop (gap);
     auto buttons = bounds.removeFromTop (rowHeight);
-    sequenceButton.setBounds (buttons.removeFromLeft ((buttons.getWidth() - gap) / 2));
+    scaleButton.setBounds (buttons.removeFromLeft ((buttons.getWidth() - gap) / 2));
     buttons.removeFromLeft (gap);
     randomButton.setBounds (buttons);
 }

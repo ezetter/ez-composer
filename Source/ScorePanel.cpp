@@ -26,9 +26,9 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     majorButton.onClick = [this] { score.setMinor (false); };
     minorButton.onClick = [this] { score.setMinor (true); };
 
-    scaleButton.setWantsKeyboardFocus (false);
-    scaleButton.setTooltip ("Add notes from the key's scale, in order or at random, where you click on a staff");
-    scaleButton.onClick = [this] { if (onScale != nullptr) onScale (scaleButton); };
+    generateNotesButton.setWantsKeyboardFocus (false);
+    generateNotesButton.setTooltip ("Add notes from the key's scale, in order or at random, where you click on a staff");
+    generateNotesButton.onClick = [this] { if (onScale != nullptr) onScale (generateNotesButton); };
 
     signatureLabel.setFont (juce::FontOptions (12.0f));
     signatureLabel.setColour (juce::Label::textColourId, controls::secondaryText);
@@ -52,8 +52,8 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
         hint->setMinimumHorizontalScale (1.0f);     // wrapped onto a second line, rather than squeezed
     }
 
-    copyProgressionButton.setWantsKeyboardFocus (false);
-    copyProgressionButton.onClick = [this]
+    copyChordsButton.setWantsKeyboardFocus (false);
+    copyChordsButton.onClick = [this]
     {
         // With two parts it goes to the other one, and with more, to the one chosen.
         if (score.getNumParts() == 2)
@@ -64,7 +64,7 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
             return;
         }
 
-        getCopyTargetsMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (copyProgressionButton),
+        getCopyTargetsMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (copyChordsButton),
                                             [safeThis = juce::Component::SafePointer (this)] (int result)
                                             {
                                                 if (safeThis != nullptr && result > 0 && safeThis->onCopyProgression != nullptr)
@@ -74,7 +74,7 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
 
     for (auto* component : std::initializer_list<juce::Component*> { &keyHeading, &keyBox, &majorButton, &minorButton, &signatureLabel, &timeSignatureHeading,
                                                                      &timeSignatureBox, &alternateHeading, &alternateBox, &alternateHint,
-                                                                     &progressionHeading, &copyProgressionButton, &progressionHint, &scaleButton })
+                                                                     &progressionHeading, &copyChordsButton, &progressionHint, &generateNotesButton })
         addAndMakeVisible (component);
 
     score.addChangeListener (this);
@@ -126,11 +126,11 @@ void ScorePanel::resized()
 
     progressionHeading.setBounds (bounds.removeFromTop (headingHeight));
     bounds.removeFromTop (2);
-    copyProgressionButton.setBounds (bounds.removeFromTop (controlHeight));
+    copyChordsButton.setBounds (bounds.removeFromTop (controlHeight));
     bounds.removeFromTop (2);
     progressionHint.setBounds (bounds.removeFromTop (32));
     bounds.removeFromTop (4);
-    scaleButton.setBounds (bounds.removeFromTop (controlHeight));
+    generateNotesButton.setBounds (bounds.removeFromTop (controlHeight));
 }
 
 void ScorePanel::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -169,30 +169,30 @@ void ScorePanel::update()
     alternateBox.setSelectedId ((int) score.getAlternateStaff (part) + 1, juce::dontSendNotification);
     alternateHint.setText ("For every chord of instrument " + juce::String (part + 1), juce::dontSendNotification);
 
-    // The progression goes from this part to the other, or to one chosen from a menu.
+    // The chords go from this part to the other, or to one chosen from a menu.
     const auto from = juce::String (part + 1);
 
     if (score.getNumParts() == 1)
     {
-        copyProgressionButton.setButtonText ("Copy Progression");
-        copyProgressionButton.setEnabled (false);
-        copyProgressionButton.setTooltip ({});
+        copyChordsButton.setButtonText ("Copy Chords");
+        copyChordsButton.setEnabled (false);
+        copyChordsButton.setTooltip ({});
         progressionHint.setText ("Add another instrument to copy instrument " + from + "'s chords to", juce::dontSendNotification);
     }
     else if (score.getNumParts() == 2)
     {
         const auto to = juce::String (2 - part);
-        copyProgressionButton.setButtonText ("Copy Progression to Instrument " + to);
-        copyProgressionButton.setEnabled (score.hasChords (part));
-        copyProgressionButton.setTooltip ("Give instrument " + to + " instrument " + from + "'s chords, in place of its own notes and chords");
+        copyChordsButton.setButtonText ("Copy Chords to Instrument " + to);
+        copyChordsButton.setEnabled (score.hasChords (part));
+        copyChordsButton.setTooltip ("Give instrument " + to + " instrument " + from + "'s chords, in place of its own notes and chords");
         progressionHint.setText ("Replaces instrument " + to + "'s notes and chords with instrument " + from + "'s chords",
                                  juce::dontSendNotification);
     }
     else
     {
-        copyProgressionButton.setButtonText ("Copy Progression To" + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")));
-        copyProgressionButton.setEnabled (score.hasChords (part));
-        copyProgressionButton.setTooltip ("Give an instrument you choose instrument " + from + "'s chords, in place of its own notes and chords");
+        copyChordsButton.setButtonText ("Copy Chords To" + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")));
+        copyChordsButton.setEnabled (score.hasChords (part));
+        copyChordsButton.setTooltip ("Give an instrument you choose instrument " + from + "'s chords, in place of its own notes and chords");
         progressionHint.setText ("Replaces the chosen instrument's notes and chords with instrument " + from + "'s chords",
                                  juce::dontSendNotification);
     }

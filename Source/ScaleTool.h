@@ -17,15 +17,16 @@ struct ScaleSettings
     bool random = false;
 };
 
-/** The Scale button's settings: the number of notes, their length, ascending or descending, and
-    Sequence and Random buttons, which each say to go and add the notes, in order or at random.
+/** The settings Generate Notes from Key shows: the number of notes, their length, ascending or
+    descending, and Scale and Random buttons, which each say to go and add the notes, in order up
+    or down the scale or at random.
 */
 class ScalePanel final : public juce::Component
 {
 public:
     explicit ScalePanel (const ScaleSettings&);
 
-    /** Called when Sequence or Random is clicked, with the settings, random or not. */
+    /** Called when Scale or Random is clicked, with the settings, random or not. */
     std::function<void (ScaleSettings)> onPlace;
 
     void resized() override;
@@ -36,7 +37,7 @@ private:
     juce::Label notesLabel, lengthLabel, directionLabel;
     juce::Slider notesSlider;
     juce::ComboBox lengthBox, directionBox;
-    juce::TextButton sequenceButton { "Sequence" }, randomButton { "Random" };
+    juce::TextButton scaleButton { "Scale" }, randomButton { "Random" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ScalePanel)
 };

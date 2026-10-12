@@ -915,7 +915,7 @@ void MainComponent::showScalePanel (juce::Component& button)
     auto panel = std::make_unique<ScalePanel> (lastScale);
     auto* panelPointer = panel.get();
 
-    // Sequence or Random closes the box, and the next click on a staff adds the notes.
+    // Scale or Random closes the box, and the next click on a staff adds the notes.
     panel->onPlace = [this, panelPointer] (ScaleSettings chosen)
     {
         lastScale = chosen;
