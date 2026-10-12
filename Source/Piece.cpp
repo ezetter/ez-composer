@@ -71,6 +71,34 @@ int Piece::addPage()
     return current;
 }
 
+int Piece::copyPage (int page)
+{
+    if (! juce::isPositiveAndBelow (page, getNumPages()))
+        return -1;
+
+    const auto copied = page + 1;
+
+    {
+        const juce::ScopedValueSetter<bool> quietly (quiet, true);
+        auto copy = createPage();
+        copy->copyFrom (getPage (page));
+        copy->setBeatsPerMinute (editing.getBeatsPerMinute());
+        pages.insert (pages.begin() + copied, std::move (copy));
+        captured.insert (captured.begin() + copied, std::nullopt);
+
+        // The page being edited moves along if it was after the one copied. The copy's the one edited now.
+        if (current >= copied)
+            ++current;
+
+        pages[(size_t) current]->copyFrom (editing);
+        current = copied;
+        editing.copyFrom (*pages[(size_t) current]);
+    }
+
+    pagesChanged (true);
+    return copied;
+}
+
 void Piece::removePage (int page)
 {
     if (getNumPages() <= 1 || ! juce::isPositiveAndBelow (page, getNumPages()))

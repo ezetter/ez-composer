@@ -357,7 +357,8 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     // A tab for each page, choosing which is edited, with a + for adding another
     pageTabs.onPageChosen = [this] (int page) { piece.choosePage (page); };
     pageTabs.onAddPage = [this] { piece.addPage(); };
-    pageTabs.onDeletePage = [this] (int page) { piece.removePage (page); };
+    pageTabs.onCopyPage = [this] (int page) { copyPage (page); };
+    pageTabs.onDeletePage = [this] (int page) { deletePage (page); };
     piece.onPagesChanged = [this] { pagesChanged(); };
     addAndMakeVisible (pageTabs);
 
@@ -670,6 +671,44 @@ void MainComponent::pagesChanged()
     }
 
     scoreChanged();
+}
+
+void MainComponent::copyPage (int page)
+{
+    if (! juce::isPositiveAndBelow (page, piece.getNumPages()))
+        return;
+
+    // The copy plays from where its page does.
+    if (juce::isPositiveAndBelow (page, (int) playbackStarts.size()))
+        playbackStarts.insert (playbackStarts.begin() + page + 1, playbackStarts[(size_t) page]);
+
+    piece.copyPage (page);
+}
+
+void MainComponent::deletePage (int page)
+{
+    if (piece.getNumPages() <= 1 || ! juce::isPositiveAndBelow (page, piece.getNumPages()))
+        return;
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle ("Delete page " + juce::String (page + 1) + "?")
+                                      .withMessage ("Its music and settings will be taken out of the score. Undo puts them back.")
+                                      .withButton ("Delete")
+                                      .withButton ("Cancel")
+                                      .withAssociatedComponent (this),
+                                  [safeThis = juce::Component::SafePointer (this), page] (int result)
+                                  {
+                                      // Delete is 1, and Cancel 0.
+                                      if (safeThis == nullptr || result != 1 || safeThis->piece.getNumPages() <= 1
+                                          || ! juce::isPositiveAndBelow (page, safeThis->piece.getNumPages()))
+                                          return;
+
+                                      if (auto& starts = safeThis->playbackStarts; juce::isPositiveAndBelow (page, (int) starts.size()))
+                                          starts.erase (starts.begin() + page);
+
+                                      safeThis->piece.removePage (page);
+                                  });
 }
 
 //==============================================================================

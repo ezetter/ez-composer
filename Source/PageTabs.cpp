@@ -38,8 +38,8 @@ void PageTabs::setPages (int numPages, int chosen)
     for (auto* tab : tabs)
     {
         tab->setToggleState (tab->page == chosen, juce::dontSendNotification);
-        tab->setTooltip (tab->page == chosen ? juce::String ("The page you're editing. Right-click for more.")
-                                             : "Edit page " + juce::String (tab->page + 1) + ". Right-click for more.");
+        tab->setTooltip (tab->page == chosen ? juce::String ("The page you're editing. Right-click to copy or delete it.")
+                                             : "Edit page " + juce::String (tab->page + 1) + ". Right-click to copy or delete it.");
     }
 
     resized();
@@ -76,17 +76,28 @@ void PageTabs::resized()
     addButton.setBounds (x + 6, (getHeight() - addButtonSize) / 2 + 1, addButtonSize, addButtonSize);
 }
 
+juce::PopupMenu PageTabs::createMenu (int page) const
+{
+    // Deleting asks first, so it ends with an ellipsis. The only page can't be deleted.
+    juce::PopupMenu menu;
+    menu.addItem (copyPageItem, "Copy Page " + juce::String (page + 1));
+    menu.addItem (deletePageItem, "Delete Page " + juce::String (page + 1) + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")), tabs.size() > 1);
+    return menu;
+}
+
 void PageTabs::showMenu (int page, juce::Component& tab)
 {
-    juce::PopupMenu menu;
-    menu.addItem (1, "Delete Page " + juce::String (page + 1), tabs.size() > 1);
+    createMenu (page).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (tab),
+                                     [safeThis = juce::Component::SafePointer (this), page] (int result)
+                                     {
+                                         if (safeThis == nullptr)
+                                             return;
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (tab),
-                        [safeThis = juce::Component::SafePointer (this), page] (int result)
-                        {
-                            if (safeThis != nullptr && result == 1 && safeThis->onDeletePage != nullptr)
-                                safeThis->onDeletePage (page);
-                        });
+                                         if (result == copyPageItem && safeThis->onCopyPage != nullptr)
+                                             safeThis->onCopyPage (page);
+                                         else if (result == deletePageItem && safeThis->onDeletePage != nullptr)
+                                             safeThis->onDeletePage (page);
+                                     });
 }
 
 //==============================================================================

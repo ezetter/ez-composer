@@ -51,7 +51,7 @@ A score can have several pages. Each page has its own key, major or minor, time 
 
 - Tabs along the top of the staves, **Page 1**, **Page 2** and so on, show the pages; the one you're editing is joined to the ruler under it. Click a tab to go to its page: the staves, the ruler and the sidebar show that page, from its first measure.
 - **+**, after the tabs, adds a page after the last and goes to it. A new page has blank staves for every instrument, four empty measures, in the key and time signature, and with the alternate staffs, of the page you were on, to change as you like.
-- Right-click a tab for **Delete Page**, which takes the page out, with its music; Undo puts it back. The only page can't be deleted.
+- Right-click a tab for its menu. **Copy Page** puts a copy of the page just after it, with all its music, settings, repeats and endings, playing from where the page does, and goes to it; the copy is a page of its own, to change as you like. **Delete Page…** takes the page out, with its music, after asking, with **Delete** or **Cancel**; Undo puts it back. The only page can't be deleted.
 - Measures are each page's own, so **+**, **−** and **Clone** after the final barline work on the page you're on, and so do **Copy Chords** and **Generate Notes from Key**.
 - With **Piece**, Play plays from where the page you're on plays from, and on through the pages after it, each in its own time signature, with its own repeats and endings. As the music goes on to the next page, the page you're looking at goes with it, if it's the one that was playing; if you've gone to another page, it stays there. The metronome's clang is on each page's own downbeats. With **Loop** on, after the last page it goes back to the start of the first.
 - With **Page**, Play plays just the page you're on, and Loop loops it. Going to another page while it plays plays that page instead, from where it plays from.
@@ -102,7 +102,7 @@ Click the ruler to choose the beat nearest the click as where Play and Record st
 
 The **Edit** menu's **Undo** (⌘Z) undoes the last change to the score, and pressing it again undoes the one before, back to how the score was when it was opened or started (the last 500 changes are remembered). **Redo** (⇧⌘Z) makes an undone change again, until something else is changed. Each is greyed out when there's nothing to undo or redo.
 
-- Undo covers every page, and adding and deleting pages. Undoing or redoing a change on another page goes to that page, to show it.
+- Undo covers every page, and adding, copying and deleting pages. Undoing or redoing a change on another page goes to that page, to show it.
 - Everything about the score can be undone: notes, ties, everything one recording added, chords and the chord window's changes, dynamics and hairpins, the key, time signature, tempo and alternate staff, and adding, removing, cloning and copying measures and progressions. What one click, drag or command does is undone in one go, e.g. a whole Copy Chords, a hairpin however far it was dragged, or everything an eraser stroke took out.
 - The chord window shows the chord as undoing leaves it, and closes if its measure's undone away.
 - Undoing counts as a change that needs saving. The instruments, their volumes and muting, and what's chosen to add, such as the note length, aren't part of what's undone.
@@ -260,7 +260,7 @@ The **MIDI** menu lists the MIDI inputs, ticked when they're on. Choose one to t
 | `Source/Score.*` | The music: the key, time signature and speed, and each instrument's notes, by eighth note, dynamics, crescendos and decrescendos, chords and alternate staff (a part, in the code), the repeat signs and endings, and the order the measures are played in, and saving it as JSON |
 | `Source/ScaleTool.*` | The settings Generate Notes from Key shows, for adding notes from the key's scale |
 | `Source/Piece.*` | The score's pages, each a score of its own, with the instruments and tempo they share, and the page being edited |
-| `Source/PageTabs.*` | The pages' tabs, with the + for adding a page |
+| `Source/PageTabs.*` | The pages' tabs, with the + for adding a page, and each tab's menu, for copying or deleting its page |
 | `Source/ScoreDocument.*` | Saves the score to a file, every page of it, and opens it, and keeps track of unsaved changes |
 | `Source/ScoreHistory.*` | Remembers every page before each change, or each eraser stroke, for Undo and Redo |
 | `Source/Music.*` | Music theory: keys, spelling, building, recognising and naming chords, and dynamics, hairpins and their velocities |

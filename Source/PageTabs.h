@@ -8,7 +8,7 @@
 
 /** A tab for each of the piece's pages, along the top of the staves, the chosen one joined to
     the ruler under it, with a + after them for adding a page. Clicking a tab chooses its page,
-    and right-clicking it offers to take the page out.
+    and right-clicking it offers to copy the page or take it out.
 */
 class PageTabs final : public juce::Component
 {
@@ -25,8 +25,13 @@ public:
     /** Called when the + is clicked. */
     std::function<void()> onAddPage;
 
-    /** Called when Delete Page is chosen from a tab's menu. */
-    std::function<void (int page)> onDeletePage;
+    /** Called when Copy Page or Delete Page is chosen from a tab's menu. */
+    std::function<void (int page)> onCopyPage, onDeletePage;
+
+    /** The menu right-clicking a page's tab shows. */
+    juce::PopupMenu createMenu (int page) const;
+
+    static constexpr int copyPageItem = 1, deletePageItem = 2;
 
     void paint (juce::Graphics&) override;
     void resized() override;

@@ -296,6 +296,12 @@ private:
     void scoreChanged();
     void pagesChanged();
 
+    /** Adds a copy of a page just after it, with all its music and settings, and goes to it. */
+    void copyPage (int page);
+
+    /** Takes out a page, after asking, unless it's the only one. */
+    void deletePage (int page);
+
     /** Starts recording what's played into the active part, playing the score if it isn't
         already, or stops recording, playing on.
     */

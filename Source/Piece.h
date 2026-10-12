@@ -49,6 +49,11 @@ public:
     */
     int addPage();
 
+    /** Adds a copy of a page just after it, with all its music and settings, to be edited on its
+        own. The copy is chosen to edit. Returns its number, or -1 if there's no such page.
+    */
+    int copyPage (int);
+
     /** Takes out a page, unless it's the only one. If it's the one being edited, the page after
         it is chosen, or the one before if it was the last.
     */
