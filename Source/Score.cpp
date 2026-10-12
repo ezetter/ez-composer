@@ -111,6 +111,7 @@ void Score::copyFrom (const Score& other)
     keyIndex = other.keyIndex;
     minor = other.minor;
     beatsPerMeasure = other.beatsPerMeasure;
+    beatsPerMinute = other.beatsPerMinute;
     sendSynchronousChangeMessage();
 }
 

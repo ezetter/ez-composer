@@ -1420,9 +1420,11 @@ void MainComponent::updatePerformance()
 
     for (int page = first; page <= last; ++page)
     {
+        // At the tempo, which is every page's, so the music and where it's shown keep together
         const auto& written = piece.getPage (page);
         auto performance = std::make_unique<Score>();
         written.writePerformance (*performance);
+        performance->setBeatsPerMinute (score.getBeatsPerMinute());
         performances.push_back (std::move (performance));
 
         const auto pageStart = start;

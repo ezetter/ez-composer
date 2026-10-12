@@ -201,7 +201,7 @@ public:
 
     //==============================================================================
     /** Makes this score a copy of another: its parts, with their ids and music, its measures,
-        key, time signature and repeats; everything but the tempo.
+        key, time signature, repeats and tempo.
     */
     void copyFrom (const Score&);
 

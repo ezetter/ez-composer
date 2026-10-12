@@ -42,6 +42,7 @@ void Piece::choosePage (int page)
         return;
 
     {
+        // The page left keeps the tempo, which is every page's, along with its music.
         const juce::ScopedValueSetter<bool> quietly (quiet, true);
         pages[(size_t) current]->copyFrom (editing);
         current = page;
@@ -82,7 +83,6 @@ int Piece::copyPage (int page)
         const juce::ScopedValueSetter<bool> quietly (quiet, true);
         auto copy = createPage();
         copy->copyFrom (getPage (page));
-        copy->setBeatsPerMinute (editing.getBeatsPerMinute());
         pages.insert (pages.begin() + copied, std::move (copy));
         captured.insert (captured.begin() + copied, std::nullopt);
 
