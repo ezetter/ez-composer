@@ -26,36 +26,39 @@ namespace
     double toBeats (int slots) { return (double) slots / Score::slotsPerBeat; }
 }
 
-Recorder::Recorder (Score& scoreToUse)
-    : score (scoreToUse)
+Recorder::Recorder (Piece& pieceToUse)
+    : piece (pieceToUse)
 {
 }
 
-int Recorder::getScoreSlots() const
+int Recorder::getScoreSlots (const Score& score)
 {
     return (int) score.getPerformanceOrder().size() * score.getBeatsPerMeasure() * Score::slotsPerBeat;
 }
 
-void Recorder::keyDown (int midiNote, double beat, int partId)
+void Recorder::keyDown (int midiNote, int page, double beat, int partId)
 {
     // A key that's somehow still down is let go of first.
-    keyUp (midiNote, beat);
+    keyUp (midiNote, page, beat);
+
+    if (! juce::isPositiveAndBelow (page, piece.getNumPages()))
+        return;
 
     const auto start = (int) std::lround (beat * Score::slotsPerBeat / grid) * grid;
     const auto staff = midiNote >= middleC ? Staff::treble : Staff::bass;
 
-    if (start >= getScoreSlots())
+    if (start >= getScoreSlots (piece.getPage (page)))
         return;
 
-    // Notes held on the same staff, from earlier, end where this one starts.
+    // Notes held on the same page and staff, from earlier, end where this one starts.
     for (auto& key : held)
-        if (key.partId == partId && key.staff == staff && key.start < start)
+        if (key.page == page && key.partId == partId && key.staff == staff && key.start < start)
             key.cut = juce::jmin (key.cut.value_or (start), start);
 
-    held.push_back ({ midiNote, partId, staff, beat, start, {} });
+    held.push_back ({ midiNote, partId, staff, page, beat, start, {} });
 }
 
-void Recorder::keyUp (int midiNote, double beat)
+void Recorder::keyUp (int midiNote, int page, double beat)
 {
     const auto key = std::find_if (held.begin(), held.end(), [midiNote] (const HeldKey& k) { return k.midiNote == midiNote; });
 
@@ -64,19 +67,23 @@ void Recorder::keyUp (int midiNote, double beat)
 
     const auto released = *key;
     held.erase (key);
-    write (released, beat);
+    write (released, page == released.page ? beat : -1.0);
 }
 
-void Recorder::finish (std::optional<double> beat)
+void Recorder::finish (std::optional<std::pair<int, double>> pageAndBeat)
 {
     const auto keys = std::exchange (held, {});
 
     for (const auto& key : keys)
-        write (key, beat.value_or (toBeats (getScoreSlots())));
+        write (key, pageAndBeat.has_value() && pageAndBeat->first == key.page ? pageAndBeat->second : -1.0);
 }
 
 void Recorder::write (const HeldKey& key, double endBeat)
 {
+    if (! juce::isPositiveAndBelow (key.page, piece.getNumPages()))
+        return;
+
+    auto& score = piece.getPage (key.page);
     const auto part = score.findPart (key.partId);
     const auto pitch = music::spellMidiNote (score.getKey(), key.midiNote);
 
@@ -84,7 +91,7 @@ void Recorder::write (const HeldKey& key, double endBeat)
         return;
 
     const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
-    const auto scoreSlots = getScoreSlots();
+    const auto scoreSlots = getScoreSlots (score);
 
     // Which measure as it's written each measure as it's played is
     const auto order = score.getPerformanceOrder();

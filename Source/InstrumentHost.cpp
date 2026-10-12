@@ -403,28 +403,32 @@ int InstrumentHost::getBlockSize() const
 }
 
 //==============================================================================
+double InstrumentHost::getRunningSampleRate() const
+{
+    const juce::ScopedLock sl (lock);
+    return sampleRate;
+}
+
 void InstrumentHost::play (const Score& score, int firstMeasure, int lastMeasure, bool loop, double startBeat)
 {
-    double currentSampleRate = 0.0;
+    if (const auto rate = getRunningSampleRate(); rate > 0.0)
+        startPassage (createPassage (score, firstMeasure, lastMeasure, rate), loop, startBeat);
+}
 
-    {
-        const juce::ScopedLock sl (lock);
-        currentSampleRate = sampleRate;
-    }
+void InstrumentHost::play (const std::vector<const Score*>& pages, bool loop, double startBeat)
+{
+    if (const auto rate = getRunningSampleRate(); rate > 0.0 && ! pages.empty())
+        startPassage (createPassage (pages, rate), loop, startBeat);
+}
 
-    if (currentSampleRate <= 0.0)
-        return;
-
-    auto newPassage = createPassage (score, firstMeasure, lastMeasure, currentSampleRate);
-
+void InstrumentHost::startPassage (Passage newPassage, bool loop, double startBeat)
+{
     {
         const juce::ScopedLock sl (lock);
 
         std::swap (passage, newPassage);
         std::fill (nextNoteEvents.begin(), nextNoteEvents.end(), 0);
         nextBeat = 0;
-        position = 0;
-        nextPosition = 0;
         looping = loop;
         playing = true;
 
@@ -441,19 +445,18 @@ void InstrumentHost::play (const Score& score, int firstMeasure, int lastMeasure
 
 void InstrumentHost::updatePlaying (const Score& score, int firstMeasure, int lastMeasure, std::optional<double> beat)
 {
-    double currentSampleRate = 0.0;
+    if (const auto rate = getRunningSampleRate(); rate > 0.0 && getPlaybackPosition().has_value())
+        replacePassage (createPassage (score, firstMeasure, lastMeasure, rate), beat);
+}
 
-    {
-        const juce::ScopedLock sl (lock);
+void InstrumentHost::updatePlaying (const std::vector<const Score*>& pages, std::optional<double> beat)
+{
+    if (const auto rate = getRunningSampleRate(); rate > 0.0 && getPlaybackPosition().has_value() && ! pages.empty())
+        replacePassage (createPassage (pages, rate), beat);
+}
 
-        if (! playing)
-            return;
-
-        currentSampleRate = sampleRate;
-    }
-
-    auto newPassage = createPassage (score, firstMeasure, lastMeasure, currentSampleRate);
-
+void InstrumentHost::replacePassage (Passage newPassage, std::optional<double> beat)
+{
     {
         const juce::ScopedLock sl (lock);
 
@@ -531,6 +534,34 @@ void InstrumentHost::catchUp (bool keepNotesSounding)
     playbackPosition = getBeatsPlayed();
 }
 
+InstrumentHost::Passage InstrumentHost::createPassage (const std::vector<const Score*>& pages, double sampleRate)
+{
+    // Each page's passage, one after another, at the first page's tempo, which they all share
+    Passage result;
+    result.secondsPerBeat = pages.front()->getSecondsPerMeasure() / pages.front()->getBeatsPerMeasure();
+    result.events.resize ((size_t) pages.front()->getNumParts());
+    auto beat = 0.0;
+
+    for (const auto* page : pages)
+    {
+        auto pagePassage = createPassage (*page, 0, page->getNumMeasures() - 1, sampleRate);
+        const auto offset = result.length;
+
+        for (size_t part = 0; part < result.events.size() && part < pagePassage.events.size(); ++part)
+            for (auto event : pagePassage.events[part])
+                result.events[part].push_back ({ event.sample + offset, event.noteNumber, event.isNoteOn, event.velocity, event.isPedal });
+
+        for (const auto& pageBeat : pagePassage.beats)
+            result.beats.push_back ({ pageBeat.sample + offset, pageBeat.downbeat });
+
+        result.sections.push_back ({ beat, page->getBeatsPerMeasure() });
+        result.length += pagePassage.length;
+        beat += page->getNumMeasures() * page->getBeatsPerMeasure();
+    }
+
+    return result;
+}
+
 InstrumentHost::Passage InstrumentHost::createPassage (const Score& score, int firstMeasure, int lastMeasure, double sampleRate)
 {
     Passage result;
@@ -538,10 +569,11 @@ InstrumentHost::Passage InstrumentHost::createPassage (const Score& score, int f
     for (int part = 0; part < score.getNumParts(); ++part)
         result.events.push_back (createNoteEvents (score, part, firstMeasure, lastMeasure, sampleRate));
 
+    const auto beatsPerMeasure = score.getBeatsPerMeasure();
     result.length = (int64_t) std::llround ((double) (lastMeasure - firstMeasure + 1) * score.getSecondsPerMeasure() * sampleRate);
-    result.beatsPerMeasure = score.getBeatsPerMeasure();
-    result.secondsPerBeat = score.getSecondsPerMeasure() / result.beatsPerMeasure;
-    result.firstBeat = (double) (firstMeasure * result.beatsPerMeasure);
+    result.secondsPerBeat = score.getSecondsPerMeasure() / beatsPerMeasure;
+    result.firstBeat = (double) (firstMeasure * beatsPerMeasure);
+    result.sections.push_back ({ result.firstBeat, beatsPerMeasure });
 
     // The metronome's beats, the first of each measure its downbeat
     for (int beat = 0;; ++beat)
@@ -551,7 +583,7 @@ InstrumentHost::Passage InstrumentHost::createPassage (const Score& score, int f
         if (sample >= result.length)
             break;
 
-        result.beats.push_back ({ sample, beat % result.beatsPerMeasure == 0 });
+        result.beats.push_back ({ sample, beat % beatsPerMeasure == 0 });
     }
 
     // Nothing sounds past the end, so a loop's notes are all finished before it starts again.
@@ -903,15 +935,23 @@ void InstrumentHost::handleIncomingMidiMessage (juce::MidiInput*, const juce::Mi
 juce::Optional<juce::AudioPlayHead::PositionInfo> InstrumentHost::getPosition() const
 {
     const auto beats = getBeatsPlayed();
-    const auto beatsPerBar = (double) passage.beatsPerMeasure;
     const auto secondsPerBeat = passage.secondsPerBeat;
+
+    // The time signature of the page it's on, with its bars counted from where the page starts
+    Section section { passage.firstBeat, 4 };
+
+    for (const auto& s : passage.sections)
+        if (s.beat <= beats)
+            section = s;
+
+    const auto beatsPerBar = (double) section.beatsPerMeasure;
 
     PositionInfo info;
     info.setIsPlaying (playing);
     info.setBpm (60.0 / secondsPerBeat);
-    info.setTimeSignature (TimeSignature { passage.beatsPerMeasure, 4 });
+    info.setTimeSignature (TimeSignature { section.beatsPerMeasure, 4 });
     info.setPpqPosition (beats);
-    info.setPpqPositionOfLastBarStart (std::floor (beats / beatsPerBar) * beatsPerBar);
+    info.setPpqPositionOfLastBarStart (section.beat + std::floor ((beats - section.beat) / beatsPerBar) * beatsPerBar);
     info.setTimeInSeconds (beats * secondsPerBeat);
     info.setTimeInSamples ((int64_t) std::llround (beats * secondsPerBeat * sampleRate));
     return info;

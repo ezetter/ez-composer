@@ -118,6 +118,12 @@ public:
         nothing unless the audio is running. When looping, they play over and over until stopped.
     */
     void play (const Score&, int firstMeasure, int lastMeasure, bool loop = false, double startBeat = 0.0);
+
+    /** Plays scores one after another, as the pages of a piece, each in its own time signature,
+        from a beat counted from the start of the first. They all have the same parts, and the
+        first one's tempo is theirs. When looping, they play over and over until stopped.
+    */
+    void play (const std::vector<const Score*>& pages, bool loop = false, double startBeat = 0.0);
     void stop();
 
     /** Jumps to a beat, counted from the start of the score, while it's playing, carrying on
@@ -139,6 +145,9 @@ public:
         comes where.
     */
     void updatePlaying (const Score&, int firstMeasure, int lastMeasure, std::optional<double> beat = {});
+
+    /** The same, for the pages of a piece being played one after another. */
+    void updatePlaying (const std::vector<const Score*>& pages, std::optional<double> beat = {});
 
     /** Turns the metronome on or off: while the score plays, it sounds each beat, a clang on the
         first beat of each measure and a click on the others. This can change while it plays.
@@ -198,18 +207,35 @@ private:
         bool downbeat;
     };
 
-    /** Some measures of the score, ready to play. */
+    /** Where a passage's time signature starts, as one page follows another. */
+    struct Section
+    {
+        double beat;                    // in beats from the start of the score
+        int beatsPerMeasure;
+    };
+
+    /** Some measures of the score, or of the pages of a piece, ready to play. */
     struct Passage
     {
         std::vector<std::vector<NoteEvent>> events;     // for each part
         std::vector<Beat> beats;
         int64_t length = 0;             // in samples
         double secondsPerBeat = 0.5;
-        int beatsPerMeasure = 4;
         double firstBeat = 0.0;         // where it starts, in beats from the start of the score
+        std::vector<Section> sections;  // in order, the first starting at the first beat
     };
 
     static Passage createPassage (const Score&, int firstMeasure, int lastMeasure, double sampleRate);
+    static Passage createPassage (const std::vector<const Score*>& pages, double sampleRate);
+
+    /** The sample rate, if the audio's running, or 0. */
+    double getRunningSampleRate() const;
+
+    /** Starts playing a passage, from a beat, or plays it in place of what's playing, carrying on
+        from a beat, or from the same beat at its tempo.
+    */
+    void startPassage (Passage, bool loop, double startBeat);
+    void replacePassage (Passage, std::optional<double> beat);
     static std::vector<NoteEvent> createNoteEvents (const Score&, int part, int firstMeasure, int lastMeasure, double sampleRate);
 
     /** A part's instrument, and what it plays. */

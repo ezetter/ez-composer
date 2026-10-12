@@ -6,6 +6,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <optional>
 
 /** A strip along the top of the staves, lined up with them as they scroll sideways, with a tick
     and number for each measure and smaller ticks for its beats, and a marker for where the score
@@ -24,8 +25,10 @@ public:
     std::function<const StaffView*()> getView;
     std::function<int()> getScrolledX;
 
-    /** Shows where the score's playing, or where it will start playing from, in beats from its start. */
-    void setMarker (double beats, bool playing);
+    /** Shows where the score's playing, or where it will start playing from, in beats from its
+        start, or nothing, while the music's playing another page.
+    */
+    void setMarker (std::optional<double> beats, bool playing);
 
     /** Called when a beat's chosen, by clicking or dragging, counted from the start of the score. */
     std::function<void (int beat)> onBeatChosen;
@@ -42,7 +45,7 @@ private:
     void choose (float x);
 
     const Score& score;
-    double markerBeats = 0.0;
+    std::optional<double> markerBeats = 0.0;
     bool playing = false;
     int lastChosen = -1;
 

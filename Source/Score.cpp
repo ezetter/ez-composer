@@ -56,6 +56,84 @@ int Score::findPart (int id) const noexcept
     return -1;
 }
 
+std::vector<int> Score::getPartIds() const
+{
+    std::vector<int> ids;
+
+    for (const auto& part : parts)
+        ids.push_back (part.id);
+
+    return ids;
+}
+
+void Score::matchParts (const Score& other)
+{
+    if (getPartIds() == other.getPartIds())
+        return;
+
+    // Counted before any parts are moved out of the way
+    const auto numMeasures = (size_t) getNumMeasures();
+    std::vector<Part> matched;
+
+    for (const auto& otherPart : other.parts)
+    {
+        if (const auto existing = findPart (otherPart.id); existing >= 0)
+        {
+            matched.push_back (std::move (parts[(size_t) existing]));
+        }
+        else
+        {
+            Part part { otherPart.id };
+            part.measures.resize (numMeasures);
+            part.alternateStaff = otherPart.alternateStaff;
+            matched.push_back (std::move (part));
+        }
+    }
+
+    parts = std::move (matched);
+    nextPartId = juce::jmax (nextPartId, other.nextPartId);
+    sendSynchronousChangeMessage();
+}
+
+void Score::takePartIdsFrom (const Score& other)
+{
+    for (size_t part = 0; part < parts.size() && part < other.parts.size(); ++part)
+        parts[part].id = other.parts[part].id;
+
+    nextPartId = juce::jmax (nextPartId, other.nextPartId);
+}
+
+void Score::copyFrom (const Score& other)
+{
+    parts = other.parts;
+    repeats = other.repeats;
+    nextPartId = other.nextPartId;
+    keyIndex = other.keyIndex;
+    minor = other.minor;
+    beatsPerMeasure = other.beatsPerMeasure;
+    sendSynchronousChangeMessage();
+}
+
+void Score::makeBlankPageLike (const Score& other)
+{
+    parts.clear();
+
+    for (const auto& otherPart : other.parts)
+    {
+        Part part { otherPart.id };
+        part.alternateStaff = otherPart.alternateStaff;
+        parts.push_back (std::move (part));
+    }
+
+    repeats.assign (initialMeasures, {});
+    nextPartId = other.nextPartId;
+    keyIndex = other.keyIndex;
+    minor = other.minor;
+    beatsPerMeasure = other.beatsPerMeasure;
+    beatsPerMinute = other.beatsPerMinute;
+    sendSynchronousChangeMessage();
+}
+
 Score::Measure& Score::getMeasure (int part, int measure)
 {
     return parts[(size_t) part].measures[(size_t) measure];

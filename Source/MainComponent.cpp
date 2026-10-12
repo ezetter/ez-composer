@@ -42,6 +42,9 @@ namespace
     // And the metronome
     const char* const metronomeKey = "metronome";
 
+    // And whether Play plays the whole piece, or the page being edited
+    const char* const playWholePieceKey = "playWholePiece";
+
     // And the effects, as JSON
     const char* const effectsKey = "effects";
 
@@ -184,7 +187,7 @@ void MainComponent::StaffSystems::layOut()
 //==============================================================================
 MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     : settings (settingsToUse),
-      document (score, settings)
+      document (piece, settings)
 {
     // Each part has its own instrument, which is saved with the score, sound and all.
     document.getInstrumentToSave = [this] (int part) { return tracks[(size_t) part].panel->saveToJSON(); };
@@ -209,12 +212,19 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     loopButton.setToggleState (settings.getBoolValue (loopKey), juce::dontSendNotification);
     loopButton.setColour (juce::TextButton::buttonOnColourId, controls::accentLight);
     loopButton.setColour (juce::TextButton::textColourOnId, controls::accent);
-    loopButton.setTooltip ("Play the score over and over, rather than stopping at the end");
+    loopButton.setTooltip ("Play the piece, or the page, over and over, rather than stopping at the end");
     loopButton.onClick = [this]
     {
         settings.setValue (loopKey, loopButton.getToggleState());
         instrumentHost.setLooping (loopButton.getToggleState());
     };
+
+    // Piece plays every page, one after another, and Page just the one being edited. Loop goes
+    // back to the start of whichever it is. It's remembered too.
+    playModeButton.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+    playModeButton.setWantsKeyboardFocus (false);
+    playModeButton.onClick = [this] { setPlayingWholePiece (! isPlayingWholePiece()); };
+    setPlayingWholePiece (settings.getBoolValue (playWholePieceKey, true));
 
     // The metronome ticks each beat as the score plays or records, and is remembered too.
     metronomeButton.setButtonText ("Metronome");
@@ -272,7 +282,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     loopButton.setWantsKeyboardFocus (false);
     metronomeButton.setWantsKeyboardFocus (false);
 
-    for (auto* component : std::initializer_list<juce::Component*> { &playButton, &recordButton, &loopButton, &metronomeButton, &tempoLabel, &tempoEditor, &partBox })
+    for (auto* component : std::initializer_list<juce::Component*> { &playButton, &recordButton, &loopButton, &playModeButton, &metronomeButton, &tempoLabel, &tempoEditor, &partBox })
         addAndMakeVisible (component);
 
     staffSystems.onAddPart = [this] { addPart(); };
@@ -344,6 +354,13 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     positionRuler.onBeatChosen = [this] (int beat) { choosePlaybackStart (beat); };
     addAndMakeVisible (positionRuler);
 
+    // A tab for each page, choosing which is edited, with a + for adding another
+    pageTabs.onPageChosen = [this] (int page) { piece.choosePage (page); };
+    pageTabs.onAddPage = [this] { piece.addPage(); };
+    pageTabs.onDeletePage = [this] (int page) { piece.removePage (page); };
+    piece.onPagesChanged = [this] { pagesChanged(); };
+    addAndMakeVisible (pageTabs);
+
     // A track for each part of the new score, with the instruments, volumes and muting it had last time
     for (int part = 0; part < score.getNumParts(); ++part)
         insertTrack (part, true);
@@ -393,7 +410,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     midiInputs.onDevicesChanged = [this] { menuItemsChanged(); };
     addAndMakeVisible (keyboard);
 
-    score.addChangeListener (this);
+    piece.addChangeListener (this);
     document.addChangeListener (this);
 
     // The File and Edit menus, with their keyboard shortcuts. Undo and Redo are greyed out when
@@ -406,7 +423,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     setActivePart (0);
     showPartTitles();
-    setSize (1676, 944);    // wide enough for four measures of most music, and the buttons after them, and tall enough for two instruments
+    setSize (1676, 974);    // wide enough for four measures of most music, and the buttons after them, and tall enough for two instruments
 
     juce::AudioDeviceManager::AudioDeviceSetup preferredSetup;
     preferredSetup.bufferSize = 256;    // small enough for the keyboard to feel immediate
@@ -438,7 +455,7 @@ MainComponent::~MainComponent()
 
     tempoEditor.removeKeyListener (this);
     audioDeviceManager.removeAudioCallback (&instrumentHost);
-    score.removeChangeListener (this);
+    piece.removeChangeListener (this);
     document.removeChangeListener (this);
 
     if (keyListenerTarget != nullptr)
@@ -460,7 +477,13 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (StaffView::paperColour);
     g.fillRect (staffViewport.getBounds());
     g.fillRect (volumeColumn.getBounds());
-    g.fillRect (positionRuler.getBounds().withLeft (volumeColumn.getX()));
+
+    // The ruler's band goes on over the volume dials, so the chosen page's tab joins it all along.
+    const auto rulerBand = positionRuler.getBounds().withLeft (volumeColumn.getX());
+    g.setColour (PageTabs::chosenColour);
+    g.fillRect (rulerBand);
+    g.setColour (juce::Colours::black.withAlpha (0.15f));
+    g.fillRect (rulerBand.withTop (rulerBand.getBottom() - 1));
 
     g.setColour (juce::Colours::black.withAlpha (0.15f));
     g.fillRect (0, toolbarHeight - 1, getWidth(), 1);
@@ -475,6 +498,7 @@ void MainComponent::resized()
     playButton.setBounds (toolbar.removeFromLeft (46));
     recordButton.setBounds (toolbar.removeFromLeft (46));
     loopButton.setBounds (toolbar.removeFromLeft (44));
+    playModeButton.setBounds (toolbar.removeFromLeft (56));
     metronomeButton.setBounds (toolbar.removeFromLeft (44));
     toolbar.removeFromLeft (16);
     tempoLabel.setBounds (toolbar.removeFromLeft (34));
@@ -505,7 +529,8 @@ void MainComponent::resized()
     keyboard.setBounds (bounds.removeFromBottom (keyboardHeight));
     keyboard.setKeyWidth ((float) keyboard.getWidth() / (float) numWhiteKeys);
 
-    // The ruler goes along the top of the staves, the volume dials and staves under it.
+    // The pages' tabs go along the top, the ruler under them, and the volume dials and staves under that.
+    pageTabs.setBounds (bounds.removeFromTop (PageTabs::height));
     auto rulerRow = bounds.removeFromTop (PositionRuler::height);
     volumeColumn.setBounds (bounds.removeFromLeft (volumeColumnWidth));
     staffViewport.setBounds (bounds);
@@ -579,6 +604,11 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
         return;
     }
 
+    scoreChanged();
+}
+
+void MainComponent::scoreChanged()
+{
     // Parts may have been added or taken out, or a whole new score loaded.
     updateTracks();
     updateRemoveMeasureButton();
@@ -589,43 +619,57 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 
     updateTempoArrows();
 
-    // Where the score plays from stays within it, as measures come and go and the time signature changes.
-    playbackStart = juce::jlimit (0.0, (double) (score.getNumMeasures() * score.getBeatsPerMeasure() - 1), playbackStart);
+    // Where each page plays from stays within it, as measures come and go and the time signature changes.
+    playbackStarts.resize ((size_t) piece.getNumPages(), 0.0);
+
+    for (int page = 0; page < piece.getNumPages(); ++page)
+    {
+        const auto& written = piece.getPage (page);
+        auto& start = playbackStarts[(size_t) page];
+        start = juce::jlimit (0.0, (double) (written.getNumMeasures() * written.getBeatsPerMeasure() - 1), start);
+    }
+
     positionRuler.repaint();
 
-    // Changes to the score are heard as soon as playback reaches them. If the repeats have
-    // changed what's played when, it carries on from the same place in the same time through.
-    if (const auto played = instrumentHost.getPlaybackPosition())
+    // Changes are heard as soon as playback reaches them. If the repeats or the pages have
+    // changed what's played when, it carries on from the same place, the same time through.
+    if (instrumentHost.getPlaybackPosition().has_value())
     {
-        const auto previousOrder = performanceOrder;
-        const auto beatsPerMeasure = score.getBeatsPerMeasure();
-        const auto index = juce::jlimit (0, juce::jmax (0, (int) previousOrder.size() - 1), (int) std::floor (*played / beatsPerMeasure));
+        const auto before = playedMeasures;
         updatePerformance();
-
-        if (performanceOrder != previousOrder && ! previousOrder.empty())
-        {
-            // The same time through the measure it's in, or the last time it's played now
-            const auto measure = previousOrder[(size_t) index];
-            const auto timesBefore = (size_t) std::count (previousOrder.begin(), previousOrder.begin() + index, measure);
-            std::vector<size_t> times;
-
-            for (size_t i = 0; i < performanceOrder.size(); ++i)
-                if (performanceOrder[i] == measure)
-                    times.push_back (i);
-
-            const auto found = times.empty() ? (size_t) 0 : times[juce::jmin (timesBefore, times.size() - 1)];
-            const auto beat = (double) found * beatsPerMeasure + (*played - index * beatsPerMeasure);
-            instrumentHost.updatePlaying (performance, 0, performance.getNumMeasures() - 1, beat);
-        }
-        else
-        {
-            instrumentHost.updatePlaying (performance, 0, performance.getNumMeasures() - 1);
-        }
+        followPerformanceChange (before);
     }
 
     showPlaybackPosition();
-
     showHeldNotes();
+}
+
+void MainComponent::pagesChanged()
+{
+    const auto switched = piece.getCurrentPage() != shownPage;
+    shownPage = piece.getCurrentPage();
+    pageTabs.setPages (piece.getNumPages(), piece.getCurrentPage());
+
+    if (switched)
+    {
+        // A chord being edited is on the page that was being edited, and the new page is shown from its start.
+        closeChordEditor();
+        staffViewport.setViewPosition (0, staffViewport.getViewPositionY());
+
+        // Playing a page, it's the one being edited, so it goes on with the one chosen now, from where that plays from.
+        if (instrumentHost.getPlaybackPosition().has_value() && ! isPlayingWholePiece())
+        {
+            if (instrumentHost.isRecording())
+            {
+                recordPlayedKeys();
+                recorder.finish ({});
+            }
+
+            startPlaying();
+        }
+    }
+
+    scoreChanged();
 }
 
 //==============================================================================
@@ -849,14 +893,14 @@ void MainComponent::deletePart (int part)
     // An empty part, without an instrument, goes straight away. Otherwise, it's asked first.
     const auto* instrument = instrumentHost.getInstrument (part);
 
-    if (score.isPartEmpty (part) && instrument == nullptr)
+    if (piece.isPartEmpty (part) && instrument == nullptr)
     {
         score.removePart (part);
         return;
     }
 
     const auto name = "instrument " + juce::String (part + 1);
-    auto message = juce::String ("Its notes, chords and dynamics will be taken out of the score");
+    auto message = juce::String ("Its notes, chords and dynamics will be taken out of the score, on every page");
 
     if (instrument != nullptr)
         message << ", and its " << instrument->getName() << " unloaded. Undo puts back the music, but the plugin will need loading again.";
@@ -1264,55 +1308,163 @@ void MainComponent::togglePlayback()
     }
     else
     {
+        startPlaying();
+        showPlaybackPosition();
+    }
+}
+
+void MainComponent::startPlaying()
+{
+    updatePerformance();
+    const auto page = piece.getCurrentPage();
+    lastPlayingPage = page;
+    instrumentHost.play (getPerformancePages(), loopButton.getToggleState(), toPlayedBeats (page, playbackStarts[(size_t) page]).value_or (0.0));
+    startTimerHz (30);
+}
+
+void MainComponent::setPlayingWholePiece (bool whole)
+{
+    playWholePiece = whole;
+    playModeButton.setButtonText (whole ? "Piece" : "Page");
+    playModeButton.setTooltip (whole ? "Piece: Play plays every page, one after another, from where this page plays from. Click to play just this page."
+                                     : "Page: Play plays just the page you're on. Click to play every page, one after another.");
+    settings.setValue (playWholePieceKey, whole);
+
+    // Playing, it carries on from where it is, if it can.
+    if (instrumentHost.getPlaybackPosition().has_value())
+    {
+        const auto before = playedMeasures;
         updatePerformance();
-        instrumentHost.play (performance, 0, performance.getNumMeasures() - 1, loopButton.getToggleState(), toPlayedBeats (playbackStart));
-        startTimerHz (30);
+        followPerformanceChange (before);
         showPlaybackPosition();
     }
 }
 
 void MainComponent::updatePerformance()
 {
-    score.writePerformance (performance);
-    performanceOrder = score.getPerformanceOrder();
+    performances.clear();
+    playedMeasures.clear();
+
+    // Every page, one after another, or just the one being edited
+    const auto first = isPlayingWholePiece() ? 0 : piece.getCurrentPage();
+    const auto last = isPlayingWholePiece() ? piece.getNumPages() - 1 : first;
+    auto start = 0.0;
+
+    for (int page = first; page <= last; ++page)
+    {
+        const auto& written = piece.getPage (page);
+        auto performance = std::make_unique<Score>();
+        written.writePerformance (*performance);
+        performances.push_back (std::move (performance));
+
+        const auto pageStart = start;
+
+        for (auto measure : written.getPerformanceOrder())
+        {
+            playedMeasures.push_back ({ page, measure, written.getBeatsPerMeasure(), start, pageStart });
+            start += written.getBeatsPerMeasure();
+        }
+    }
 }
 
-double MainComponent::toWrittenBeats (double playedBeats) const
+std::vector<const Score*> MainComponent::getPerformancePages() const
 {
-    if (performanceOrder.empty())
-        return playedBeats;
+    std::vector<const Score*> pages;
 
-    const auto beatsPerMeasure = score.getBeatsPerMeasure();
-    const auto index = juce::jlimit (0, (int) performanceOrder.size() - 1, (int) std::floor (playedBeats / beatsPerMeasure));
-    return performanceOrder[(size_t) index] * beatsPerMeasure + (playedBeats - index * beatsPerMeasure);
+    for (const auto& performance : performances)
+        pages.push_back (performance.get());
+
+    return pages;
 }
 
-double MainComponent::toPlayedBeats (double writtenBeats) const
+std::optional<MainComponent::WrittenPosition> MainComponent::toWrittenPosition (double playedBeats) const
 {
-    const auto beatsPerMeasure = score.getBeatsPerMeasure();
-    const auto measure = (int) std::floor (writtenBeats / beatsPerMeasure);
-    const auto first = std::find (performanceOrder.begin(), performanceOrder.end(), measure);
+    if (playedMeasures.empty())
+        return {};
 
-    if (first == performanceOrder.end())
-        return writtenBeats;
+    // The last measure starting at or before it
+    const auto after = std::upper_bound (playedMeasures.begin(), playedMeasures.end(), playedBeats,
+                                         [] (double beat, const PlayedMeasure& measure) { return beat < measure.start; });
+    const auto& measure = playedMeasures[(size_t) juce::jmax (0, (int) std::distance (playedMeasures.begin(), after) - 1)];
+    return WrittenPosition { measure.page, measure.measure * measure.beatsPerMeasure + (playedBeats - measure.start), playedBeats - measure.pageStart };
+}
 
-    return (double) std::distance (performanceOrder.begin(), first) * beatsPerMeasure + (writtenBeats - measure * beatsPerMeasure);
+std::optional<double> MainComponent::toPlayedBeats (int page, double writtenBeats) const
+{
+    for (const auto& measure : playedMeasures)
+        if (measure.page == page && measure.measure == (int) std::floor (writtenBeats / measure.beatsPerMeasure))
+            return measure.start + (writtenBeats - measure.measure * measure.beatsPerMeasure);
+
+    return {};
+}
+
+void MainComponent::followPerformanceChange (const std::vector<PlayedMeasure>& before)
+{
+    const auto played = instrumentHost.getPlaybackPosition();
+
+    if (! played.has_value())
+        return;
+
+    // Where it was: the page and measure, how many times it had been there before, and how far into the measure
+    std::optional<double> beat;
+
+    if (! before.empty())
+    {
+        const auto after = std::upper_bound (before.begin(), before.end(), *played,
+                                             [] (double b, const PlayedMeasure& measure) { return b < measure.start; });
+        const auto index = juce::jmax (0, (int) std::distance (before.begin(), after) - 1);
+        const auto& was = before[(size_t) index];
+        const auto sameMeasure = [&was] (const PlayedMeasure& m) { return m.page == was.page && m.measure == was.measure; };
+        const auto timesBefore = (size_t) std::count_if (before.begin(), before.begin() + index, sameMeasure);
+        std::vector<size_t> times;
+
+        for (size_t i = 0; i < playedMeasures.size(); ++i)
+            if (sameMeasure (playedMeasures[i]))
+                times.push_back (i);
+
+        if (! times.empty())
+        {
+            const auto& now = playedMeasures[times[juce::jmin (timesBefore, times.size() - 1)]];
+            beat = now.start + juce::jmin (*played - was.start, (double) now.beatsPerMeasure);
+        }
+    }
+
+    if (beat.has_value())
+    {
+        instrumentHost.updatePlaying (getPerformancePages(), *beat);
+        return;
+    }
+
+    // The page it was playing isn't played now, so it plays the page being edited, from where that plays from.
+    if (instrumentHost.isRecording())
+    {
+        recordPlayedKeys();
+        recorder.finish ({});
+    }
+
+    startPlaying();
 }
 
 void MainComponent::choosePlaybackStart (int beat)
 {
-    playbackStart = beat;
+    const auto page = piece.getCurrentPage();
+    playbackStarts[(size_t) page] = beat;
 
     if (const auto position = instrumentHost.getPlaybackPosition())
     {
-        // Keys held while recording end where it jumps from.
-        if (instrumentHost.isRecording())
+        if (const auto played = toPlayedBeats (page, beat))
         {
-            recordPlayedKeys();
-            recorder.finish (position);
-        }
+            // Keys held while recording end where it jumps from.
+            if (instrumentHost.isRecording())
+            {
+                recordPlayedKeys();
+                const auto at = toWrittenPosition (*position);
+                recorder.finish (at.has_value() ? std::optional (std::pair { at->page, at->playedBeat }) : std::nullopt);
+            }
 
-        instrumentHost.jumpTo (toPlayedBeats (beat));
+            instrumentHost.jumpTo (*played);
+            lastPlayingPage = page;
+        }
     }
 
     showPlaybackPosition();
@@ -1328,11 +1480,7 @@ void MainComponent::toggleRecording()
     }
 
     if (! instrumentHost.getPlaybackPosition().has_value())
-    {
-        updatePerformance();
-        instrumentHost.play (performance, 0, performance.getNumMeasures() - 1, loopButton.getToggleState(), toPlayedBeats (playbackStart));
-        startTimerHz (30);
-    }
+        startPlaying();
 
     // Without the audio running, nothing plays, so there's nothing to record along with.
     if (instrumentHost.getPlaybackPosition().has_value())
@@ -1349,40 +1497,61 @@ void MainComponent::toggleRecording()
 
 void MainComponent::recordPlayedKeys()
 {
+    // Each on the page it was played on, where that page had got to as it's played
     for (const auto& key : instrumentHost.takeRecordedKeys())
     {
-        if (key.isDown)
-            recorder.keyDown (key.noteNumber, key.beat, activePartId);
-        else
-            recorder.keyUp (key.noteNumber, key.beat);
+        if (const auto at = toWrittenPosition (key.beat))
+        {
+            if (key.isDown)
+                recorder.keyDown (key.noteNumber, at->page, at->playedBeat, activePartId);
+            else
+                recorder.keyUp (key.noteNumber, at->page, at->playedBeat);
+        }
     }
 }
 
-void MainComponent::finishRecording (std::optional<double> beat)
+void MainComponent::finishRecording (std::optional<double> playedBeats)
 {
     instrumentHost.setRecording (false);
     recordPlayedKeys();
-    recorder.finish (beat);
+    const auto at = playedBeats.has_value() ? toWrittenPosition (*playedBeats) : std::nullopt;
+    recorder.finish (at.has_value() ? std::optional (std::pair { at->page, at->playedBeat }) : std::nullopt);
     recordButton.setToggleState (false, juce::dontSendNotification);
     history.endGesture();
 }
 
 void MainComponent::showPlaybackPosition()
 {
-    // Shown where it is in the score as it's written
     const auto played = instrumentHost.getPlaybackPosition();
-    const auto position = played.has_value() ? std::optional (toWrittenBeats (*played)) : std::nullopt;
+    const auto at = played.has_value() ? toWrittenPosition (*played) : std::nullopt;
 
-    playButton.setButtonText (position.has_value() ? "Stop" : "Play");
-    playButton.setSymbol (position.has_value() ? controls::TransportButton::Symbol::stop : controls::TransportButton::Symbol::play);
+    // When the music goes on to another page, the page being edited goes with it, if it was the
+    // one playing, so it's followed along.
+    if (at.has_value() && at->page != lastPlayingPage)
+    {
+        const auto follow = lastPlayingPage == piece.getCurrentPage() && at->page != piece.getCurrentPage();
+        lastPlayingPage = at->page;
+
+        if (follow)
+        {
+            piece.choosePage (at->page);
+            return;
+        }
+    }
+
+    playButton.setButtonText (played.has_value() ? "Stop" : "Play");
+    playButton.setSymbol (played.has_value() ? controls::TransportButton::Symbol::stop : controls::TransportButton::Symbol::play);
+
+    // Shown where it is in the page as it's written, if it's playing the page being edited
+    const auto position = at.has_value() && at->page == piece.getCurrentPage() ? std::optional (at->beat) : std::nullopt;
 
     for (auto& view : staffSystems.views)
         view->setPlaybackPosition (position);
 
     // The ruler's marker is where it's playing, or where it'll start from.
-    positionRuler.setMarker (position.value_or (playbackStart), position.has_value());
+    positionRuler.setMarker (played.has_value() ? position : std::optional (playbackStarts[(size_t) piece.getCurrentPage()]), played.has_value());
 
-    if (! position.has_value())
+    if (! played.has_value())
     {
         // Recording stops when the score stops, at the end, the notes still held lasting to there.
         if (instrumentHost.isRecording())
@@ -1391,6 +1560,9 @@ void MainComponent::showPlaybackPosition()
         stopTimer();
         return;
     }
+
+    if (! position.has_value())
+        return;
 
     // When the beat that's playing goes out of view, scroll it back to a quarter of the way across.
     const auto playingArea = staffSystems.views[0]->getPlaybackArea();
@@ -1692,7 +1864,8 @@ void MainComponent::scoreReplaced()
 
     history.clear();
     instrumentHost.stop();
-    playbackStart = 0.0;
+    playbackStarts.assign ((size_t) piece.getNumPages(), 0.0);
+    lastPlayingPage = -1;
     showPlaybackPosition();
     closeChordEditor();
     staffViewport.setViewPosition (0, 0);

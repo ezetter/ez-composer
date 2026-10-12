@@ -10,7 +10,9 @@
 #include "EffectsWindow.h"
 #include "EraserButton.h"
 #include "NoteLengthPicker.h"
+#include "PageTabs.h"
 #include "PianoKeyboard.h"
+#include "Piece.h"
 #include "PositionRuler.h"
 #include "Recorder.h"
 #include "Score.h"
@@ -246,17 +248,53 @@ private:
     void pianoKeyClicked (int midiNote);
     void togglePlayback();
 
-    /** Chooses the beat the score plays from, counted from its start, jumping there if it's playing. */
+    /** Plays the piece, or the page, from where the page being edited plays from. */
+    void startPlaying();
+
+    /** Chooses the beat the page plays from, counted from its start, jumping there if it's playing. */
     void choosePlaybackStart (int beat);
 
-    /** Writes the score out as it's played, with its repeats, for the instruments to play. */
-    void updatePerformance();
+    /** Whether Play plays every page, one after another, or just the page being edited. */
+    bool isPlayingWholePiece() const noexcept { return playWholePiece; }
+    void setPlayingWholePiece (bool);
 
-    /** A point in the score as it's played, repeats and all, as a beat of the score as it's
-        written, and the other way, where it's first played. Both are in beats from the start.
+    /** The pages played, the whole piece or the page being edited, and each of them written out
+        as it's played, with its repeats, for the instruments to play.
     */
-    double toWrittenBeats (double playedBeats) const;
-    double toPlayedBeats (double writtenBeats) const;
+    void updatePerformance();
+    std::vector<const Score*> getPerformancePages() const;
+
+    /** A measure as it's played, and where it is in the pages as written. */
+    struct PlayedMeasure
+    {
+        int page, measure, beatsPerMeasure;
+        double start;           // in beats from the start of what's played
+        double pageStart;       // where its page starts, the time it's played
+    };
+
+    /** A point in what's played, as a page, a beat of the page as it's written, and a beat of the
+        page as it's played, counting from its start.
+    */
+    struct WrittenPosition
+    {
+        int page;
+        double beat, playedBeat;
+    };
+
+    std::optional<WrittenPosition> toWrittenPosition (double playedBeats) const;
+
+    /** Where a beat of a page as it's written is first played, if the page is being played. */
+    std::optional<double> toPlayedBeats (int page, double writtenBeats) const;
+
+    /** After what's played has changed, carries on from the same place in the same page, the
+        same time through, or, if that page isn't played any more, from where the page being
+        edited plays from.
+    */
+    void followPerformanceChange (const std::vector<PlayedMeasure>& before);
+
+    /** After the piece, or the page being edited, has changed. */
+    void scoreChanged();
+    void pagesChanged();
 
     /** Starts recording what's played into the active part, playing the score if it isn't
         already, or stops recording, playing on.
@@ -269,7 +307,7 @@ private:
     /** Stops recording, writing the notes of the keys still down as ending at a point, or at the
         end of the score, so it's all undone in one go.
     */
-    void finishRecording (std::optional<double> beat);
+    void finishRecording (std::optional<double> playedBeats);
     void showPlaybackPosition();
     void addMeasure();
     void removeMeasure();
@@ -319,18 +357,23 @@ private:
 
     /** The MIDI inputs the MIDI menu showed, the last time it was opened */
     std::vector<MidiInputs::Device> midiMenuDevices;
-    Score score;
+    Score score;                        // the page being edited
+    Piece piece { score };              // every page
     ScoreDocument document;
-    ScoreHistory history { score };
-    Score performance;                  // the score as it's played, its repeats written out, which the instruments play
-    std::vector<int> performanceOrder;  // which of the score's measures each of the performance's is
-    Recorder recorder { score };
+    ScoreHistory history { piece };
+    std::vector<std::unique_ptr<Score>> performances;     // the pages being played, each written out as it's played, which the instruments play
+    std::vector<PlayedMeasure> playedMeasures;              // in the order they're played
+    int lastPlayingPage = -1;           // the page the music was playing, last time it was shown
+    int shownPage = 0;                  // the page being edited, last time the pages changed
+    Recorder recorder { piece };
     juce::ApplicationCommandManager commandManager;
 
     controls::TransportButton playButton { controls::TransportButton::Symbol::play };          // a stop button while playing
     controls::TransportButton recordButton { controls::TransportButton::Symbol::record };
     controls::LoopButton loopButton;
-    controls::MetronomeButton metronomeButton;     // beside Loop
+    juce::TextButton playModeButton;    // beside Loop: Piece, to play every page, or Page, just the one being edited
+    bool playWholePiece = true;
+    controls::MetronomeButton metronomeButton;     // beside them
     juce::Label tempoLabel;
     juce::TextEditor tempoEditor;
     controls::StepButton tempoUpButton { true }, tempoDownButton { false };     // beside it, stacked
@@ -344,8 +387,9 @@ private:
 
     StaffSystems staffSystems { score };
     ScrollingViewport staffViewport;
-    PositionRuler positionRuler { score };     // along the top of the staves, for choosing where the score plays from
-    double playbackStart = 0.0;             // where Play and Record start, in beats from the start of the score
+    PageTabs pageTabs;                  // along the top of the staves, a tab for each page
+    PositionRuler positionRuler { score };     // under them, for choosing where the page plays from
+    std::vector<double> playbackStarts { 0.0 };     // where Play and Record start on each page, in beats from its start
 
     controls::DialLookAndFeel dialLookAndFeel;
     NoteLengthPicker noteLengthPicker;  // at the top left of the score, over the staves: the length of the notes that clicks add

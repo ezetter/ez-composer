@@ -8,9 +8,9 @@ PositionRuler::PositionRuler (const Score& scoreToShow)
     setTooltip ("Click or drag to choose where the score plays from, or jump there while it plays");
 }
 
-void PositionRuler::setMarker (double beats, bool isPlaying)
+void PositionRuler::setMarker (std::optional<double> beats, bool isPlaying)
 {
-    if (juce::exactlyEqual (beats, markerBeats) && isPlaying == playing)
+    if (beats.has_value() == markerBeats.has_value() && (! beats.has_value() || juce::exactlyEqual (*beats, *markerBeats)) && isPlaying == playing)
         return;
 
     markerBeats = beats;
@@ -61,7 +61,10 @@ void PositionRuler::paint (juce::Graphics& g)
     }
 
     // The marker: filled while the score plays, an outline where it'll start from
-    const auto x = getBeatX (*view, markerBeats);
+    if (! markerBeats.has_value())
+        return;
+
+    const auto x = getBeatX (*view, *markerBeats);
     juce::Path marker;
     marker.addTriangle (x - 5.5f, bounds.getBottom() - 10.0f, x + 5.5f, bounds.getBottom() - 10.0f, x, bounds.getBottom() - 1.0f);
 

@@ -6,9 +6,9 @@ namespace
     const char* const recentScoresKey = "recentScores";
 }
 
-ScoreDocument::ScoreDocument (Score& scoreToUse, juce::PropertiesFile& settingsToUse)
+ScoreDocument::ScoreDocument (Piece& pieceToUse, juce::PropertiesFile& settingsToUse)
     : FileBasedDocument (fileExtension, juce::String ("*") + fileExtension, "Open a score", "Save the score"),
-      score (scoreToUse),
+      piece (pieceToUse),
       settings (settingsToUse)
 {
     recentScores.setMaxNumberOfItems (maxRecentScores);
@@ -19,18 +19,18 @@ ScoreDocument::ScoreDocument (Score& scoreToUse, juce::PropertiesFile& settingsT
                                                                   && last.existsAsFile())
         recentScores.addFile (last);
 
-    score.addChangeListener (this);
+    piece.addChangeListener (this);
 }
 
 ScoreDocument::~ScoreDocument()
 {
-    score.removeChangeListener (this);
+    piece.removeChangeListener (this);
 }
 
 void ScoreDocument::startNewScore()
 {
     replacingScore = true;
-    score.clear();
+    piece.clear();
     replacingScore = false;
 
     setFile ({});
@@ -84,8 +84,11 @@ juce::Result ScoreDocument::loadDocument (const juce::File& file)
         return juce::Result::fail (file.getFileName() + " isn't an Anthropocene Music score.");
 
     replacingScore = true;
-    const auto result = score.loadJSON (json);
+    const auto result = piece.loadJSON (json);
     replacingScore = false;
+
+    // The instruments are the piece's, the same on every page.
+    const auto& score = piece.getEditingScore();
 
     // Scores from before there were two parts have one instrument, for the first.
     if (result.wasOk() && loadInstrument != nullptr)
@@ -118,7 +121,8 @@ juce::Result ScoreDocument::loadDocument (const juce::File& file)
 
 juce::Result ScoreDocument::saveDocument (const juce::File& file)
 {
-    auto json = score.toJSON();
+    auto json = piece.toJSON();
+    const auto& score = piece.getEditingScore();
 
     // Each part's instrument, or null for a part without one
     if (getInstrumentToSave != nullptr)

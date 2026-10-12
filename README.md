@@ -2,7 +2,7 @@
 
 A native macOS music app written in C++ with [JUCE](https://juce.com).
 
-It has as many instruments as you like, two to start with, each on its own grand staff and played by its own VST3 plugin, that you can write notes and chords for, and an 88-key piano. Chords are defined the way the Chord Progression Builder defines them, one measure at a time. Sound goes to the Mac's default audio output.
+It has as many instruments as you like, two to start with, each on its own grand staff and played by its own VST3 plugin, that you can write notes and chords for, and an 88-key piano. Chords are defined the way the Chord Progression Builder defines them, one measure at a time. A score can have several pages, each with its own key, time signature and music, played one after another or one at a time. Sound goes to the Mac's default audio output.
 
 ## Building
 
@@ -34,15 +34,28 @@ Each instrument has a **volume dial** to the left of its staves, setting how lou
 
 ### Toolbar
 
-- **Play**, the green arrow (or the space bar), plays the score from the beat chosen on the ruler (see below), the beginning to start with, highlighting each beat and following it along the staff. While it plays, it becomes **Stop**, a black square, which stops it, recording too. Changes to the score while it plays are heard as soon as playback reaches them: a note added ahead of the beat that's playing plays when it gets there (one added behind it, or under it, waits for the next time through a loop, rather than starting part way). A note that's sounding stops at once if it's taken out, or at its new end if it's made shorter, and a pedal marked down or taken out where it's playing goes down or comes up straight away.
+- **Play**, the green arrow (or the space bar), plays from the beat chosen on the ruler of the page you're on (see below), its beginning to start with: with **Piece**, on through every page after it, and with **Page**, just that page (see [Pages](#pages)). It highlights each beat, following it along the staff. While it plays, it becomes **Stop**, a black square, which stops it, recording too. Changes to the score while it plays are heard as soon as playback reaches them: a note added ahead of the beat that's playing plays when it gets there (one added behind it, or under it, waits for the next time through a loop, rather than starting part way). A note that's sounding stops at once if it's taken out, or at its new end if it's made shorter, and a pedal marked down or taken out where it's playing goes down or comes up straight away.
 - **Record**, the red circle beside it, plays the score as Play does, from the same beat, and records what you play on the piano or a MIDI controller into the active instrument (see [Recording](#recording)). It's tinted red while recording. Pressed while the score's already playing, it starts recording from there; pressed while recording, it stops recording and the score plays on.
-- **Loop**, beside Record and drawn as two arrows going round in a loop, the upper one to the right and the lower one back to the left, makes the score play over and over, going straight from the end back to the beginning, until you press **Stop**. It can be turned on or off while the score plays; turning it off lets the score finish this time through. It's blue while it's on, and is remembered the next time the app starts.
+- **Loop**, beside Record and drawn as two arrows going round in a loop, the upper one to the right and the lower one back to the left, makes the piece, or the page, play over and over, going straight from the end back to the beginning, the start of the first page for the piece, until you press **Stop**. It can be turned on or off while the score plays; turning it off lets the score finish this time through. It's blue while it's on, and is remembered the next time the app starts.
+- **Piece** or **Page**, beside Loop, says what Play, Record and Loop play: **Piece**, every page, one after another, or **Page**, just the page you're on. Click it to change it, even while the score plays: it carries on from where it is if it can. It's remembered the next time the app starts.
 - The **metronome**, beside Loop and drawn as one, ticks each beat while the score plays or records: a sharp metallic clang, like a cowbell's, on the first beat of each measure, and a woody click on the others, so a 3/4 measure goes clang, click, click. It's blue while it's on, can be turned on or off while the score plays (it's heard from the next beat), keeps time through a loop and with tempo changes, and is remembered the next time the app starts. It sounds through the speakers alongside the instruments, at a fixed level, and isn't sent to the instruments or saved with the score.
 - **BPM** sets the tempo in quarter notes per minute, from 20 to 300, fractions allowed. The default is 120. Type it, or step it with the up and down arrows beside it, a beat per minute at a time (from a fraction, to the whole number either side); holding an arrow down goes on stepping, and is undone in one go. While typing in it, the up and down arrow keys step it too. An arrow is greyed out at the end of the range. A change while the score plays takes over straight away, from the beat it's got to.
 - The instrument menu (**Instrument 1**, **Instrument 2** and so on) chooses the active instrument.
 - **Load Instrument…** loads a VST3 instrument plugin for the active instrument, such as one from `/Library/Audio/Plug-Ins/VST3`. **Edit [plugin]**, named for the loaded plugin (e.g. **Edit Pigments**), opens the plugin's own window, where you can choose its sounds. The instruments can use different plugins, or the same one with different sounds.
 - **Effects**, at the right of the toolbar, opens the effects page, for playing the instruments through VST3 effect plugins (see [Effects](#effects)).
 - Each instrument's plugin is saved with the score (see [Saving and opening](#saving-and-opening)). It's also loaded again the next time the app starts, with the sound it had. It's saved when you load it, when you close its editor, and when you quit, in `~/Library/Application Support/Anthropocene Music`. If it can't be loaded, say because it's been uninstalled, the app tells you and forgets it.
+
+### Pages
+
+A score can have several pages. Each page has its own key, major or minor, time signature, alternate staffs, measures, repeats and music: everything in the sidebar, and everything on its staves. The instruments, with their plugins, volumes and effects, and the tempo are the score's, the same on every page, so every page has the same instruments' staves; adding or deleting an instrument does so on every page, and deleting one with music on any page asks first.
+
+- Tabs along the top of the staves, **Page 1**, **Page 2** and so on, show the pages; the one you're editing is joined to the ruler under it. Click a tab to go to its page: the staves, the ruler and the sidebar show that page, from its first measure.
+- **+**, after the tabs, adds a page after the last and goes to it. A new page has blank staves for every instrument, four empty measures, in the key and time signature, and with the alternate staffs, of the page you were on, to change as you like.
+- Right-click a tab for **Delete Page**, which takes the page out, with its music; Undo puts it back. The only page can't be deleted.
+- Measures are each page's own, so **+**, **−** and **Clone** after the final barline work on the page you're on, and so do **Copy Chords** and **Generate Notes from Key**.
+- With **Piece**, Play plays from where the page you're on plays from, and on through the pages after it, each in its own time signature, with its own repeats and endings. As the music goes on to the next page, the page you're looking at goes with it, if it's the one that was playing; if you've gone to another page, it stays there. The metronome's clang is on each page's own downbeats. With **Loop** on, after the last page it goes back to the start of the first.
+- With **Page**, Play plays just the page you're on, and Loop loops it. Going to another page while it plays plays that page instead, from where it plays from.
+- Going to another page isn't a change to the score, and isn't undone.
 
 ### Effects
 
@@ -70,6 +83,7 @@ The **File** menu saves and opens scores:
 | **Save As…** | ⇧⌘S | Saves the score to a new file, which it then keeps using. |
 
 - Scores are saved as `.amscore` files, which are JSON. A file keeps everything about the score, and the plugins it's played on and their volumes: the key, time signature, tempo, and for each instrument its alternate staff, its measures and their notes, and each measure's chord with all its settings. That includes notes you've added to or taken out of a chord, and the order a Random chord plays in. Notes on beats hidden by a shorter time signature are kept too.
+- A score with several pages saves them all: the first page as a score on its own is saved, with the other pages after it, so an app from before there were pages opens just the first page. Opening a score goes to its first page.
 - The effects are saved with the score too, with their settings, the buses they're in, and where each instrument and bus goes (see [Effects](#effects)). Opening a score saved with effects puts them in place of the ones you had; one saved without them leaves yours as they are.
 - Each instrument's plugin is saved with the score, with its sound: whatever you've chosen in its editor. Opening the score loads the plugins again, or just gives it the saved sound if it's the one already loaded. A plugin's sound can be large, so a score can be too; Pigments adds about half a megabyte.
 - Loading a different instrument, or changing its sound in its editor, counts as a change that needs saving, and the title shows it within half a second. It goes by what the instrument reports: a change to one of its parameters, its program, or its other settings. Just opening the editor, or playing, isn't a change, even though some instruments (Pigments, for one) save details of their editor window along with their sound.
@@ -80,7 +94,7 @@ The **File** menu saves and opens scores:
 
 ### Ruler
 
-Along the top of the staves, above the note length and dynamic buttons, is a ruler, lined up with the measures and scrolling sideways with them: a tall tick and the number for each measure, on its first beat, and short ticks for its other beats. A marker shows where the score plays from, as an outline while it's stopped, and moves along filled in while it plays or records.
+Along the top of the staves, under the pages' tabs and above the note length and dynamic buttons, is a ruler for the page you're on, lined up with its measures and scrolling sideways with them: a tall tick and the number for each measure, on its first beat, and short ticks for its other beats. A marker shows where the page plays from, as an outline while it's stopped, and moves along filled in while it plays or records; while another page is playing, there's no marker. Each page has its own place to play from.
 
 Click the ruler to choose the beat nearest the click as where Play and Record start, or drag along it. While the score plays, clicking or dragging jumps there straight away, and it carries on from there; the notes sounding stop, the pedal goes down or comes up as it is there, and notes that started before it aren't started part way. While recording, keys held as it jumps end where it jumped from. Stopping leaves the marker where it'll start from next time. It stays within the score as measures are taken away, and a new or opened score starts from the beginning. With **Loop** on, the score plays on from there to the end, and then loops from the very beginning.
 
@@ -88,12 +102,15 @@ Click the ruler to choose the beat nearest the click as where Play and Record st
 
 The **Edit** menu's **Undo** (⌘Z) undoes the last change to the score, and pressing it again undoes the one before, back to how the score was when it was opened or started (the last 500 changes are remembered). **Redo** (⇧⌘Z) makes an undone change again, until something else is changed. Each is greyed out when there's nothing to undo or redo.
 
+- Undo covers every page, and adding and deleting pages. Undoing or redoing a change on another page goes to that page, to show it.
 - Everything about the score can be undone: notes, ties, everything one recording added, chords and the chord window's changes, dynamics and hairpins, the key, time signature, tempo and alternate staff, and adding, removing, cloning and copying measures and progressions. What one click, drag or command does is undone in one go, e.g. a whole Copy Chords, a hairpin however far it was dragged, or everything an eraser stroke took out.
 - The chord window shows the chord as undoing leaves it, and closes if its measure's undone away.
 - Undoing counts as a change that needs saving. The instruments, their volumes and muting, and what's chosen to add, such as the note length, aren't part of what's undone.
 - Typing in the BPM box, ⌘Z undoes the typing instead.
 
 ### Score
+
+These are the settings of the page you're on; each page has its own (see [Pages](#pages)).
 
 | Setting | What it does |
 | --- | --- |
@@ -225,6 +242,7 @@ While recording, each key played on the piano, the computer keyboard or a MIDI c
 - The notes are spelled in the key, B♭ rather than A♯ in F major, say. They take the place of what they're written over, as notes added by clicking do, and a measure whose chord has the staff is left alone.
 - Keys still held when recording stops end there, or at the end of the score when it plays to the end. Recording stops when the score does.
 - With **Loop** on, recording goes on through each time round. What was recorded is heard the next time through, and more can be played along with it. A key held as the loop goes back to the beginning lasts to the end of the score.
+- Recording the whole piece, with **Piece**, what's played on a page goes on that page, whichever page you're looking at. A key held as the music goes on to the next page ends at the end of its page.
 - Everything one recording adds is undone in one go. Choosing another instrument while recording records the next keys into that one.
 
 ### MIDI controllers
@@ -241,8 +259,10 @@ The **MIDI** menu lists the MIDI inputs, ticked when they're on. Choose one to t
 | `Source/MainComponent.*` | The File, Edit and MIDI menus, the toolbar, the sidebar, the instruments' scrolling staves, with their volume dials and delete buttons, adding and deleting instruments, the piano, and the audio output |
 | `Source/Score.*` | The music: the key, time signature and speed, and each instrument's notes, by eighth note, dynamics, crescendos and decrescendos, chords and alternate staff (a part, in the code), the repeat signs and endings, and the order the measures are played in, and saving it as JSON |
 | `Source/ScaleTool.*` | The settings Generate Notes from Key shows, for adding notes from the key's scale |
-| `Source/ScoreDocument.*` | Saves the score to a file and opens it, and keeps track of unsaved changes |
-| `Source/ScoreHistory.*` | Remembers the score before each change, or each eraser stroke, for Undo and Redo |
+| `Source/Piece.*` | The score's pages, each a score of its own, with the instruments and tempo they share, and the page being edited |
+| `Source/PageTabs.*` | The pages' tabs, with the + for adding a page |
+| `Source/ScoreDocument.*` | Saves the score to a file, every page of it, and opens it, and keeps track of unsaved changes |
+| `Source/ScoreHistory.*` | Remembers every page before each change, or each eraser stroke, for Undo and Redo |
 | `Source/Music.*` | Music theory: keys, spelling, building, recognising and naming chords, and dynamics, hairpins and their velocities |
 | `Source/MeasureContent.*` | Works out the notes, rests and their lengths that each measure has on each staff |
 | `Source/StaffView.*` | Draws an instrument's grand staff with each measure's chord button, lined up with the other instruments', with its repeat signs and endings, and turns clicks and drags into notes, dynamics, hairpins, repeat signs and endings, erases them, or moves notes and changes their lengths |

@@ -1,15 +1,15 @@
 #include "ScoreHistory.h"
 
-ScoreHistory::ScoreHistory (Score& scoreToUse)
-    : score (scoreToUse),
+ScoreHistory::ScoreHistory (Piece& pieceToUse)
+    : piece (pieceToUse),
       current (capture())
 {
-    score.addChangeListener (this);
+    piece.addChangeListener (this);
 }
 
 ScoreHistory::~ScoreHistory()
 {
-    score.removeChangeListener (this);
+    piece.removeChangeListener (this);
 }
 
 bool ScoreHistory::canUndo()
@@ -35,7 +35,7 @@ void ScoreHistory::undo()
     redoStates.push_back (current);
     current = undoStates.back();
     undoStates.pop_back();
-    restore (current);
+    restore (current, redoStates.back());
     changed();
 }
 
@@ -49,7 +49,7 @@ void ScoreHistory::redo()
     undoStates.push_back (current);
     current = redoStates.back();
     redoStates.pop_back();
-    restore (current);
+    restore (current, undoStates.back());
     changed();
 }
 
@@ -108,16 +108,30 @@ void ScoreHistory::handleAsyncUpdate()
     changed();
 }
 
-juce::String ScoreHistory::capture() const
+ScoreHistory::State ScoreHistory::capture() const
 {
-    // With the parts' ids, so a part that's taken out and put back is known to be the same one
-    return juce::JSON::toString (score.toJSON (true), true);
+    // With the parts' ids, so a part that's taken out and put back is known to be the same one.
+    // A page that hasn't changed shares its text with the last time, so it takes no more memory.
+    return piece.capturePages();
 }
 
-void ScoreHistory::restore (const juce::String& state)
+void ScoreHistory::restore (const State& state, const State& from)
 {
     const juce::ScopedValueSetter<bool> setter (restoring, true);
-    score.loadJSON (juce::JSON::parse (state));
+
+    // The page being edited, if it's changed, or else the first page that has
+    const auto differs = [&] (int page) { return (size_t) page >= from.size() || state[(size_t) page] != from[(size_t) page]; };
+    auto pageToEdit = juce::jlimit (0, (int) state.size() - 1, piece.getCurrentPage());
+
+    if (! differs (pageToEdit))
+        for (int page = 0; page < (int) state.size(); ++page)
+            if (differs (page))
+            {
+                pageToEdit = page;
+                break;
+            }
+
+    piece.restorePages (state, pageToEdit);
 }
 
 void ScoreHistory::changed()

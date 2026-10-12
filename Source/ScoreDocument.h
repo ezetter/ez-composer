@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Score.h"
+#include "Piece.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
-/** Saves the score to a file, with the instrument it's played on, and loads it back, and keeps
-    track of whether it has unsaved changes.
+/** Saves the score to a file, every page of it, with the instruments it's played on, and loads it
+    back, and keeps track of whether it has unsaved changes.
 
     Listeners hear when the file or the unsaved state changes, e.g. to update the window's title.
 */
@@ -13,10 +13,10 @@ class ScoreDocument final : public juce::FileBasedDocument,
                             private juce::ChangeListener
 {
 public:
-    ScoreDocument (Score&, juce::PropertiesFile& settings);
+    ScoreDocument (Piece&, juce::PropertiesFile& settings);
     ~ScoreDocument() override;
 
-    /** Starts a new, empty score with no file. */
+    /** Starts a new, empty score with no file: one page, with two empty parts. */
     void startNewScore();
 
     static constexpr auto fileExtension = ".amscore";
@@ -72,7 +72,7 @@ private:
     void rememberRecentScore (const juce::File&);
     void saveRecentScores();
 
-    Score& score;
+    Piece& piece;
     juce::PropertiesFile& settings;
     bool replacingScore = false;
     juce::RecentlyOpenedFilesList recentScores;

@@ -186,6 +186,31 @@ public:
     /** The number of the part with an id, or -1 if it's not in the score any more. */
     int findPart (int id) const noexcept;
 
+    /** The parts' ids, in order. */
+    std::vector<int> getPartIds() const;
+
+    /** Gives this score the same parts as another, by their ids, in the same order: parts it
+        has keep their music, ones it hasn't are added empty, and ones the other hasn't go.
+    */
+    void matchParts (const Score&);
+
+    /** Gives this score's parts the other's ids, place by place, as for a page loaded from a
+        file, whose parts are known by their places.
+    */
+    void takePartIdsFrom (const Score&);
+
+    //==============================================================================
+    /** Makes this score a copy of another: its parts, with their ids and music, its measures,
+        key, time signature and repeats; everything but the tempo.
+    */
+    void copyFrom (const Score&);
+
+    /** Makes this score a blank page to go with another: the same parts, with no music, in as
+        many measures as a new score has, in the other's key and time signature, with its parts'
+        alternate staffs, and at its tempo.
+    */
+    void makeBlankPageLike (const Score&);
+
     //==============================================================================
     /** The number of measures, which every part has. */
     int getNumMeasures() const noexcept { return (int) parts[0].measures.size(); }
