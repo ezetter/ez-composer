@@ -40,7 +40,7 @@ private:
     Score& score;
     int part = 0;
 
-    juce::Label keyHeading, signatureLabel, timeSignatureHeading, alternateHeading, alternateHint, progressionHeading, progressionHint;
+    juce::Label keyHeading, signatureLabel, timeSignatureHeading, alternateHeading, progressionHeading;
     juce::ComboBox keyBox, timeSignatureBox, alternateBox;
     juce::TextButton majorButton { "Major" }, minorButton { "Minor" };
     juce::TextButton copyChordsButton;

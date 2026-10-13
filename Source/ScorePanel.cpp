@@ -7,6 +7,7 @@ namespace
     constexpr int headingHeight = 16;
     constexpr int controlHeight = 28;
     constexpr int sectionGap = 12;
+    constexpr int buttonGap = 6;        // between Copy Chords and Generate Notes from Key
 }
 
 ScorePanel::ScorePanel (Score& scoreToEdit)
@@ -42,17 +43,7 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     timeSignatureBox.onChange = [this] { score.setBeatsPerMeasure (timeSignatureBox.getSelectedId()); };
 
     alternateBox.addItemList ({ "None", "Root", "Octave", "Block chord", "Rolled chord" }, 1);
-    alternateBox.setTooltip ("What the other staff shows under or over every chord");
     alternateBox.onChange = [this] { score.setAlternateStaff (part, (music::AlternateStaff) (alternateBox.getSelectedId() - 1)); };
-
-    for (auto* hint : { &alternateHint, &progressionHint })
-    {
-        hint->setFont (juce::FontOptions (12.0f));
-        hint->setColour (juce::Label::textColourId, controls::secondaryText);
-        hint->setBorderSize ({});
-        hint->setJustificationType (juce::Justification::topLeft);
-        hint->setMinimumHorizontalScale (1.0f);     // wrapped onto a second line, rather than squeezed
-    }
 
     copyChordsButton.setWantsKeyboardFocus (false);
     copyChordsButton.onClick = [this]
@@ -75,8 +66,8 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     };
 
     for (auto* component : std::initializer_list<juce::Component*> { &keyHeading, &keyBox, &majorButton, &minorButton, &signatureLabel, &timeSignatureHeading,
-                                                                     &timeSignatureBox, &alternateHeading, &alternateBox, &alternateHint,
-                                                                     &progressionHeading, &copyChordsButton, &progressionHint, &generateNotesButton })
+                                                                     &timeSignatureBox, &alternateHeading, &alternateBox,
+                                                                     &progressionHeading, &copyChordsButton, &generateNotesButton })
         addAndMakeVisible (component);
 
     score.addChangeListener (this);
@@ -96,7 +87,7 @@ ScorePanel::~ScorePanel()
 
 int ScorePanel::getIdealHeight() const
 {
-    return 4 * (headingHeight + 2) + 5 * controlHeight + 2 * (16 + 2) + 2 + 32 + 4 + 3 * sectionGap;
+    return 4 * (headingHeight + 2) + 5 * controlHeight + (2 + 16) + buttonGap + 3 * sectionGap;
 }
 
 void ScorePanel::resized()
@@ -122,16 +113,12 @@ void ScorePanel::resized()
     alternateHeading.setBounds (bounds.removeFromTop (headingHeight));
     bounds.removeFromTop (2);
     alternateBox.setBounds (bounds.removeFromTop (controlHeight));
-    bounds.removeFromTop (2);
-    alternateHint.setBounds (bounds.removeFromTop (16));
     bounds.removeFromTop (sectionGap);
 
     progressionHeading.setBounds (bounds.removeFromTop (headingHeight));
     bounds.removeFromTop (2);
     copyChordsButton.setBounds (bounds.removeFromTop (controlHeight));
-    bounds.removeFromTop (2);
-    progressionHint.setBounds (bounds.removeFromTop (32));
-    bounds.removeFromTop (4);
+    bounds.removeFromTop (buttonGap);
     generateNotesButton.setBounds (bounds.removeFromTop (controlHeight));
 }
 
@@ -169,7 +156,7 @@ void ScorePanel::update()
     signatureLabel.setText (music::getKeySignatureText (score.getKey()), juce::dontSendNotification);
     timeSignatureBox.setSelectedId (score.getBeatsPerMeasure(), juce::dontSendNotification);
     alternateBox.setSelectedId ((int) score.getAlternateStaff (part) + 1, juce::dontSendNotification);
-    alternateHint.setText ("For every chord of instrument " + juce::String (part + 1), juce::dontSendNotification);
+    alternateBox.setTooltip ("What the other staff shows under or over every chord of instrument " + juce::String (part + 1));
 
     // The chords go from this part to the other, or to one chosen from a menu.
     const auto from = juce::String (part + 1);
@@ -179,7 +166,6 @@ void ScorePanel::update()
         copyChordsButton.setButtonText ("Copy Chords");
         copyChordsButton.setEnabled (false);
         copyChordsButton.setTooltip ("Add another instrument to copy instrument " + from + "'s chords to");
-        progressionHint.setText ("Add another instrument to copy instrument " + from + "'s chords to", juce::dontSendNotification);
     }
     else if (score.getNumParts() == 2)
     {
@@ -188,8 +174,6 @@ void ScorePanel::update()
         copyChordsButton.setEnabled (score.hasChords (part));
         copyChordsButton.setTooltip (score.hasChords (part) ? "Give instrument " + to + " instrument " + from + "'s chords, in place of its own notes and chords"
                                                             : "Instrument " + from + " has no chords to copy yet. Add one with Add Chord, over a measure.");
-        progressionHint.setText ("Replaces instrument " + to + "'s notes and chords with instrument " + from + "'s chords",
-                                 juce::dontSendNotification);
     }
     else
     {
@@ -197,7 +181,5 @@ void ScorePanel::update()
         copyChordsButton.setEnabled (score.hasChords (part));
         copyChordsButton.setTooltip (score.hasChords (part) ? "Give an instrument you choose instrument " + from + "'s chords, in place of its own notes and chords"
                                                             : "Instrument " + from + " has no chords to copy yet. Add one with Add Chord, over a measure.");
-        progressionHint.setText ("Replaces the chosen instrument's notes and chords with instrument " + from + "'s chords",
-                                 juce::dontSendNotification);
     }
 }
