@@ -364,6 +364,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     pageTabs.onCopyPage = [this] (int page) { copyPage (page); };
     pageTabs.onDeletePage = [this] (int page) { deletePage (page); };
     pageTabs.onMovePage = [this] (int from, int to) { movePage (from, to); };
+    pageTabs.onRenamePage = [this] (int page, const juce::String& name) { piece.renamePage (page, name); };
     piece.onPagesChanged = [this] { pagesChanged(); };
     addAndMakeVisible (pageTabs);
 
@@ -657,7 +658,12 @@ void MainComponent::pagesChanged()
 {
     const auto switched = piece.getCurrentPage() != shownPage;
     shownPage = piece.getCurrentPage();
-    pageTabs.setPages (piece.getNumPages(), piece.getCurrentPage());
+    juce::StringArray names;
+
+    for (int page = 0; page < piece.getNumPages(); ++page)
+        names.add (piece.getPageName (page));
+
+    pageTabs.setPages (names, piece.getCurrentPage());
 
     if (switched)
     {
@@ -698,9 +704,15 @@ void MainComponent::deletePage (int page)
     if (piece.getNumPages() <= 1 || ! juce::isPositiveAndBelow (page, piece.getNumPages()))
         return;
 
+    // A page with a name is asked about by its name.
+    const auto& name = piece.getPage (page).getName();
+    const auto title = name.isNotEmpty() ? "Delete " + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x9c")) + name
+                                               + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x9d?"))
+                                         : "Delete page " + juce::String (page + 1) + "?";
+
     juce::AlertWindow::showAsync (juce::MessageBoxOptions()
                                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
-                                      .withTitle ("Delete page " + juce::String (page + 1) + "?")
+                                      .withTitle (title)
                                       .withMessage ("Its music and settings will be taken out of the score. Undo puts them back.")
                                       .withButton ("Delete")
                                       .withButton ("Cancel")

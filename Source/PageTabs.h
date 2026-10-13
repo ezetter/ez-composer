@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Controls.h"
+#include "Score.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -9,8 +10,9 @@
 
 /** A tab for each of the piece's pages, along the top of the staves, the chosen one joined to
     the ruler under it, with a + after them for adding a page. Clicking a tab chooses its page,
-    right-clicking it offers to copy the page or take it out, and dragging it along moves the
-    page to another place among them, the other tabs making room for it as it goes.
+    right-clicking it offers to rename the page, copy it or take it out, and dragging it along
+    moves the page to another place among them, the other tabs making room for it as it goes.
+    The tabs are as wide as the longest name needs, up to a point, unless they're crowded.
 */
 class PageTabs final : public juce::Component
 {
@@ -18,8 +20,8 @@ public:
     PageTabs();
     ~PageTabs() override;
 
-    /** Shows a tab for each page, with one chosen. */
-    void setPages (int numPages, int chosen);
+    /** Shows a tab for each page, with its name, and one chosen. */
+    void setPages (const juce::StringArray& names, int chosen);
 
     /** Called when a tab's clicked, with its page, counting from 0. */
     std::function<void (int page)> onPageChosen;
@@ -35,16 +37,28 @@ public:
     */
     std::function<void (int from, int to)> onMovePage;
 
-    /** The menu right-clicking a page's tab shows. */
-    juce::PopupMenu createMenu (int page) const;
+    /** Called when a page's been given a new name on its tab, with the name typed. */
+    std::function<void (int page, const juce::String& name)> onRenamePage;
 
-    static constexpr int copyPageItem = 1, deletePageItem = 2;
+    /** Shows a box over a page's tab, with its name selected, for typing a new one, as Rename
+        Page in the tab's menu does. Return, or a click anywhere else, gives the page the name
+        typed, and Esc leaves it as it was.
+    */
+    void startRenaming (int page);
+
+    /** Whether a page's name is being typed. */
+    bool isRenaming() const noexcept { return renamingPage.has_value(); }
+
+    /** The menu right-clicking a page's tab shows. */
+    juce::PopupMenu createMenu() const;
+
+    static constexpr int copyPageItem = 1, deletePageItem = 2, renamePageItem = 3;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
     static constexpr int height = 30;
-    static constexpr int tabWidth = 84, minTabWidth = 52;
+    static constexpr int tabWidth = 84, minTabWidth = 52, maxTabWidth = 160;
 
     /** The colour of the chosen tab, and the ruler it's joined to */
     inline static const juce::Colour chosenColour { 0xfff7f7f9 };
@@ -64,6 +78,19 @@ private:
     };
 
     void showMenu (int page, juce::Component& tab);
+
+    /** Gives the page being renamed the name typed, or leaves it as it was. */
+    void finishRenaming (bool rename);
+    void layOutNameEditor();
+
+    /** While a page is being renamed, hears every click, as one away from its box gives it the name typed. */
+    struct ClickListener final : public juce::MouseListener
+    {
+        explicit ClickListener (PageTabs& ownerToUse) : owner (ownerToUse) {}
+        void mouseDown (const juce::MouseEvent&) override;
+
+        PageTabs& owner;
+    };
 
     /** How wide the tabs are, and where the one at a place goes, across. */
     int getTabWidth() const;
@@ -89,8 +116,12 @@ private:
     int dragPlace = 0;                  // where it would go
     bool dragMoved = false;             // whether it's moved far enough to be a drag
     bool ignoringClick = false;         // as a dragged tab is let go
+    int widestName = 0;                 // how wide the widest name is, which the tabs are made wide enough for
     controls::RoundButtonLookAndFeel roundButtonLookAndFeel;
     juce::TextButton addButton { "+" };
+    juce::TextEditor nameEditor;        // over a tab, while its page's name is typed
+    std::optional<int> renamingPage;
+    ClickListener clickListener { *this };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PageTabs)
 };

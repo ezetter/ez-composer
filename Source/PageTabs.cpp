@@ -7,6 +7,13 @@ namespace
     constexpr int tabTop = 5;
     constexpr int addButtonSize = 22;
     constexpr int dragThreshold = 4;        // how far a tab has to be dragged before it moves, rather than being clicked
+    constexpr int namePadding = 10;         // either side of a tab's name
+    constexpr int minEditorWidth = 120;     // the box for typing a name, wide enough to type in over a narrow tab
+
+    juce::Font getTabFont (bool chosen)
+    {
+        return juce::FontOptions (13.0f, chosen ? juce::Font::bold : juce::Font::plain);
+    }
 }
 
 PageTabs::PageTabs()
@@ -18,31 +25,68 @@ PageTabs::PageTabs()
     addButton.onClick = [this] { if (onAddPage != nullptr) onAddPage(); };
     addAndMakeVisible (addButton);
 
-    setPages (1, 0);
+    // The box for typing a page's name, which Return or a click anywhere else keeps, and Esc doesn't
+    nameEditor.setFont (getTabFont (true));
+    nameEditor.setJustification (juce::Justification::centred);
+    nameEditor.setInputRestrictions (Score::maxNameLength);
+    nameEditor.setColour (juce::TextEditor::outlineColourId, controls::accent);
+    nameEditor.setColour (juce::TextEditor::focusedOutlineColourId, controls::accent);
+    nameEditor.setTooltip ("The page's name: Return keeps it, and Esc leaves it as it was");
+    nameEditor.onReturnKey = [this] { finishRenaming (true); };
+    nameEditor.onEscapeKey = [this] { finishRenaming (false); };
+    nameEditor.onFocusLost = [this] { finishRenaming (true); };
+    addChildComponent (nameEditor);
+
+    setPages ({ "Page 1" }, 0);
 }
 
 PageTabs::~PageTabs()
 {
+    juce::Desktop::getInstance().removeGlobalMouseListener (&clickListener);
     addButton.setLookAndFeel (nullptr);
 }
 
-void PageTabs::setPages (int numPages, int chosen)
+void PageTabs::setPages (const juce::StringArray& names, int chosen)
 {
     chosenPage = chosen;
 
-    while (tabs.size() > numPages)
+    // A page being renamed that's gone isn't renamed.
+    if (renamingPage.has_value() && *renamingPage >= names.size())
+        finishRenaming (false);
+
+    while (tabs.size() > names.size())
         tabs.removeLast();
 
-    while (tabs.size() < numPages)
+    while (tabs.size() < names.size())
         addAndMakeVisible (tabs.add (std::make_unique<Tab> (*this, tabs.size())));
+
+    // Each named, and with a tip saying what it can do, starting with its name in full, which its
+    // tab may cut short: as much as fits in a tip's two lines, however long the name.
+    const auto fitTip = [] (std::initializer_list<juce::String> tips)
+    {
+        for (const auto& tip : tips)
+            if (controls::TooltipLookAndFeel::layOut (tip).getNumLines() <= 2)
+                return tip;
+
+        return *std::prev (tips.end());
+    };
+
+    const auto actions = names.size() > 1 ? juce::String ("drag to move it, or right-click to rename, copy or delete it.")
+                                          : juce::String ("right-click to rename or copy it.");
+    widestName = 0;
 
     for (auto* tab : tabs)
     {
+        const auto& name = names[tab->page];
+        tab->setName (name);
+        tab->setButtonText (name);
         tab->setToggleState (tab->page == chosen, juce::dontSendNotification);
-        tab->setTooltip ((tab->page == chosen ? juce::String ("The page you're editing.") : "Edit page " + juce::String (tab->page + 1) + ".")
-                         + (numPages > 1 ? " Drag it to move the page, or right-click to copy or delete it." : " Right-click to copy it."));
+        tab->setTooltip (tab->page == chosen ? fitTip ({ name + ", being edited: " + actions, name + ", being edited", name })
+                                             : fitTip ({ name + ": click to edit it, " + actions, name + ": click to edit it", name }));
+        widestName = juce::jmax (widestName, (int) std::ceil (juce::GlyphArrangement::getStringWidth (getTabFont (true), name)));
     }
 
+    nameEditor.toFront (false);
     resized();
     repaint();
 }
@@ -62,9 +106,11 @@ void PageTabs::paint (juce::Graphics& g)
 
 int PageTabs::getTabWidth() const
 {
-    // As wide as they can be, down to a minimum, leaving room for the +
+    // Wide enough for the widest name, up to a point, or as wide as they can be, down to a
+    // minimum, leaving room for the +
+    const auto wanted = juce::jlimit (tabWidth, maxTabWidth, widestName + 2 * namePadding);
     const auto room = getWidth() - firstTabLeft - addButtonSize - 16;
-    return tabs.isEmpty() ? tabWidth : juce::jlimit (minTabWidth, tabWidth, (room - (tabs.size() - 1) * tabGap) / tabs.size());
+    return tabs.isEmpty() ? wanted : juce::jlimit (minTabWidth, wanted, (room - (tabs.size() - 1) * tabGap) / tabs.size());
 }
 
 int PageTabs::getTabX (int place) const
@@ -81,6 +127,8 @@ void PageTabs::resized()
 
     if (draggedPage.has_value() && dragMoved)
         layOutDragging();
+
+    layOutNameEditor();
 }
 
 //==============================================================================
@@ -154,28 +202,91 @@ bool PageTabs::finishDragging()
     return moved;
 }
 
-juce::PopupMenu PageTabs::createMenu (int page) const
+juce::PopupMenu PageTabs::createMenu() const
 {
-    // Deleting asks first, so it ends with an ellipsis. The only page can't be deleted.
+    // Renaming and deleting ask for more, so they end with an ellipsis. The only page can't be deleted.
+    const auto ellipsis = juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6"));
     juce::PopupMenu menu;
-    menu.addItem (copyPageItem, "Copy Page " + juce::String (page + 1));
-    menu.addItem (deletePageItem, "Delete Page " + juce::String (page + 1) + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")), tabs.size() > 1);
+    menu.addItem (renamePageItem, "Rename Page" + ellipsis);
+    menu.addItem (copyPageItem, "Copy Page");
+    menu.addSeparator();
+    menu.addItem (deletePageItem, "Delete Page" + ellipsis, tabs.size() > 1);
     return menu;
 }
 
 void PageTabs::showMenu (int page, juce::Component& tab)
 {
-    createMenu (page).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (tab),
-                                     [safeThis = juce::Component::SafePointer (this), page] (int result)
-                                     {
-                                         if (safeThis == nullptr)
-                                             return;
+    createMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (tab),
+                                [safeThis = juce::Component::SafePointer (this), page] (int result)
+                                {
+                                    if (safeThis == nullptr)
+                                        return;
 
-                                         if (result == copyPageItem && safeThis->onCopyPage != nullptr)
-                                             safeThis->onCopyPage (page);
-                                         else if (result == deletePageItem && safeThis->onDeletePage != nullptr)
-                                             safeThis->onDeletePage (page);
-                                     });
+                                    if (result == renamePageItem)
+                                        safeThis->startRenaming (page);
+                                    else if (result == copyPageItem && safeThis->onCopyPage != nullptr)
+                                        safeThis->onCopyPage (page);
+                                    else if (result == deletePageItem && safeThis->onDeletePage != nullptr)
+                                        safeThis->onDeletePage (page);
+                                });
+}
+
+//==============================================================================
+void PageTabs::startRenaming (int page)
+{
+    if (! juce::isPositiveAndBelow (page, tabs.size()))
+        return;
+
+    // Another page being renamed keeps the name typed for it.
+    finishRenaming (true);
+    renamingPage = page;
+    nameEditor.setText (tabs[page]->getButtonText(), juce::dontSendNotification);
+
+    // Emptied, it shows the name the page has without one: its number.
+    nameEditor.setTextToShowWhenEmpty ("Page " + juce::String (page + 1), controls::secondaryText);
+    layOutNameEditor();
+    nameEditor.setVisible (true);
+    nameEditor.toFront (false);
+
+    if (nameEditor.isShowing())
+        nameEditor.grabKeyboardFocus();
+
+    nameEditor.selectAll();
+    juce::Desktop::getInstance().addGlobalMouseListener (&clickListener);
+}
+
+void PageTabs::finishRenaming (bool rename)
+{
+    if (! renamingPage.has_value())
+        return;
+
+    const auto page = *renamingPage;
+    renamingPage.reset();
+    juce::Desktop::getInstance().removeGlobalMouseListener (&clickListener);
+
+    const auto name = nameEditor.getText();
+    nameEditor.setVisible (false);
+
+    if (rename && onRenamePage != nullptr)
+        onRenamePage (page, name);
+}
+
+void PageTabs::layOutNameEditor()
+{
+    if (! renamingPage.has_value() || ! juce::isPositiveAndBelow (*renamingPage, tabs.size()))
+        return;
+
+    // Over its tab, and wide enough to type in, even over a narrow one
+    const auto tab = tabs[*renamingPage]->getBounds();
+    nameEditor.setBounds (juce::Rectangle<int> (juce::jmax (tab.getWidth(), minEditorWidth), tab.getHeight() - 3)
+                              .withCentre (tab.getCentre().translated (0, -1))
+                              .constrainedWithin (getLocalBounds()));
+}
+
+void PageTabs::ClickListener::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.originalComponent != &owner.nameEditor && ! owner.nameEditor.isParentOf (e.originalComponent))
+        owner.finishRenaming (true);
 }
 
 //==============================================================================
@@ -234,7 +345,8 @@ void PageTabs::Tab::paintButton (juce::Graphics& g, bool highlighted, bool down)
     g.strokePath (shape, juce::PathStrokeType (1.0f));
     g.restoreState();
 
+    // Its name, shortened with an ellipsis if it doesn't fit
     g.setColour (chosen ? controls::accent : controls::secondaryText);
-    g.setFont (juce::FontOptions (13.0f, chosen ? juce::Font::bold : juce::Font::plain));
-    g.drawText (getName(), getLocalBounds().withTrimmedTop (1), juce::Justification::centred, true);
+    g.setFont (getTabFont (chosen));
+    g.drawText (getButtonText(), getLocalBounds().withTrimmedTop (1).reduced (namePadding / 2, 0), juce::Justification::centred, true);
 }

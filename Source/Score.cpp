@@ -112,6 +112,7 @@ void Score::copyFrom (const Score& other)
     minor = other.minor;
     beatsPerMeasure = other.beatsPerMeasure;
     beatsPerMinute = other.beatsPerMinute;
+    name = other.name;
     sendSynchronousChangeMessage();
 }
 
@@ -132,7 +133,22 @@ void Score::makeBlankPageLike (const Score& other)
     minor = other.minor;
     beatsPerMeasure = other.beatsPerMeasure;
     beatsPerMinute = other.beatsPerMinute;
+    name = {};
     sendSynchronousChangeMessage();
+}
+
+juce::String Score::tidyName (const juce::String& newName)
+{
+    return newName.replaceCharacters ("\r\n\t", "   ").trim().substring (0, maxNameLength).trimEnd();
+}
+
+void Score::setName (const juce::String& newName)
+{
+    if (const auto tidied = tidyName (newName); tidied != name)
+    {
+        name = tidied;
+        sendSynchronousChangeMessage();
+    }
 }
 
 Score::Measure& Score::getMeasure (int part, int measure)
@@ -1196,7 +1212,8 @@ namespace
     // 13: a chord's root raised
     // 14: repeat signs, and first and second endings
     // 15: staccato notes
-    constexpr int formatVersion = 15;
+    // 16: page names
+    constexpr int formatVersion = 16;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1255,6 +1272,7 @@ void Score::clear()
     minor = false;
     beatsPerMeasure = 4;
     beatsPerMinute = 120.0;
+    name = {};
     sendSynchronousChangeMessage();
 }
 
@@ -1267,6 +1285,10 @@ juce::var Score::toJSON (bool withPartIds) const
     root->setProperty ("minor", minor);
     root->setProperty ("beatsPerMeasure", beatsPerMeasure);
     root->setProperty ("beatsPerMinute", beatsPerMinute);
+
+    // The page's name, if it has one
+    if (name.isNotEmpty())
+        root->setProperty ("name", name);
 
     // The measures with repeat signs, by number from 0, if there are any
     if (hasRepeats())
@@ -1672,6 +1694,9 @@ juce::Result Score::loadJSON (const juce::var& json)
 
     const auto tempo = (double) json.getProperty ("beatsPerMinute", 120.0);
     beatsPerMinute = tempo >= minBeatsPerMinute && tempo <= maxBeatsPerMinute ? tempo : 120.0;
+
+    // A page's name, from version 16
+    name = tidyName (json.getProperty ("name", {}).toString());
 
     // Repeat signs, in measures the score has
     repeats.assign ((size_t) getNumMeasures(), {});

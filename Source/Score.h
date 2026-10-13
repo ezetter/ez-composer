@@ -202,15 +202,31 @@ public:
 
     //==============================================================================
     /** Makes this score a copy of another: its parts, with their ids and music, its measures,
-        key, time signature, repeats and tempo.
+        key, time signature, repeats, tempo and name.
     */
     void copyFrom (const Score&);
 
     /** Makes this score a blank page to go with another: the same parts, with no music, in as
         many measures as a new score has, in the other's key and time signature, with its parts'
-        alternate staffs, and at its tempo.
+        alternate staffs, and at its tempo, without a name.
     */
     void makeBlankPageLike (const Score&);
+
+    //==============================================================================
+    /** The name it's been given as a page of a piece, or nothing, for a page shown by its number.
+        It goes with the page's music wherever the page goes, and is saved with it.
+    */
+    const juce::String& getName() const noexcept { return name; }
+
+    /** Gives it a name, or with an empty one, takes its name away. */
+    void setName (const juce::String&);
+
+    /** A name as it's kept: on one line, without spaces at either end, and no longer than
+        maxNameLength characters.
+    */
+    static juce::String tidyName (const juce::String&);
+
+    static constexpr int maxNameLength = 32;
 
     //==============================================================================
     /** The number of measures, which every part has. */
@@ -566,5 +582,6 @@ private:
     bool minor = false;
     int beatsPerMeasure = 4;
     double beatsPerMinute = 120.0;
+    juce::String name;
     juce::Random random;
 };

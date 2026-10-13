@@ -83,6 +83,10 @@ int Piece::copyPage (int page)
         const juce::ScopedValueSetter<bool> quietly (quiet, true);
         auto copy = createPage();
         copy->copyFrom (getPage (page));
+
+        if (const auto& name = copy->getName(); name.isNotEmpty())
+            copy->setName (name.substring (0, Score::maxNameLength - 5).trimEnd() + " copy");
+
         pages.insert (pages.begin() + copied, std::move (copy));
         captured.insert (captured.begin() + copied, std::nullopt);
 
@@ -145,6 +149,34 @@ void Piece::movePage (int from, int to)
         --current;
     else if (from > current && to <= current)
         ++current;
+
+    pagesChanged (true);
+}
+
+juce::String Piece::getPageName (int page) const
+{
+    const auto& name = getPage (page).getName();
+    return name.isNotEmpty() ? name : "Page " + juce::String (page + 1);
+}
+
+void Piece::renamePage (int page, const juce::String& newName)
+{
+    if (! juce::isPositiveAndBelow (page, getNumPages()))
+        return;
+
+    // The name it's shown by without one is no name.
+    auto name = Score::tidyName (newName);
+
+    if (name.equalsIgnoreCase ("Page " + juce::String (page + 1)))
+        name = {};
+
+    if (name == getPage (page).getName())
+        return;
+
+    {
+        const juce::ScopedValueSetter<bool> quietly (quiet, true);
+        getPage (page).setName (name);
+    }
 
     pagesChanged (true);
 }

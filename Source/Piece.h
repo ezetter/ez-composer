@@ -50,7 +50,8 @@ public:
     int addPage();
 
     /** Adds a copy of a page just after it, with all its music and settings, to be edited on its
-        own. The copy is chosen to edit. Returns its number, or -1 if there's no such page.
+        own, and named after it, with "copy" after its name, if it has one. The copy is chosen to
+        edit. Returns its number, or -1 if there's no such page.
     */
     int copyPage (int);
 
@@ -64,7 +65,17 @@ public:
     */
     void movePage (int from, int to);
 
-    /** Called after another page has been chosen to edit, or pages have been added or taken out. */
+    /** A page's name, as its tab shows it: the name it's been given, or "Page" and its number. */
+    juce::String getPageName (int) const;
+
+    /** Names a page, keeping its name wherever it moves to. With an empty name, or the one it's
+        shown by without a name, it has none, and is shown by its number again.
+    */
+    void renamePage (int, const juce::String&);
+
+    /** Called after another page has been chosen to edit, or pages have been added, taken out,
+        moved or renamed.
+    */
     std::function<void()> onPagesChanged;
 
     /** Whether a part has nothing in it, on any page. */
