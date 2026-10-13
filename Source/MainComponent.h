@@ -382,6 +382,11 @@ private:
     Recorder recorder { piece };
     juce::ApplicationCommandManager commandManager;
 
+    // Shows the tip for whatever control the pointer rests on, in this window or any other of
+    // the app's, such as the chord and effects windows
+    controls::TooltipLookAndFeel tooltipLookAndFeel;
+    juce::TooltipWindow tooltipWindow;
+
     controls::TransportButton playButton { controls::TransportButton::Symbol::play };          // a stop button while playing
     controls::TransportButton recordButton { controls::TransportButton::Symbol::record };
     controls::LoopButton loopButton;

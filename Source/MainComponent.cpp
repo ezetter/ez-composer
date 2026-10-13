@@ -193,6 +193,10 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     document.getInstrumentToSave = [this] (int part) { return tracks[(size_t) part].panel->saveToJSON(); };
     document.loadInstrument = [this] (int part, const juce::var& json) { tracks[(size_t) part].panel->loadFromJSON (json); };
 
+    // Every control has a tip, which shows when the pointer rests on it, drawn quietly.
+    tooltipWindow.setLookAndFeel (&tooltipLookAndFeel);
+    tooltipWindow.setOpaque (false);
+
     playButton.setButtonText ("Play");
     playButton.setTooltip ("Play the score, or stop it (space)");
     playButton.onClick = [this] { togglePlayback(); };
@@ -200,7 +204,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     // Record plays the score too, and writes what's played on the keyboard into the active part.
     recordButton.setButtonText ("Record");
-    recordButton.setTooltip ("Play the score, and add what's played on the keyboard to the active instrument's staves");
+    recordButton.setTooltip ("Record: play the score, and write what you play on the piano or a MIDI controller into the active instrument's staves");
     recordButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xfffbe2e0));
     recordButton.onClick = [this] { toggleRecording(); };
 
@@ -255,9 +259,8 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     // The arrows beside it step it up and down, as the up and down arrow keys do while typing in
     // it. Holding an arrow down goes on stepping, and is undone in one go.
+    // Their tips say when the tempo can't go any further.
     tempoEditor.addKeyListener (this);
-    tempoUpButton.setTooltip ("Faster");
-    tempoDownButton.setTooltip ("Slower");
 
     for (auto [button, direction] : { std::pair { &tempoUpButton, 1 }, { &tempoDownButton, -1 } })
     {
@@ -321,7 +324,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
     eraserButton.onClick = [this] { setErasing (! eraserButton.getToggleState()); };
-    editButton.setTooltip ("Edit notes: drag a note to move it, or click one to change its length or delete it");
+    editButton.setTooltip ("Edit notes: drag a note to move it, or click one to change its length, make it staccato, or delete it");
     editButton.onClick = [this] { setEditing (! editButton.getToggleState()); };
     setNoteLength (1.0);
 
@@ -407,6 +410,9 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, juce::Colour (0xff4a8fe0));
     keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, juce::Colour (0x264a8fe0));
     keyboard.onKeyClicked = [this] (int midiNote) { pianoKeyClicked (midiNote); };
+    keyboard.setTooltip ("Click or drag across the keys to play the active instrument. Once it's been clicked, the computer keyboard plays it "
+                         "too: A is middle C, with the row from A to L going up from there, and W, E, T, Y, U, O and P the black keys. "
+                         "While a chord window is open, clicking a key adds its note to the chord, or takes it out.");
 
     // A MIDI controller plays like the on-screen piano, including adding notes to a chord.
     midiInputs.onNoteOn = [this] (int midiNote) { pianoKeyClicked (midiNote); };
@@ -455,6 +461,8 @@ MainComponent::~MainComponent()
 
     for (auto* button : { &addMeasureButton, &removeMeasureButton })
         button->setLookAndFeel (nullptr);
+
+    tooltipWindow.setLookAndFeel (nullptr);
 
     tempoEditor.removeKeyListener (this);
     audioDeviceManager.removeAudioCallback (&instrumentHost);
@@ -936,7 +944,8 @@ void MainComponent::numberTracks()
     {
         tracks[index].panel->setPart ((int) index);
         tracks[index].dial->setTooltip ("Instrument " + juce::String (index + 1) + "'s volume. Drag to turn it, or click to mute or unmute.");
-        tracks[index].deleteButton->setTooltip ("Delete instrument " + juce::String (index + 1) + ", with its staves");
+        tracks[index].deleteButton->setTooltip (tracks.size() > 1 ? "Delete instrument " + juce::String (index + 1) + ", with its staves"
+                                                                  : juce::String ("The only instrument can't be deleted"));
         tracks[index].deleteButton->setEnabled (tracks.size() > 1);
         staffSystems.views[index]->followPart();
     }
@@ -1699,8 +1708,14 @@ void MainComponent::stepTempo (int direction)
 
 void MainComponent::updateTempoArrows()
 {
-    tempoUpButton.setEnabled (score.getBeatsPerMinute() < Score::maxBeatsPerMinute);
-    tempoDownButton.setEnabled (score.getBeatsPerMinute() > Score::minBeatsPerMinute);
+    const auto canGoFaster = score.getBeatsPerMinute() < Score::maxBeatsPerMinute;
+    const auto canGoSlower = score.getBeatsPerMinute() > Score::minBeatsPerMinute;
+    tempoUpButton.setEnabled (canGoFaster);
+    tempoDownButton.setEnabled (canGoSlower);
+    tempoUpButton.setTooltip (canGoFaster ? "Faster, a beat per minute at a time. Hold it down to keep going."
+                                          : "The tempo's as fast as it goes, " + formatNumber (Score::maxBeatsPerMinute) + " BPM");
+    tempoDownButton.setTooltip (canGoSlower ? "Slower, a beat per minute at a time. Hold it down to keep going."
+                                            : "The tempo's as slow as it goes, " + formatNumber (Score::minBeatsPerMinute) + " BPM");
 }
 
 void MainComponent::addMeasure()

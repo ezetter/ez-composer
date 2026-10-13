@@ -5,7 +5,8 @@
 EraserButton::EraserButton()
     : juce::Button ("Eraser")
 {
-    setTooltip ("Eraser: hold the mouse button down and move over notes, ties, dynamics and hairpins to take them out");
+    setTooltip ("Eraser: hold the mouse button down and move over the score to take out what it passes over: notes, ties, dynamics, "
+                "hairpins, pedal marks, repeat signs and endings. Click it again to stop erasing.");
     setWantsKeyboardFocus (false);
 }
 

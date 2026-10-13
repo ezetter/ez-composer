@@ -39,8 +39,8 @@ void PageTabs::setPages (int numPages, int chosen)
     for (auto* tab : tabs)
     {
         tab->setToggleState (tab->page == chosen, juce::dontSendNotification);
-        tab->setTooltip (tab->page == chosen ? juce::String ("The page you're editing. Right-click to copy or delete it.")
-                                             : "Edit page " + juce::String (tab->page + 1) + ". Right-click to copy or delete it.");
+        tab->setTooltip ((tab->page == chosen ? juce::String ("The page you're editing.") : "Edit page " + juce::String (tab->page + 1) + ".")
+                         + (numPages > 1 ? " Drag it to move the page, or right-click to copy or delete it." : " Right-click to copy it."));
     }
 
     resized();

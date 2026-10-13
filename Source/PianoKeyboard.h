@@ -6,7 +6,8 @@
 #include <map>
 
 /** The on-screen piano. It reports clicked keys, and can mark a chord's notes on its keys. */
-class PianoKeyboard final : public juce::MidiKeyboardComponent
+class PianoKeyboard final : public juce::MidiKeyboardComponent,
+                            public juce::SettableTooltipClient
 {
 public:
     explicit PianoKeyboard (juce::MidiKeyboardState&);

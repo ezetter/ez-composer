@@ -379,9 +379,13 @@ void InstrumentPanel::updateControls()
                          instrument != nullptr || isLoading ? juce::Colours::black : juce::Colours::grey);
 
     loadButton.setEnabled (! isLoading);
+    loadButton.setTooltip (isLoading ? withEllipsis ("Loading " + nameBeingLoaded)
+                                     : "Choose a VST3 instrument plugin for instrument " + juce::String (part + 1) + " to play");
     editorButton.setEnabled (instrument != nullptr && ! isLoading);
     editorButton.setButtonText (instrument != nullptr ? "Edit " + instrument->getName() : juce::String ("Edit Instrument"));
-    editorButton.setTooltip (instrument != nullptr ? "Open " + instrument->getName() + "'s own window, to choose its sounds" : juce::String());
+    editorButton.setTooltip (instrument != nullptr ? "Open " + instrument->getName() + "'s own window, to choose its sounds"
+                             : isLoading ? withEllipsis ("Loading the instrument")
+                                         : "Load an instrument first, with Load Instrument, to open its own window");
     resized();
 
     if (onStatusChanged != nullptr)

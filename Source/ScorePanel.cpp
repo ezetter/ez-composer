@@ -18,7 +18,7 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     controls::makeHeading (progressionHeading, "Progression");
 
     // The key is its tonic's letter, with Major or Minor beside it.
-    keyBox.setTooltip ("The key's tonic");
+    keyBox.setTooltip ("The key's tonic. In another key, chords follow their numerals into it, and notes keep their pitches.");
     keyBox.onChange = [this] { score.setKeyIndex (keyBox.getSelectedId() - 1); };
     controls::makeSegmented ({ &majorButton, &minorButton }, 2001);
     majorButton.setTooltip ("A major key");
@@ -37,6 +37,8 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     for (auto beats : { 2, 3, 4 })
         timeSignatureBox.addItem (juce::String (beats) + "/4", beats);
 
+    timeSignatureBox.setTooltip ("How many quarter-note beats each measure has. Notes that don't fit in shorter measures are kept, and come back "
+                                 "if they're longer again.");
     timeSignatureBox.onChange = [this] { score.setBeatsPerMeasure (timeSignatureBox.getSelectedId()); };
 
     alternateBox.addItemList ({ "None", "Root", "Octave", "Block chord", "Rolled chord" }, 1);
@@ -176,7 +178,7 @@ void ScorePanel::update()
     {
         copyChordsButton.setButtonText ("Copy Chords");
         copyChordsButton.setEnabled (false);
-        copyChordsButton.setTooltip ({});
+        copyChordsButton.setTooltip ("Add another instrument to copy instrument " + from + "'s chords to");
         progressionHint.setText ("Add another instrument to copy instrument " + from + "'s chords to", juce::dontSendNotification);
     }
     else if (score.getNumParts() == 2)
@@ -184,7 +186,8 @@ void ScorePanel::update()
         const auto to = juce::String (2 - part);
         copyChordsButton.setButtonText ("Copy Chords to Instrument " + to);
         copyChordsButton.setEnabled (score.hasChords (part));
-        copyChordsButton.setTooltip ("Give instrument " + to + " instrument " + from + "'s chords, in place of its own notes and chords");
+        copyChordsButton.setTooltip (score.hasChords (part) ? "Give instrument " + to + " instrument " + from + "'s chords, in place of its own notes and chords"
+                                                            : "Instrument " + from + " has no chords to copy yet. Add one with Add Chord, over a measure.");
         progressionHint.setText ("Replaces instrument " + to + "'s notes and chords with instrument " + from + "'s chords",
                                  juce::dontSendNotification);
     }
@@ -192,7 +195,8 @@ void ScorePanel::update()
     {
         copyChordsButton.setButtonText ("Copy Chords To" + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")));
         copyChordsButton.setEnabled (score.hasChords (part));
-        copyChordsButton.setTooltip ("Give an instrument you choose instrument " + from + "'s chords, in place of its own notes and chords");
+        copyChordsButton.setTooltip (score.hasChords (part) ? "Give an instrument you choose instrument " + from + "'s chords, in place of its own notes and chords"
+                                                            : "Instrument " + from + " has no chords to copy yet. Add one with Add Chord, over a measure.");
         progressionHint.setText ("Replaces the chosen instrument's notes and chords with instrument " + from + "'s chords",
                                  juce::dontSendNotification);
     }

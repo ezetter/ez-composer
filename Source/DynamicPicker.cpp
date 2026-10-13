@@ -7,32 +7,55 @@ namespace
     constexpr float glyphStaffSpace = 6.5f;     // the dynamics are drawn as if on a staff this size
     constexpr int gap = 3;
 
+    /** What a dynamic asks for, in plain words. */
+    juce::String getMeaning (music::Dynamic dynamic)
+    {
+        switch (dynamic)
+        {
+            case music::Dynamic::ppp: return "as softly as can be";
+            case music::Dynamic::pp:  return "very softly";
+            case music::Dynamic::p:   return "softly";
+            case music::Dynamic::mp:  return "fairly softly";
+            case music::Dynamic::mf:  return "fairly loudly";
+            case music::Dynamic::f:   return "loudly";
+            case music::Dynamic::ff:  return "very loudly";
+            case music::Dynamic::fff: return "as loudly as can be";
+        }
+
+        return {};
+    }
+
+    /** A button's tooltip: what it marks, and how to mark it. */
     juce::String describe (music::Marking marking)
     {
         if (const auto* dynamic = std::get_if<music::Dynamic> (&marking))
-            return music::getDynamicMark (*dynamic) + " (" + music::getDynamicName (*dynamic) + "): click the score to mark it, "
-                   "and the notes from there on play at velocity " + juce::String (music::getDynamicVelocity (*dynamic));
+            return music::getDynamicMark (*dynamic) + " (" + music::getDynamicName (*dynamic) + "): play " + getMeaning (*dynamic)
+                   + ". Click an instrument's staves to mark it between them; the notes from there on play at velocity "
+                   + juce::String (music::getDynamicVelocity (*dynamic)) + ". Clicking its mark again takes it out, and clicking another dynamic's replaces it.";
 
         if (std::get_if<music::Repeat> (&marking) != nullptr && std::get<music::Repeat> (marking) == music::Repeat::endings)
-            return "First and second endings: click the measure the first ending starts at, before an end repeat, or anywhere if there isn't "
-                   "one after it, when one's added at the end. A second ending's added after it, in every instrument, with the first's music "
-                   "copied in, to change as you like. Click an ending to take out both, leaving their music";
+            return "First and second endings: click the measure where the first ending starts, before an end repeat, or anywhere if "
+                   "there isn't one, and one's added at the end. A second ending goes after it in every instrument, with the first's "
+                   "music copied in to change, and is played the second time through instead. Click an ending to take out both.";
 
         if (const auto* repeat = std::get_if<music::Repeat> (&marking))
             return *repeat == music::Repeat::start
-                       ? juce::String ("Start repeat: click a measure to start a repeated passage there, in every instrument, or click one that's there to take it out")
-                       : juce::String ("End repeat: click a measure to end a repeated passage there, in every instrument, or click one that's there to take it out. "
-                                       "The first time the music gets there, it goes back to the start repeat, or the beginning");
+                       ? juce::String ("Start repeat: click a measure to start a passage to play twice there, in every instrument. "
+                                       "Click one that's there to take it out.")
+                       : juce::String ("End repeat: click a measure to end a passage to play twice there, in every instrument. The first "
+                                       "time the music gets there, it goes back to the start repeat, or the beginning. Click one that's "
+                                       "there to take it out.");
 
         if (std::holds_alternative<music::Pedal> (marking))
-            return "Pedal: click under an instrument's lower staff to put the sustain pedal down, and again to lift it. "
-                   "Clicking between where it goes down and comes up lifts it and puts it straight down again there. "
-                   "Notes are held while it's down.";
+            return "Sustain pedal: click on or under an instrument's lower staff to put the pedal down, and again to lift it. Clicking "
+                   "between where it goes down and comes up lifts it and puts it straight down again. Notes ring on while it's down.";
 
         const auto hairpin = std::get<music::Hairpin> (marking);
-        return music::getHairpinName (hairpin) + ": drag along the score to mark one, or drag the end of one to stretch it. "
-               "Each beat, the notes get " + juce::String (juce::roundToInt (music::hairpinChangePerBeat * 100.0)) + "% of the way "
-               + (hairpin == music::Hairpin::crescendo ? "to the loudest" : "to the softest");
+        return music::getHairpinName (hairpin) + (hairpin == music::Hairpin::crescendo ? ": getting louder" : ": getting softer")
+               + ". Drag along an instrument's staves to mark one, or drag the end of one to stretch it; a click marks one a beat long, "
+                 "and clicking one takes it out. Each beat, the notes get "
+               + juce::String (juce::roundToInt (music::hairpinChangePerBeat * 100.0)) + "% of the way "
+               + (hairpin == music::Hairpin::crescendo ? "to the loudest." : "to the softest.");
     }
 }
 

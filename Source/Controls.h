@@ -317,6 +317,53 @@ namespace controls
         }
     };
 
+    /** Draws tooltips as quiet notes, like the system's: plain dark text, ranged left and wrapped
+        to an easy width, on a pale panel with rounded corners and a fine outline, like the tiles
+        of the buttons over the score. The tooltip window it's for mustn't be opaque, so the
+        corners show what's behind them.
+    */
+    struct TooltipLookAndFeel final : public juce::LookAndFeel_V4
+    {
+        TooltipLookAndFeel() : LookAndFeel_V4 (getLightColourScheme()) {}
+
+        static constexpr float maxWidth = 340.0f, paddingX = 9.0f, paddingY = 6.0f;
+
+        static juce::TextLayout layOut (const juce::String& text)
+        {
+            juce::AttributedString string;
+            string.setWordWrap (juce::AttributedString::WordWrap::byWord);
+            string.setJustification (juce::Justification::topLeft);
+            string.append (text, juce::FontOptions (13.0f), juce::Colour (0xff1b1b1b));
+
+            juce::TextLayout layout;
+            layout.createLayoutWithBalancedLineLengths (string, maxWidth);
+            return layout;
+        }
+
+        juce::Rectangle<int> getTooltipBounds (const juce::String& text, juce::Point<int> screenPosition, juce::Rectangle<int> parentArea) override
+        {
+            // Below and to the right of the pointer, or above or to the left of it near the edges
+            const auto layout = layOut (text);
+            const auto width = (int) std::ceil (layout.getWidth() + 2.0f * paddingX);
+            const auto height = (int) std::ceil (layout.getHeight() + 2.0f * paddingY);
+
+            return juce::Rectangle<int> (screenPosition.x > parentArea.getCentreX() ? screenPosition.x - (width + 12) : screenPosition.x + 18,
+                                         screenPosition.y > parentArea.getCentreY() ? screenPosition.y - (height + 6) : screenPosition.y + 18,
+                                         width, height)
+                       .constrainedWithin (parentArea);
+        }
+
+        void drawTooltip (juce::Graphics& g, const juce::String& text, int width, int height) override
+        {
+            const auto bounds = juce::Rectangle<float> ((float) width, (float) height);
+            g.setColour (juce::Colour (0xfffbfbfc));
+            g.fillRoundedRectangle (bounds, 5.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.18f));
+            g.drawRoundedRectangle (bounds.reduced (0.5f), 5.0f, 1.0f);
+            layOut (text).draw (g, bounds.reduced (paddingX, paddingY));
+        }
+    };
+
     /** A combo box that says whenever an item's chosen from its menu, even the one that's already
         chosen, which onChange doesn't.
     */

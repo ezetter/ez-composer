@@ -48,6 +48,8 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     sharpButton.onClick = [this] { edit ([this] (MeasureChord& c) { c.spec.sharp = sharpButton.getToggleState(); c.spec.flat = false; c.keyboardNotes.reset(); }); };
 
     controls::makeSegmented ({ &majorButton, &minorButton }, 1001);
+    majorButton.setTooltip ("A major chord: a major 3rd and a perfect 5th over its root");
+    minorButton.setTooltip ("A minor chord: a minor 3rd and a perfect 5th over its root");
 
     for (auto* button : { &majorButton, &minorButton })
     {
@@ -78,11 +80,14 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
         });
     };
 
+    numeralBox.setTooltip (controls::fromUTF8 ("The chord, by the note of the key's scale it's built on: I on the tonic, V on the 5th, and so on, "
+                                               "named in the key, or \xe2\x80\x94 for none"));
     numeralBox.onChange = [this]
     {
         edit ([this] (MeasureChord& c) { c.spec.degree = numeralBox.getSelectedId() - 2; c.keyboardNotes.reset(); });
     };
 
+    addedNoteBox.setTooltip ("A 7th or 9th to add to the chord");
     addedNoteBox.onChange = [this]
     {
         edit ([this] (MeasureChord& c)
@@ -107,22 +112,21 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     for (size_t i = 0; i < positionButtons.size(); ++i)
     {
         positionButtons[i].setButtonText (positionNames[i]);
-        positionButtons[i].setTooltip (music::getPositionName ((int) i));
         positionButtons[i].onClick = [this, i] { edit ([i] (MeasureChord& c) { c.spec.inversion = (int) i; c.keyboardNotes.reset(); }); };
     }
 
     const std::array<juce::String, 3> octaveNames { controls::fromUTF8 ("\xe2\x86\x93 8ve"), "0", controls::fromUTF8 ("\xe2\x86\x91 8ve") };
-    const std::array<const char*, 3> octaveTooltips { "Down an octave", "Written octave", "Up an octave" };
     controls::makeSegmented ({ &octaveButtons[0], &octaveButtons[1], &octaveButtons[2] }, 1003);
 
     for (size_t i = 0; i < octaveButtons.size(); ++i)
     {
         octaveButtons[i].setButtonText (octaveNames[i]);
-        octaveButtons[i].setTooltip (octaveTooltips[i]);
         octaveButtons[i].onClick = [this, i] { edit ([i] (MeasureChord& c) { c.spec.octave = (int) i - 1; c.keyboardNotes.reset(); }); };
     }
 
     controls::makeSegmented ({ &trebleButton, &bassButton }, 1004);
+    trebleButton.setTooltip ("Write the chord on the treble staff, with the alternate staff's notes on the bass staff");
+    bassButton.setTooltip ("Write the chord on the bass staff, with the alternate staff's notes on the treble staff");
     trebleButton.onClick = [this] { edit ([] (MeasureChord& c) { c.style.staff = Staff::treble; }); };
     bassButton.onClick = [this] { edit ([] (MeasureChord& c) { c.style.staff = Staff::bass; }); };
 
@@ -160,7 +164,7 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     keyboardNotesLabel.setFont (juce::FontOptions (12.0f));
     keyboardNotesLabel.setJustificationType (juce::Justification::topLeft);
 
-    removeButton.setTooltip ("Takes the chord out of the measure");
+    doneButton.setTooltip ("Close the window (Return or Esc). Every change is in the score already.");
     removeButton.onClick = [this] { score.setChord (part, measure, std::nullopt); };
 
     // Return or Escape closes the window, as well as Done.
@@ -277,7 +281,7 @@ void ChordEditor::update()
 
     // The + / ° button makes a major chord augmented or a minor chord diminished.
     alterButton.setButtonText (spec.minor ? controls::fromUTF8 ("\xc2\xb0") : juce::String ("+"));
-    alterButton.setTooltip (spec.minor ? "Diminished" : "Augmented");
+    alterButton.setTooltip (spec.minor ? "Diminished: the minor chord with its 5th a half step lower" : "Augmented: the major chord with its 5th a half step higher");
     alterButton.setToggleState (spec.altered, juce::dontSendNotification);
 
     // Each numeral names its chord in the current key, e.g. "vi (Am)".
@@ -305,16 +309,27 @@ void ChordEditor::update()
 
     addedNoteBox.setSelectedId ((int) spec.addedNote + 1, juce::dontSendNotification);
 
+    // Each inversion's tip says which of the chord's notes is lowest, and why it can't be chosen, if it can't.
+    const std::array<const char*, 4> bassNotes { "the root", "the 3rd", "the 5th", "the 7th" };
+    const auto chooseFirst = juce::String (" (choose a chord first)");
+
     for (size_t i = 0; i < positionButtons.size(); ++i)
     {
+        const auto needsAddedNote = i == 3 && spec.addedNote == music::AddedNote::none;
         positionButtons[i].setToggleState (spec.inversion == (int) i, juce::dontSendNotification);
-        positionButtons[i].setEnabled (! spec.isEmpty() && (i < 3 || spec.addedNote != music::AddedNote::none));
+        positionButtons[i].setEnabled (! spec.isEmpty() && ! needsAddedNote);
+        positionButtons[i].setTooltip (music::getPositionName ((int) i) + ": " + bassNotes[i] + " in the bass"
+                                       + (i == 3 ? juce::String (", for a chord with a 7th or 9th added") : juce::String())
+                                       + (spec.isEmpty() ? chooseFirst : needsAddedNote ? juce::String (" (choose an added note first)") : juce::String()));
     }
+
+    const std::array<const char*, 3> octaveTips { "Down an octave", "In its usual octave", "Up an octave" };
 
     for (size_t i = 0; i < octaveButtons.size(); ++i)
     {
         octaveButtons[i].setToggleState (spec.octave == (int) i - 1, juce::dontSendNotification);
         octaveButtons[i].setEnabled (! spec.isEmpty());
+        octaveButtons[i].setTooltip (octaveTips[i] + (spec.isEmpty() ? chooseFirst : juce::String()));
     }
 
     trebleButton.setToggleState (style.staff == Staff::treble, juce::dontSendNotification);
@@ -383,6 +398,8 @@ void ChordEditor::update()
     }
 
     removeButton.setEnabled (score.getChord (part, measure) != nullptr);
+    removeButton.setTooltip (removeButton.isEnabled() ? "Take the chord out of the measure, leaving the window open for a new one"
+                                                      : "There's no chord in the measure to take out");
     resized();
 }
 

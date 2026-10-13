@@ -21,11 +21,12 @@ ScalePanel::ScalePanel (const ScaleSettings& settings)
         addAndMakeVisible (label);
     }
 
+    // Its tip first, so its buttons and box get it too, as its style makes them
+    notesSlider.setTooltip ("How many notes to add, from " + juce::String (ScaleSettings::minNotes) + " to " + juce::String (ScaleSettings::maxNotes));
     notesSlider.setSliderStyle (juce::Slider::IncDecButtons);
     notesSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 44, rowHeight);
     notesSlider.setRange (ScaleSettings::minNotes, ScaleSettings::maxNotes, 1);
     notesSlider.setValue (settings.numNotes, juce::dontSendNotification);
-    notesSlider.setTooltip ("How many notes to add, from " + juce::String (ScaleSettings::minNotes) + " to " + juce::String (ScaleSettings::maxNotes));
     addAndMakeVisible (notesSlider);
 
     for (size_t i = 0; i < noteLengths.size(); ++i)
@@ -35,6 +36,7 @@ ScalePanel::ScalePanel (const ScaleSettings& settings)
         if (noteLengths[i].first == settings.length)
             lengthBox.setSelectedId ((int) i + 1, juce::dontSendNotification);
 
+    lengthBox.setTooltip ("How long each note is, or as long as fits in what's left of its measure");
     addAndMakeVisible (lengthBox);
 
     directionBox.addItemList ({ "Ascending", "Descending" }, 1);

@@ -51,8 +51,6 @@ EffectsPanel::EffectBox::EffectBox (EffectRack& rackToUse, int busId, int index)
     removeButton.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xe2\x9c\x95")));
     editButton.setTooltip ("Open its own window, to change its settings");
     bypassButton.setTooltip ("Pass over it, as if it weren't there");
-    earlierButton.setTooltip ("Move it earlier in the chain");
-    laterButton.setTooltip ("Move it later in the chain");
     removeButton.setTooltip ("Take it out of the chain");
 
     bypassButton.setClickingTogglesState (true);
@@ -61,6 +59,8 @@ EffectsPanel::EffectBox::EffectBox (EffectRack& rackToUse, int busId, int index)
     bypassButton.setColour (juce::TextButton::textColourOnId, juce::Colour (0xff8a5a00));
     earlierButton.setEnabled (index > 0);
     laterButton.setEnabled (index < host.getNumEffects (busId) - 1);
+    earlierButton.setTooltip (earlierButton.isEnabled() ? "Move it earlier in the chain" : "It's first in the chain already");
+    laterButton.setTooltip (laterButton.isEnabled() ? "Move it later in the chain" : "It's last in the chain already");
 
     editButton.onClick = [&rackToUse, busId, index] { rackToUse.showEditor (busId, index); };
     bypassButton.onClick = [&rackToUse, busId, index, this] { rackToUse.setEffectBypassed (busId, index, bypassButton.getToggleState()); };

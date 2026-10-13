@@ -20,6 +20,8 @@ The first configure downloads JUCE 9.0.2 into `build/`.
 
 The window has a toolbar along the top, the score's settings on the left, the instruments' staves, one above the other, and the piano under them.
 
+Every control has a tip saying what it does and how to use it, which shows when the pointer rests on it for a moment: the buttons, menus and boxes in the toolbar, the sidebar and over the staves, the volume dials, the page tabs, the ruler and the piano, and those in the chord window, the scale's settings and the effects page. The annotation buttons' tips say what each mark means as well, such as **mf**'s *play fairly loudly*, and how loudly its notes play. A greyed-out control's tip says why it can't be used yet.
+
 ### Instruments
 
 The score has two instruments to start with, and can have any number. They share the key, time signature, tempo and measures, and play together in time, but each has its own notes, chords, dynamics, alternate staff and plugin. Instrument 1's staves are at the top and the others' below, in order; their measures line up, spaced to fit what's in any of them. Each instrument's name and plugin are written at its top left, e.g. "Instrument 1 · Pigments".
@@ -276,7 +278,7 @@ The **MIDI** menu lists the MIDI inputs, ticked when they're on. Choose one to t
 | `Source/EraserButton.*` | The eraser button, and the eraser the pointer becomes |
 | `Source/NoteLengthPicker.*` | The whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th and 32nd note buttons for choosing the length of the notes clicks add, and the staccato button after them, and the notes and dot drawn on them, which a note's menu shows too |
 | `Source/PianoKeyboard.*` | The on-screen piano |
-| `Source/Controls.h` | Colours and helpers shared by the controls, and the play, stop, record, loop and metronome buttons |
+| `Source/Controls.h` | Colours and helpers shared by the controls, the play, stop, record, loop and metronome buttons, and how tooltips are drawn |
 | `Source/InstrumentHost.*` | Hosts each instrument's plugin, and plays them from the piano, MIDI controllers and the score, once or looping, through the buses' chains of effects, with the metronome's clang and click, noting the keys played while recording |
 | `Source/PositionRuler.*` | The ruler along the top of the staves, with the measures and beats, for choosing where the score plays from |
 | `Source/Recorder.*` | Writes the keys played while recording into the score as notes, tied across barlines |
