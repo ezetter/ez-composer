@@ -15,6 +15,7 @@ struct StaffEvent
     std::vector<music::Tone> tones;     // empty for a rest
     bool rolled = false;
     bool centred = false;               // written in the middle of the measure rather than at its onset
+    bool staccato = false;              // played short and detached, with a dot over or under it
 
     bool isRest() const noexcept { return tones.empty(); }
 };

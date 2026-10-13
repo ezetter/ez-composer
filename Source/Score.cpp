@@ -519,12 +519,13 @@ bool Score::addNote (const Note& note)
     auto& measure = getMeasure (note.part, note.measure);
     auto& staffNotes = measure.notes[(size_t) note.staff];
     auto& lengths = measure.lengths[(size_t) note.staff];
+    auto& staccato = measure.staccato[(size_t) note.staff];
     auto& notes = staffNotes[(size_t) slot];
     const auto length = fitNoteLength (toSlot (note.length), slots - slot);
     const auto insertionPoint = std::lower_bound (notes.begin(), notes.end(), note.pitch, comesBefore);
     const auto alreadyThere = insertionPoint != notes.end() && *insertionPoint == note.pitch;
 
-    if (alreadyThere && lengths[(size_t) slot] == length)
+    if (alreadyThere && lengths[(size_t) slot] == length && staccato[(size_t) slot] == note.staccato)
         return false;
 
     // A longer note held over this point is cut short to end here, as long as a note can be.
@@ -537,10 +538,13 @@ bool Score::addNote (const Note& note)
     {
         staffNotes[(size_t) covered].clear();
         lengths[(size_t) covered] = slotsPerBeat;
+        staccato[(size_t) covered] = false;
     }
 
-    // Notes already there take the new length, as notes starting together share one.
+    // Notes already there take the new length, and are staccato or not as it is, as notes
+    // starting together share one length, and one stem to mark.
     lengths[(size_t) slot] = length;
+    staccato[(size_t) slot] = note.staccato;
 
     if (! alreadyThere)
         notes.insert (insertionPoint, note.pitch);
@@ -568,6 +572,30 @@ const std::vector<music::Pitch>& Score::getNotes (int part, Staff staff, int mea
 double Score::getNoteLength (int part, Staff staff, int measure, double beat) const
 {
     return toBeats (getMeasure (part, measure).lengths[(size_t) staff][(size_t) toSlot (beat)]);
+}
+
+bool Score::isStaccato (int part, Staff staff, int measure, double beat) const
+{
+    const auto slot = toSlot (beat);
+    return juce::isPositiveAndBelow (slot, maxSlotsPerMeasure) && getMeasure (part, measure).staccato[(size_t) staff][(size_t) slot];
+}
+
+bool Score::setStaccato (int part, Staff staff, int measure, double beat, bool shouldBeStaccato)
+{
+    const auto slot = toSlot (beat);
+
+    if (! juce::isPositiveAndBelow (slot, maxSlotsPerMeasure))
+        return false;
+
+    auto& target = getMeasure (part, measure);
+    auto& staccato = target.staccato[(size_t) staff][(size_t) slot];
+
+    if (target.notes[(size_t) staff][(size_t) slot].empty() || staccato == shouldBeStaccato)
+        return false;
+
+    staccato = shouldBeStaccato;
+    sendSynchronousChangeMessage();
+    return true;
 }
 
 //==============================================================================
@@ -673,7 +701,10 @@ bool Score::removeNotesAt (int part, Staff staff, int measure, double beat, int 
         return false;
 
     if (notes.empty())
+    {
         target.lengths[(size_t) staff][slot] = slotsPerBeat;
+        target.staccato[(size_t) staff][slot] = false;
+    }
 
     pruneTies();
 
@@ -910,6 +941,7 @@ void Score::replaceChordWithNotes (int part, int measure, const std::vector<Note
             pitches.insert (std::lower_bound (pitches.begin(), pitches.end(), note.pitch, comesBefore), note.pitch);
 
         target.lengths[(size_t) note.staff][(size_t) slot] = fitNoteLength (toSlot (note.length), getSlotsPerMeasure() - slot);
+        target.staccato[(size_t) note.staff][(size_t) slot] = note.staccato;
     }
 
     pruneTies();
@@ -1163,7 +1195,8 @@ namespace
     // 12: a minor key's chords numbered up its own scale, rather than its relative major's
     // 13: a chord's root raised
     // 14: repeat signs, and first and second endings
-    constexpr int formatVersion = 14;
+    // 15: staccato notes
+    constexpr int formatVersion = 15;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1308,6 +1341,16 @@ juce::var Score::toJSON (bool withPartIds) const
             }
 
             measureObject->setProperty (staff == Staff::treble ? "trebleTies" : "bassTies", ties);
+
+            // The 32nds whose notes are staccato, if there are any
+            juce::Array<juce::var> staccato;
+
+            for (int slot = 0; slot < maxSlotsPerMeasure; ++slot)
+                if (measure.staccato[(size_t) staff][(size_t) slot])
+                    staccato.add (slot);
+
+            if (! staccato.isEmpty())
+                measureObject->setProperty (staff == Staff::treble ? "trebleStaccato" : "bassStaccato", staccato);
         }
 
         // The dynamic marked at each 32nd, or "" for none, if there are any
@@ -1486,6 +1529,12 @@ juce::Result Score::loadJSON (const juce::var& json)
                                     std::find (notes.begin(), notes.end(), tied) != notes.end())
                                     measure.ties[(size_t) staff][slot].push_back (tied);
                 }
+
+                // Staccato, for notes that are there, in scores from version 15
+                if (const auto* staccato = item.getProperty (staff == Staff::treble ? "trebleStaccato" : "bassStaccato", {}).getArray())
+                    for (const auto& entry : *staccato)
+                        if (const auto slot = readInt (entry, 0, maxSlotsPerMeasure - 1, -1); slot >= 0 && ! measure.notes[(size_t) staff][(size_t) slot].empty())
+                            measure.staccato[(size_t) staff][(size_t) slot] = true;
             }
 
             if (const auto* dynamics = item.getProperty ("dynamics", {}).getArray())

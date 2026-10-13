@@ -227,7 +227,8 @@ namespace
                 // notes they cover, which only a damaged file could have, aren't shown.
                 const auto added = (int) std::lround (score.getNoteLength (part, staff, measure, onset) * Score::slotsPerBeat);
                 const auto length = Score::fitNoteLength (added, slots - slot);
-                StaffEvent event { onset, getDurationForBeats (beatOf (length)), {}, false, false };
+                StaffEvent event { onset, getDurationForBeats (beatOf (length)), {}, false, false,
+                                   score.isStaccato (part, staff, measure, onset) };
 
                 for (const auto& pitch : score.getNotes (part, staff, measure, onset))
                 {

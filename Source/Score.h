@@ -21,12 +21,13 @@ struct Note
     int part = 0;
     double length = 1;  // in beats: 0.125 for a 32nd note, 0.25 for a 16th, 0.5 for an eighth, 0.75 for a dotted eighth, 1 for a quarter,
                         // 1.5 for a dotted quarter, 2 for a half, 3 for a dotted half, 4 for a whole
+    bool staccato = false;  // played short and detached, with a dot over or under it
 
     bool operator== (const Note& other) const
     {
         // Beats and lengths are whole numbers of 32nd notes, so they're compared exactly.
         return staff == other.staff && measure == other.measure && juce::exactlyEqual (beat, other.beat)
-            && pitch == other.pitch && part == other.part && juce::exactlyEqual (length, other.length);
+            && pitch == other.pitch && part == other.part && juce::exactlyEqual (length, other.length) && staccato == other.staccato;
     }
 };
 
@@ -229,8 +230,8 @@ public:
         longest of a whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th
         or 32nd note that does. It takes the place
         of any notes it covers, and cuts short a longer note it starts during. The notes starting
-        together all have the same length, so they take the new one's. Returns false if the score
-        already has it, or its staff is taken by the measure's chord.
+        together all have the same length, and are all staccato or none are, so they take the new
+        one's. Returns false if the score already has it, or its staff is taken by the measure's chord.
 
         Beats are counted from 0, and notes start on them or on a 32nd note between them.
     */
@@ -245,6 +246,16 @@ public:
     double getNoteLength (int part, Staff, int measure, double beat) const;
 
     static constexpr double maxNoteLength = 4.0;
+
+    /** Whether the notes starting at a point are staccato: played short and detached, with a dot
+        over or under them. The notes starting together are all staccato, or none are.
+    */
+    bool isStaccato (int part, Staff, int measure, double beat) const;
+
+    /** Makes the notes starting at a point staccato, or not. Returns false, changing nothing, if
+        no notes start there, or they're that way already.
+    */
+    bool setStaccato (int part, Staff, int measure, double beat, bool);
 
     /** The longest note that's no longer than asked, and fits in the room there is, both in
         32nd notes: a whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th
@@ -492,10 +503,12 @@ private:
                 staffLengths.fill (slotsPerBeat);
         }
 
-        // By 32nd note: the notes starting there, how many 32nds they last, and which are tied to the next
+        // By 32nd note: the notes starting there, how many 32nds they last, which are tied to the
+        // next, and whether they're staccato
         std::array<std::array<std::vector<music::Pitch>, maxSlotsPerMeasure>, 2> notes;
         std::array<std::array<int, maxSlotsPerMeasure>, 2> lengths;
         std::array<std::array<std::vector<music::Pitch>, maxSlotsPerMeasure>, 2> ties;
+        std::array<std::array<bool, maxSlotsPerMeasure>, 2> staccato {};
         std::array<std::optional<music::Dynamic>, maxSlotsPerMeasure> dynamics;      // by 32nd note, for both staves
         std::array<std::optional<HairpinStart>, maxSlotsPerMeasure> hairpins;      // starting at each 32nd
         std::array<juce::uint8, maxSlotsPerMeasure> pedalMarks {};                 // at each 32nd: pedalUp, then pedalDown, or neither
@@ -511,6 +524,7 @@ private:
                 slot.clear();
 
             lengths[(size_t) staff].fill (slotsPerBeat);
+            staccato[(size_t) staff].fill (false);
         }
     };
 

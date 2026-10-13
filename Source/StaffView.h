@@ -17,7 +17,7 @@
     staves line up when they're stacked.
 
     Clicking the staff adds a note and clicking a note takes it out again: a note of the length
-    chosen, or on a staff with a chord's notes, a note of the chord. Both happen when the mouse is
+    chosen, staccato if that's chosen, or on a staff with a chord's notes, a note of the chord. Both happen when the mouse is
     let go without moving. Dragging from a note to the next note of the same pitch ties them, or
     unties them; dragging anywhere else does nothing. Above each measure is a button to add a
     chord to it, or edit the one it has.
@@ -53,6 +53,12 @@ public:
         and every eighth for dotted eighths; the others go on beats.
     */
     void setNoteLength (double beats);
+
+    /** Whether the notes that clicks add are staccato, whatever their length: played short and
+        detached, with a dot on the side of the notehead away from the stem. Notes added from the
+        scale are too.
+    */
+    void setStaccato (bool);
 
     /** What clicks mark, rather than adding notes, or none to go back to adding notes.
 
@@ -102,16 +108,17 @@ public:
     std::vector<Note> planMove (const Note& dragged, juce::Point<float>) const;
 
     /** The menu clicking a note while editing shows: its lengths, the ones that fit in what's left
-        of its measure, with its own ticked, and Delete.
+        of its measure, with its own ticked, Staccato, ticked if it is, and Delete.
     */
     juce::PopupMenu createNoteMenu (const Note&) const;
 
-    /** Does what was chosen from a note's menu: changes its length, along with the notes starting
-        with it, or takes it out. Nothing happens if the note's gone in the meantime.
+    /** Does what was chosen from a note's menu: changes its length, or makes it staccato or not,
+        along with the notes starting with it, or takes it out. Nothing happens if the note's gone
+        in the meantime.
     */
     void applyNoteMenuChoice (const Note&, int itemId);
 
-    static constexpr int deleteNoteItemId = 1000;   // the menu's other items are the lengths, in 32nds
+    static constexpr int deleteNoteItemId = 1000, staccatoItemId = 1001;     // the menu's other items are the lengths, in 32nds
 
     /** Called when an eraser stroke starts and finishes, so everything it takes out can be undone together. */
     std::function<void()> onEraseStarted, onEraseFinished;
@@ -279,6 +286,9 @@ private:
 
     /** A faint notehead, for a note that a click or a drag would put there. */
     void drawGhostNote (juce::Graphics&, const Note&) const;
+
+    /** A staccato dot, in the current colour, centred across on a point, on a line or space. */
+    void drawStaccatoDot (juce::Graphics&, Staff, float centreX, int staffPosition) const;
 
     /** A note being moved, where it would go. */
     void drawMoveHint (juce::Graphics&) const;
@@ -454,6 +464,7 @@ private:
     MusicGlyphs glyphs;
     bool active = false;
     double noteLength = 1.0;
+    bool staccato = false;                          // whether the notes clicks add are staccato
     std::optional<ScaleSettings> scalePlacement;    // adding notes from the scale, at the next click
     std::optional<Note> scaleHover;                 // where it would go
     juce::Random random;

@@ -27,6 +27,7 @@ namespace Smufl
     constexpr juce::juce_wchar accidentalSharp       = 0xE262;
     constexpr juce::juce_wchar accidentalDoubleSharp = 0xE263;
     constexpr juce::juce_wchar accidentalDoubleFlat  = 0xE264;
+    constexpr juce::juce_wchar articStaccatoAbove    = 0xE4A2;
     constexpr juce::juce_wchar restWhole             = 0xE4E3;
     constexpr juce::juce_wchar restHalf              = 0xE4E4;
     constexpr juce::juce_wchar restQuarter           = 0xE4E5;

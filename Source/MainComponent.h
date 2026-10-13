@@ -52,7 +52,7 @@ public:
     void getCommandInfo (juce::CommandID, juce::ApplicationCommandInfo&) override;
     bool perform (const InvocationInfo&) override;
 
-    static constexpr int minimumWidth = 1290;     // room for the note length, dynamic, pedal and repeat buttons, and Edit and the eraser
+    static constexpr int minimumWidth = 1326;     // room for the note length, staccato, dynamic, pedal and repeat buttons, and Edit and the eraser
     static constexpr int minimumHeight = 640;
 
 private:
@@ -204,6 +204,11 @@ private:
         Clicks add notes again, if they were marking a dynamic.
     */
     void setNoteLength (double beats);
+
+    /** Makes the notes that clicking the staff adds staccato, or not, whatever their length.
+        Clicks add notes again, if they were marking something or erasing.
+    */
+    void setStaccato (bool);
 
     /** Chooses a dynamic or hairpin for clicking or dragging on the score to mark, instead of
         adding notes, or none to go back to adding notes of the length chosen.

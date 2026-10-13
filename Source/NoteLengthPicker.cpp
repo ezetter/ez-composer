@@ -31,8 +31,24 @@ NoteLengthPicker::NoteLengthPicker()
         addAndMakeVisible (*button);
     }
 
+    // Staccato goes with whichever length's chosen, and stays on until it's clicked again.
+    staccatoButton.setTooltip ("Staccato: the notes you add are played short and detached, with a dot over or under them. Click again to turn it off.");
+    staccatoButton.setClickingTogglesState (true);
+    staccatoButton.setWantsKeyboardFocus (false);
+    staccatoButton.onClick = [this]
+    {
+        if (onStaccatoChange != nullptr)
+            onStaccatoChange (staccatoButton.getToggleState());
+    };
+    addAndMakeVisible (staccatoButton);
+
     setLength (1.0);
     setSize (getIdealBounds().getWidth(), getIdealBounds().getHeight());
+}
+
+void NoteLengthPicker::setStaccato (bool shouldBeStaccato)
+{
+    staccatoButton.setToggleState (shouldBeStaccato, juce::dontSendNotification);
 }
 
 void NoteLengthPicker::setLength (double beats)
@@ -49,13 +65,15 @@ void NoteLengthPicker::setChoiceShown (bool shown)
 
 juce::Rectangle<int> NoteLengthPicker::getIdealBounds() const
 {
-    return { (int) buttons.size() * buttonSize + ((int) buttons.size() - 1) * gap, buttonSize };
+    return { (int) buttons.size() * buttonSize + ((int) buttons.size() - 1) * gap + groupGap + buttonSize, buttonSize };
 }
 
 void NoteLengthPicker::resized()
 {
     for (size_t i = 0; i < buttons.size(); ++i)
         buttons[i]->setBounds ((int) i * (buttonSize + gap), 0, buttonSize, buttonSize);
+
+    staccatoButton.setBounds (buttons.back()->getRight() + groupGap, 0, buttonSize, buttonSize);
 }
 
 //==============================================================================
@@ -112,4 +130,23 @@ void NoteLengthPicker::drawNote (juce::Graphics& g, const MusicGlyphs& glyphs, d
         if (flagged)
             glyphs.draw (g, flagGlyph, { right - stemThickness, origin.y - stemLength + flagAnchor * glyphStaffSpace });
     }
+}
+
+void NoteLengthPicker::drawStaccato (juce::Graphics& g, juce::Rectangle<float> bounds)
+{
+    // Just the dot, big enough to see at a glance
+    constexpr float diameter = 5.5f;
+    g.fillEllipse (juce::Rectangle<float> (diameter, diameter).withCentre (bounds.getCentre()));
+}
+
+//==============================================================================
+NoteLengthPicker::StaccatoButton::StaccatoButton()
+    : juce::Button ("Staccato")
+{
+}
+
+void NoteLengthPicker::StaccatoButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    g.setColour (controls::drawSymbolButtonTile (g, *this, highlighted, down));
+    drawStaccato (g, getLocalBounds().toFloat().reduced (0.5f));
 }

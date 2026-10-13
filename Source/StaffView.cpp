@@ -90,6 +90,19 @@ namespace
         return music::mod (staffPosition, 2) == 0;
     }
 
+    /** Where a staccato dot goes on notes from one staff position to another, with their stem
+        up or down: on the side away from the stem, a space past the notehead at that end, but in
+        a space rather than on a line, whether it's one of the staff's or a ledger line the notes
+        need, so a dot past a note on a line goes in the space beyond the one the notehead's in.
+    */
+    int getStaccatoDotPosition (int lowest, int highest, bool stemUp)
+    {
+        const auto direction = stemUp ? -1 : 1;
+        const auto position = (stemUp ? lowest : highest) + 2 * direction;
+        const auto onLine = isLine (position) && position >= juce::jmin (0, lowest) && position <= juce::jmax (topLine, highest);
+        return onLine ? position + direction : position;
+    }
+
     bool hasStem (Duration duration)
     {
         return duration != Duration::whole;
@@ -170,7 +183,8 @@ struct StaffView::NoteLayout
         : centreX (centre),
           onset (event.onset),
           duration (event.duration),
-          headWidth (getNoteheadWidth (event.duration) * staffSpace)
+          headWidth (getNoteheadWidth (event.duration) * staffSpace),
+          staccato (event.staccato)
     {
         auto tones = event.tones;
         std::sort (tones.begin(), tones.end(), [] (const music::Tone& a, const music::Tone& b)
@@ -200,6 +214,7 @@ struct StaffView::NoteLayout
     double onset = 0.0;
     Duration duration = Duration::quarter;
     float headWidth = 0.0f;
+    bool staccato = false;
     std::vector<int> positions;                     // low to high
     std::vector<std::optional<int>> accidentals;    // the alteration to show beside each note, if any
     std::vector<int> accidentalColumns;             // which column each accidental goes in, counting leftwards
@@ -235,6 +250,12 @@ struct StaffView::NoteLayout
     {
         return stemUp ? getNormalLeft() + headWidth - stemThickness * staffSpace : getNormalLeft();
     }
+
+    /** A staccato dot's place: centred on the notehead at the end away from the stem, which is
+        never one moved across for a second, and a space past it.
+    */
+    float getStaccatoX() const   { return (stemUp ? headLefts.front() : headLefts.back()) + headWidth / 2.0f; }
+    int getStaccatoPosition() const { return getStaccatoDotPosition (positions.front(), positions.back(), stemUp); }
 
     /** The stem points away from whichever note is furthest from the middle line. */
     void chooseStemDirection()
@@ -383,6 +404,12 @@ void StaffView::setNoteLength (double beats)
     setHoverNote ({});
 }
 
+void StaffView::setStaccato (bool shouldBeStaccato)
+{
+    staccato = shouldBeStaccato;
+    setHoverNote ({});
+}
+
 void StaffView::setMarking (std::optional<music::Marking> newMarking)
 {
     marking = newMarking;
@@ -436,7 +463,7 @@ std::vector<Note> StaffView::planScale (const Note& start, juce::Random* randomT
         // The scale's notes are the key signature's.
         const auto length = Score::fitNoteLength (settings.length, slotsPerMeasure - slot);
         notes.push_back ({ start.staff, measure, (double) slot / Score::slotsPerBeat, { step, keyAlterations[(size_t) music::mod (step, 7)] },
-                           part, (double) length / Score::slotsPerBeat });
+                           part, (double) length / Score::slotsPerBeat, start.staccato });
 
         if ((slot += length) >= slotsPerMeasure)
         {
@@ -503,6 +530,9 @@ void StaffView::drawScaleHint (juce::Graphics& g) const
 
         drawLedgerLines (g, note.staff, { position }, { left }, width);
         glyphs.draw (g, getNoteheadGlyph (duration), { left, getY (note.staff, position) });
+
+        if (note.staccato)
+            drawStaccatoDot (g, note.staff, left + width / 2.0f, getStaccatoDotPosition (position, position, position < middleLine));
     }
 
     g.setColour (inkColour);
@@ -564,7 +594,8 @@ std::optional<Note> StaffView::findEditableNoteAt (juce::Point<float> point) con
             if (pitch.step == spot->pitch.step)
             {
                 found = Note { spot->staff, spot->measure, event.onset, pitch, part,
-                               score.getNoteLength (part, spot->staff, spot->measure, event.onset) };
+                               score.getNoteLength (part, spot->staff, spot->measure, event.onset),
+                               score.isStaccato (part, spot->staff, spot->measure, event.onset) };
                 nearestDistance = distance;
             }
         }
@@ -601,7 +632,8 @@ std::vector<Note> StaffView::getTiedNotes (const Note& note) const
         const auto slot = (int) std::lround (beat * Score::slotsPerBeat);
         const auto length = Score::fitNoteLength ((int) std::lround (score.getNoteLength (part, note.staff, measure, beat) * Score::slotsPerBeat),
                                                   slotsPerMeasure - slot);
-        return Note { note.staff, measure, beat, note.pitch, part, (double) length / Score::slotsPerBeat };
+        return Note { note.staff, measure, beat, note.pitch, part, (double) length / Score::slotsPerBeat,
+                      score.isStaccato (part, note.staff, measure, beat) };
     };
 
     const auto first = noteAt (note.measure, note.beat);
@@ -665,13 +697,14 @@ std::vector<Note> StaffView::planMove (const Note& dragged, juce::Point<float> p
     const auto toSlots = [&] (int measure, double beat) { return measure * slotsPerMeasure + (int) std::lround (beat * Score::slotsPerBeat); };
     const auto toLength = [] (const Note& note) { return (int) std::lround (note.length * Score::slotsPerBeat); };
     const auto shift = toSlots (target->measure, target->beat) - toSlots (dragged.measure, dragged.beat);
-    const auto noteAt = [&] (int at, int length)
+    const auto noteAt = [&] (int at, int length, bool isStaccato)
     {
         return Note { target->staff, at / slotsPerMeasure, (double) (at % slotsPerMeasure) / Score::slotsPerBeat,
-                      target->pitch, part, (double) length / Score::slotsPerBeat };
+                      target->pitch, part, (double) length / Score::slotsPerBeat, isStaccato };
     };
 
-    // Each note as far along as the dragged one goes, if they all still fit in their measures
+    // Each note as far along as the dragged one goes, staccato or not as it was, if they all
+    // still fit in their measures
     std::vector<Note> moved;
 
     for (const auto& note : chain)
@@ -684,11 +717,12 @@ std::vector<Note> StaffView::planMove (const Note& dragged, juce::Point<float> p
             break;
         }
 
-        moved.push_back (noteAt (at, toLength (note)));
+        moved.push_back (noteAt (at, toLength (note), note.staccato));
     }
 
     // Otherwise, as one note as long as all of them, from where the first lands, filling each
-    // measure up to the barline and tied over it
+    // measure up to the barline and tied over it, the last staccato if the last of them was, as
+    // it's the last of tied notes that's let go early
     if (moved.empty())
     {
         auto at = toSlots (chain.front().measure, chain.front().beat) + shift;
@@ -704,9 +738,12 @@ std::vector<Note> StaffView::planMove (const Note& dragged, juce::Point<float> p
         {
             const auto barline = (at / slotsPerMeasure + 1) * slotsPerMeasure;
             const auto length = Score::fitNoteLength (end - at, barline - at);
-            moved.push_back (noteAt (at, length));
+            moved.push_back (noteAt (at, length, false));
             at += length;
         }
+
+        if (! moved.empty())
+            moved.back().staccato = chain.back().staccato;
     }
 
     for (const auto& note : moved)
@@ -745,28 +782,43 @@ juce::PopupMenu StaffView::createNoteMenu (const Note& note) const
     const auto room = score.getBeatsPerMeasure() * Score::slotsPerBeat - (int) std::lround (note.beat * Score::slotsPerBeat);
     const auto length = (int) std::lround (note.length * Score::slotsPerBeat);
 
-    for (auto [slots, name] : { std::pair { 32, "Whole note" }, { 24, "Dotted half note" }, { 16, "Half note" },
-                                { 12, "Dotted quarter note" }, { 8, "Quarter note" }, { 6, "Dotted eighth note" },
-                                { 4, "Eighth note" }, { 2, "16th note" }, { 1, "32nd note" } })
+    // Each with what its button shows: its note, or the staccato dot
+    const auto createImage = [] (const std::function<void (juce::Graphics&, juce::Rectangle<float>)>& draw)
     {
-        // Each with its note, as on the note length buttons
         juce::Image image (juce::Image::ARGB, 2 * NoteLengthPicker::buttonSize, 2 * NoteLengthPicker::buttonSize, true);
 
         {
             juce::Graphics g (image);
             g.addTransform (juce::AffineTransform::scale (2.0f));
             g.setColour (inkColour);
-            NoteLengthPicker::drawNote (g, menuGlyphs, (double) slots / Score::slotsPerBeat,
-                                        juce::Rectangle<float> ((float) NoteLengthPicker::buttonSize, (float) NoteLengthPicker::buttonSize));
+            draw (g, juce::Rectangle<float> ((float) NoteLengthPicker::buttonSize, (float) NoteLengthPicker::buttonSize));
         }
 
+        return std::make_unique<juce::DrawableImage> (image);
+    };
+
+    for (auto [slots, name] : { std::pair { 32, "Whole note" }, { 24, "Dotted half note" }, { 16, "Half note" },
+                                { 12, "Dotted quarter note" }, { 8, "Quarter note" }, { 6, "Dotted eighth note" },
+                                { 4, "Eighth note" }, { 2, "16th note" }, { 1, "32nd note" } })
+    {
         juce::PopupMenu::Item item (name);
         item.itemID = slots;
         item.isEnabled = slots <= room;
         item.isTicked = slots == length;
-        item.image = std::make_unique<juce::DrawableImage> (image);
+        item.image = createImage ([this, beats = (double) slots / Score::slotsPerBeat] (juce::Graphics& g, juce::Rectangle<float> area)
+        {
+            NoteLengthPicker::drawNote (g, menuGlyphs, beats, area);
+        });
         menu.addItem (std::move (item));
     }
+
+    menu.addSeparator();
+
+    juce::PopupMenu::Item staccatoItem ("Staccato");
+    staccatoItem.itemID = staccatoItemId;
+    staccatoItem.isTicked = score.isStaccato (part, note.staff, note.measure, note.beat);
+    staccatoItem.image = createImage (NoteLengthPicker::drawStaccato);
+    menu.addItem (std::move (staccatoItem));
 
     menu.addSeparator();
     menu.addItem (deleteNoteItemId, "Delete");
@@ -801,10 +853,16 @@ void StaffView::applyNoteMenuChoice (const Note& note, int itemId)
     {
         score.removeNotesAt (part, note.staff, note.measure, note.beat, note.pitch.step);
     }
+    else if (itemId == staccatoItemId)
+    {
+        score.setStaccato (part, note.staff, note.measure, note.beat, ! score.isStaccato (part, note.staff, note.measure, note.beat));
+    }
     else
     {
+        // A new length, staccato or not as it is
         auto changed = note;
         changed.length = (double) itemId / Score::slotsPerBeat;
+        changed.staccato = score.isStaccato (part, note.staff, note.measure, note.beat);
         score.addNote (changed);
     }
 
@@ -960,6 +1018,16 @@ void StaffView::updateLayout()
                     lowest = juce::jmin (lowest, tone.pitch.step - getBottomLineStep (staff));
                 }
 
+                // A staccato dot goes past the notes, on the side away from the stem.
+                const auto stemUp = middleLine - lowest > highest - middleLine;
+
+                if (event.staccato)
+                {
+                    const auto dot = getStaccatoDotPosition (lowest, highest, stemUp);
+                    highest = juce::jmax (highest, dot);
+                    lowest = juce::jmin (lowest, dot);
+                }
+
                 if (melodic)
                 {
                     highest += 7;
@@ -967,7 +1035,7 @@ void StaffView::updateLayout()
                 }
                 else if (hasStem (event.duration))
                 {
-                    if (middleLine - lowest > highest - middleLine)
+                    if (stemUp)
                         highest += 7;
                     else
                         lowest -= 7;
@@ -1114,7 +1182,10 @@ std::optional<Note> StaffView::getNoteAt (juce::Point<float> point) const
     auto note = getNoteAt (point, scalePlacement.has_value() ? (double) scalePlacement->length / Score::slotsPerBeat : noteLength);
 
     if (note.has_value())
+    {
         note->length = noteLength;
+        note->staccato = staccato;
+    }
 
     return note;
 }
@@ -1807,6 +1878,21 @@ void StaffView::drawNote (juce::Graphics& g, Staff staff, const NoteLayout& note
         drawRollSign (g, leftmost - 0.25f * staffSpace,
                       getY (staff, note.positions.back()) - 0.6f * staffSpace,
                       getY (staff, note.positions.front()) + 0.6f * staffSpace);
+
+    // A staccato note's dot is the note's colour when the note's on its own, so it would go
+    // with it; with others, it stays for them.
+    if (note.staccato)
+    {
+        const auto highlighted = note.positions.size() == 1 && note.positions.front() == highlightedPosition;
+
+        if (highlighted)
+            g.setColour (highlightColour);
+
+        drawStaccatoDot (g, staff, note.getStaccatoX(), note.getStaccatoPosition());
+
+        if (highlighted)
+            g.setColour (inkColour);
+    }
 }
 
 void StaffView::drawStem (juce::Graphics& g, Staff staff, const NoteLayout& note) const
@@ -2127,7 +2213,17 @@ void StaffView::drawGhostNote (juce::Graphics& g, const Note& note) const
     if (isDotted (duration))
         glyphs.draw (g, Smufl::augmentationDot, { left + width + 0.35f * staffSpace, getY (note.staff, isLine (position) ? position + 1 : position) });
 
+    // A staccato note has its dot away from where its stem would be.
+    if (note.staccato)
+        drawStaccatoDot (g, note.staff, left + width / 2.0f, getStaccatoDotPosition (position, position, position < middleLine));
+
     g.setColour (inkColour);
+}
+
+void StaffView::drawStaccatoDot (juce::Graphics& g, Staff staff, float centreX, int staffPosition) const
+{
+    const auto bounds = glyphs.getPath (Smufl::articStaccatoAbove).getBounds();
+    glyphs.draw (g, Smufl::articStaccatoAbove, { centreX - bounds.getCentreX(), getY (staff, staffPosition) - bounds.getCentreY() });
 }
 
 void StaffView::drawMoveHint (juce::Graphics& g) const
@@ -2941,7 +3037,7 @@ void StaffView::writeOutRandomChordWithout (int measure, Staff staff, double bea
         for (const auto& event : content.staves[(size_t) writtenStaff].events)
             for (const auto& tone : event.tones)
                 if (! (writtenStaff == staff && juce::exactlyEqual (event.onset, beat) && tone.midi == midi))
-                    notes.push_back ({ writtenStaff, measure, event.onset, tone.pitch, part, getBeats (event.duration) });
+                    notes.push_back ({ writtenStaff, measure, event.onset, tone.pitch, part, getBeats (event.duration), event.staccato });
 
     score.replaceChordWithNotes (part, measure, notes);
 }

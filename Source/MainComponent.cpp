@@ -316,8 +316,9 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
         button->setColour (juce::TextButton::textColourOffId, controls::accent);
         button->setWantsKeyboardFocus (false);
     }
-    // Note lengths for clicking into the staff, quarter notes to start with, or dynamics and hairpins to mark
+    // Note lengths for clicking into the staff, quarter notes to start with, staccato or not, or dynamics and hairpins to mark
     noteLengthPicker.onChange = [this] (double beats) { setNoteLength (beats); };
+    noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
     eraserButton.onClick = [this] { setErasing (! eraserButton.getToggleState()); };
     editButton.setTooltip ("Edit notes: drag a note to move it, or click one to change its length or delete it");
@@ -858,6 +859,7 @@ void MainComponent::insertTrack (int index, bool reloadFromSettings)
 
     // It does what clicks on the other parts do.
     view.setNoteLength (noteLengthPicker.getLength());
+    view.setStaccato (noteLengthPicker.isStaccato());
 
     if (eraserButton.getToggleState())
         view.setErasing (true);
@@ -1073,6 +1075,17 @@ void MainComponent::setNoteLength (double beats)
         view->setNoteLength (beats);
         view->setMarking ({});
     }
+}
+
+void MainComponent::setStaccato (bool staccato)
+{
+    noteLengthPicker.setStaccato (staccato);
+
+    for (auto& view : staffSystems.views)
+        view->setStaccato (staccato);
+
+    // Back to adding notes, with the length chosen
+    setNoteLength (noteLengthPicker.getLength());
 }
 
 void MainComponent::setMarking (std::optional<music::Marking> marking)

@@ -19,6 +19,10 @@ namespace
     constexpr double blockChordSpread = 0.012;
     constexpr double rolledChordSpread = 0.06;
 
+    // A staccato note sounds for half its written length, as notation programs play one, and is
+    // silent for the rest, so it's detached from the note after it.
+    constexpr double staccatoProportion = 0.5;
+
 
     /** A note sounding from one time to another, in seconds. */
     struct Sounding
@@ -641,7 +645,8 @@ std::vector<InstrumentHost::NoteEvent> InstrumentHost::createNoteEvents (const S
             {
                 // Every note is held for exactly as long as it's written: a beat for a quarter note,
                 // four for a whole note, whatever wrote it. A chord written as a whole note lasts
-                // the measure because that's how long a whole note is in 4/4.
+                // the measure because that's how long a whole note is in 4/4. Only a staccato note
+                // is let go sooner.
                 const auto onset = start + event.onset * beatSeconds;
                 const auto end = onset + getBeats (event.duration) * beatSeconds;
 
@@ -680,9 +685,18 @@ std::vector<InstrumentHost::NoteEvent> InstrumentHost::createNoteEvents (const S
                     const auto& tied = staff.tiedNotes;
 
                     if (std::any_of (tied.begin(), tied.end(), [&] (const auto& t) { return juce::exactlyEqual (t.first, event.onset) && t.second == tone.pitch; }))
+                    {
                         tiedOn[key] = index;
-                    else
-                        tiedOn.erase (key);
+                        continue;
+                    }
+
+                    tiedOn.erase (key);
+
+                    // A staccato note is let go part of the way through. Tied to the next, it's
+                    // held on into that instead, and it's the last of the tied notes that says
+                    // whether they're let go early.
+                    if (event.staccato)
+                        soundings[index].end = onset + staccatoProportion * (end - onset);
                 }
             }
         }
