@@ -128,7 +128,7 @@ EffectsPanel::BusCard::BusCard (EffectRack& rackToUse, int busIdToShow, int plac
 
     // On to the main output, or a bus after it, so nothing goes round in a loop
     fillOutputs (output, host, place + 1, host.getBusOutput (busId));
-    output.setTooltip ("Where what comes out of this bus's effects goes: the main output, or another bus after it, to go through its effects too");
+    output.setTooltip ("Where this bus goes next: the main output, or another bus after it, to go through its effects too");
     output.onChange = [&rackToUse, this] { rackToUse.setBusOutput (busId, output.getSelectedId() - 1); };
     addAndMakeVisible (output);
 

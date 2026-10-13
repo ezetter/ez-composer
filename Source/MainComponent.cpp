@@ -410,9 +410,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, juce::Colour (0xff4a8fe0));
     keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, juce::Colour (0x264a8fe0));
     keyboard.onKeyClicked = [this] (int midiNote) { pianoKeyClicked (midiNote); };
-    keyboard.setTooltip ("Click or drag across the keys to play the active instrument. Once it's been clicked, the computer keyboard plays it "
-                         "too: A is middle C, with the row from A to L going up from there, and W, E, T, Y, U, O and P the black keys. "
-                         "While a chord window is open, clicking a key adds its note to the chord, or takes it out.");
+    keyboard.setTooltip ("Click or drag to play the active instrument. Once it's clicked, the computer's A to L keys play it too, from middle C.");
 
     // A MIDI controller plays like the on-screen piano, including adding notes to a chord.
     midiInputs.onNoteOn = [this] (int midiNote) { pianoKeyClicked (midiNote); };

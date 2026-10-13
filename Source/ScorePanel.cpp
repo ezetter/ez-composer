@@ -38,8 +38,7 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     for (auto beats : { 2, 3, 4 })
         timeSignatureBox.addItem (juce::String (beats) + "/4", beats);
 
-    timeSignatureBox.setTooltip ("How many quarter-note beats each measure has. Notes that don't fit in shorter measures are kept, and come back "
-                                 "if they're longer again.");
+    timeSignatureBox.setTooltip ("How many beats each measure has. Notes past a shorter measure's end are kept, and come back if it grows.");
     timeSignatureBox.onChange = [this] { score.setBeatsPerMeasure (timeSignatureBox.getSelectedId()); };
 
     alternateBox.addItemList ({ "None", "Root", "Octave", "Block chord", "Rolled chord" }, 1);

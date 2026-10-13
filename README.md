@@ -20,7 +20,7 @@ The first configure downloads JUCE 9.0.2 into `build/`.
 
 The window has a toolbar along the top, the score's settings on the left, the instruments' staves, one above the other, and the piano under them.
 
-Every control has a tip saying what it does and how to use it, which shows when the pointer rests on it for a moment: the buttons, menus and boxes in the toolbar, the sidebar and over the staves, the volume dials, the page tabs, the ruler and the piano, and those in the chord window, the scale's settings and the effects page. The annotation buttons' tips say what each mark means as well, such as **mf**'s *play fairly loudly*, and how loudly its notes play. A greyed-out control's tip says why it can't be used yet.
+Every control has a short tip, two lines at most, saying what it does and how to use it, which shows when the pointer rests on it for a moment: the buttons, menus and boxes in the toolbar, the sidebar and over the staves, the volume dials, the page tabs, the ruler and the piano, and those in the chord window, the scale's settings and the effects page. The annotation buttons' tips say what each mark means as well, such as **mf**'s *fairly loud*, and the velocity its notes play at. A greyed-out control's tip says why it can't be used yet.
 
 ### Instruments
 

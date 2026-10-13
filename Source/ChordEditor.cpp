@@ -80,8 +80,8 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
         });
     };
 
-    numeralBox.setTooltip (controls::fromUTF8 ("The chord, by the note of the key's scale it's built on: I on the tonic, V on the 5th, and so on, "
-                                               "named in the key, or \xe2\x80\x94 for none"));
+    numeralBox.setTooltip (controls::fromUTF8 ("The chord, by the note of the scale it's built on: I on the tonic, V on the 5th, and so on, "
+                                               "or \xe2\x80\x94 for none"));
     numeralBox.onChange = [this]
     {
         edit ([this] (MeasureChord& c) { c.spec.degree = numeralBox.getSelectedId() - 2; c.keyboardNotes.reset(); });
@@ -144,8 +144,7 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     for (size_t i = 0; i < noteLengths.size(); ++i)
         noteLengthBox.addItem (noteLengths[i].second, (int) i + 1);
 
-    noteLengthBox.setTooltip ("How long the chord's notes are: a block or rolled chord is played again in notes this long until the measure's full, "
-                              "and an arpeggio or Random chord plays a note this long at a time");
+    noteLengthBox.setTooltip ("How long the chord's notes are: block and rolled chords play again in them, the others a note at a time");
     noteLengthBox.onChange = [this]
     {
         if (const auto index = noteLengthBox.getSelectedId() - 1; juce::isPositiveAndBelow (index, (int) noteLengths.size()))
