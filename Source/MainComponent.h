@@ -165,6 +165,11 @@ private:
     using juce::Component::keyPressed;
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
 
+    /** Clicking something that doesn't take the keyboard focus, such as Play or the staves, leaves
+        the focus where it was, rather than giving it to the first control that would take it.
+    */
+    std::unique_ptr<juce::ComponentTraverser> createKeyboardFocusTraverser() override;
+
 
     /** Makes a part the active one: the keyboard plays its instrument, and the toolbar and the
         sidebar's alternate staff show and set its.

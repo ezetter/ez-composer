@@ -611,9 +611,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         return true;
     }
 
-    // The space bar plays, or pauses what's playing, unless it's being typed into the tempo,
-    // which hears it first. A box being typed in otherwise keeps it for itself.
-    if (key == juce::KeyPress::spaceKey && originatingComponent != &tempoEditor)
+    // The space bar plays, or pauses what's playing, even while the tempo's being typed, which
+    // can't have a space in it. A box that can, such as a page's name, keeps it for itself.
+    if (key == juce::KeyPress::spaceKey)
     {
         if (instrumentHost.getPlaybackPosition().has_value())
             pausePlayback();
@@ -636,6 +636,18 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
     }
 
     return false;
+}
+
+std::unique_ptr<juce::ComponentTraverser> MainComponent::createKeyboardFocusTraverser()
+{
+    // Otherwise a click on Play or the staves, with nothing focused, gives the focus to the
+    // tempo, which keeps the space bar and the keys that play the piano for itself.
+    struct Traverser final : public juce::KeyboardFocusTraverser
+    {
+        juce::Component* getDefaultComponent (juce::Component*) override { return nullptr; }
+    };
+
+    return std::make_unique<Traverser>();
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
