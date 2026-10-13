@@ -208,9 +208,23 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     recordButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xfffbe2e0));
     recordButton.onClick = [this] { toggleRecording(); };
 
+    // Beside Record, back to the start of the page, and back or on a measure, playing or stopped
+    backButton.setButtonText ("Back to Start");
+    backButton.setTooltip ("Back to the start of the page you're on, playing or stopped");
+    backButton.onClick = [this] { goToPageStart(); };
+    rewindButton.setButtonText ("Rewind");
+    rewindButton.setTooltip ("Rewind: back to the start of the measure before, playing or stopped");
+    rewindButton.onClick = [this] { stepMeasure (-1); };
+    fastForwardButton.setButtonText ("Fast Forward");
+    fastForwardButton.setTooltip ("Fast forward: on to the start of the next measure, playing or stopped");
+    fastForwardButton.onClick = [this] { stepMeasure (1); };
+
     // Loop is remembered from one run of the app to the next.
     playButton.setConnectedEdges (juce::Button::ConnectedOnRight);
-    recordButton.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+
+    for (auto* button : { &recordButton, &backButton, &rewindButton, &fastForwardButton })
+        button->setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+
     loopButton.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
     loopButton.setClickingTogglesState (true);
     loopButton.setToggleState (settings.getBoolValue (loopKey), juce::dontSendNotification);
@@ -280,12 +294,11 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     // Clicking a button shouldn't take the keyboard focus away from the piano, which the
     // computer keyboard can play too.
-    playButton.setWantsKeyboardFocus (false);
-    recordButton.setWantsKeyboardFocus (false);
-    loopButton.setWantsKeyboardFocus (false);
-    metronomeButton.setWantsKeyboardFocus (false);
+    for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &backButton, &rewindButton, &fastForwardButton, &loopButton, &metronomeButton })
+        button->setWantsKeyboardFocus (false);
 
-    for (auto* component : std::initializer_list<juce::Component*> { &playButton, &recordButton, &loopButton, &playModeButton, &metronomeButton, &tempoLabel, &tempoEditor, &partBox })
+    for (auto* component : std::initializer_list<juce::Component*> { &playButton, &recordButton, &backButton, &rewindButton, &fastForwardButton, &loopButton,
+                                                                     &playModeButton, &metronomeButton, &tempoLabel, &tempoEditor, &partBox })
         addAndMakeVisible (component);
 
     staffSystems.onAddPart = [this] { addPart(); };
@@ -507,6 +520,10 @@ void MainComponent::resized()
     auto toolbar = bounds.removeFromTop (toolbarHeight).reduced (12, 8);
     playButton.setBounds (toolbar.removeFromLeft (46));
     recordButton.setBounds (toolbar.removeFromLeft (46));
+
+    for (auto* button : { &backButton, &rewindButton, &fastForwardButton })
+        button->setBounds (toolbar.removeFromLeft (40));
+
     loopButton.setBounds (toolbar.removeFromLeft (44));
     playModeButton.setBounds (toolbar.removeFromLeft (56));
     metronomeButton.setBounds (toolbar.removeFromLeft (44));
@@ -1552,23 +1569,113 @@ void MainComponent::choosePlaybackStart (int beat)
     const auto page = piece.getCurrentPage();
     playbackStarts[(size_t) page] = beat;
 
-    if (const auto position = instrumentHost.getPlaybackPosition())
+    if (instrumentHost.getPlaybackPosition().has_value())
     {
         if (const auto played = toPlayedBeats (page, beat))
         {
-            // Keys held while recording end where it jumps from.
-            if (instrumentHost.isRecording())
-            {
-                recordPlayedKeys();
-                const auto at = toWrittenPosition (*position);
-                recorder.finish (at.has_value() ? std::optional (std::pair { at->page, at->playedBeat }) : std::nullopt);
-            }
-
-            instrumentHost.jumpTo (*played);
+            jumpPlayback (*played);
             lastPlayingPage = page;
         }
     }
 
+    showPlaybackPosition();
+}
+
+void MainComponent::jumpPlayback (double playedBeats)
+{
+    const auto position = instrumentHost.getPlaybackPosition();
+
+    if (! position.has_value())
+        return;
+
+    // Keys held while recording end where it jumps from.
+    if (instrumentHost.isRecording())
+    {
+        recordPlayedKeys();
+        const auto at = toWrittenPosition (*position);
+        recorder.finish (at.has_value() ? std::optional (std::pair { at->page, at->playedBeat }) : std::nullopt);
+    }
+
+    instrumentHost.jumpTo (playedBeats);
+}
+
+void MainComponent::goToPageStart()
+{
+    const auto page = piece.getCurrentPage();
+
+    // Playing, it carries on from the start of the page, and stopped, the page plays from there.
+    if (instrumentHost.getPlaybackPosition().has_value())
+    {
+        jumpPlayback (toPlayedBeats (page, 0.0).value_or (0.0));
+        lastPlayingPage = page;
+    }
+    else
+    {
+        playbackStarts[(size_t) page] = 0.0;
+        scrollToMeasure (0);
+    }
+
+    showPlaybackPosition();
+}
+
+void MainComponent::stepMeasure (int direction)
+{
+    // Playing, it jumps to the start of the measure before or after the one playing, as they're played.
+    if (const auto played = instrumentHost.getPlaybackPosition())
+    {
+        if (playedMeasures.empty())
+            return;
+
+        const auto after = std::upper_bound (playedMeasures.begin(), playedMeasures.end(), *played,
+                                             [] (double beat, const PlayedMeasure& measure) { return beat < measure.start; });
+        const auto count = (int) playedMeasures.size();
+        auto index = juce::jmax (0, (int) std::distance (playedMeasures.begin(), after) - 1) + direction;
+
+        // Looping, it goes round from one end to the other; otherwise there's nothing after the last.
+        if (loopButton.getToggleState())
+            index = music::mod (index, count);
+        else if (index >= count)
+            return;
+
+        jumpPlayback (playedMeasures[(size_t) juce::jmax (0, index)].start);
+        showPlaybackPosition();
+        return;
+    }
+
+    // Stopped, the page plays from the start of the measure before or after the one it plays
+    // from, or past either end of it, with Piece, from the next page's start, or the last measure
+    // of the one before.
+    auto page = piece.getCurrentPage();
+    const auto& written = piece.getPage (page);
+    const auto measure = juce::jlimit (0, written.getNumMeasures() - 1,
+                                       (int) std::floor (playbackStarts[(size_t) page] / written.getBeatsPerMeasure() + 1.0e-9)) + direction;
+    auto start = (double) (measure * written.getBeatsPerMeasure());
+
+    if (measure >= written.getNumMeasures())
+    {
+        if (! isPlayingWholePiece() || page + 1 >= piece.getNumPages())
+            return;
+
+        ++page;
+        start = 0.0;
+    }
+    else if (measure < 0)
+    {
+        start = 0.0;
+
+        if (isPlayingWholePiece() && page > 0)
+        {
+            const auto& previous = piece.getPage (--page);
+            start = (double) ((previous.getNumMeasures() - 1) * previous.getBeatsPerMeasure());
+        }
+    }
+
+    playbackStarts[(size_t) page] = start;
+
+    if (page != piece.getCurrentPage())
+        piece.choosePage (page);
+
+    scrollToMeasure ((int) (start / piece.getPage (page).getBeatsPerMeasure()));
     showPlaybackPosition();
 }
 

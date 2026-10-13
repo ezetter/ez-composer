@@ -259,6 +259,22 @@ private:
     /** Chooses the beat the page plays from, counted from its start, jumping there if it's playing. */
     void choosePlaybackStart (int beat);
 
+    /** Goes back to the start of the page being edited: playing, it carries on from there, and
+        stopped, the page plays from there.
+    */
+    void goToPageStart();
+
+    /** Goes back a measure, or on one, to the start of the measure before the one it's at, or the
+        one after. Playing, it jumps there, through the measures as they're played, on from one
+        page to the next with Piece, and round from one end to the other when looping. Stopped,
+        the page plays from there; with Piece, from the start of the next page, or the last
+        measure of the one before, past either end of the page.
+    */
+    void stepMeasure (int direction);
+
+    /** While playing, jumps to a beat of what's played, the keys held while recording ending where it jumps from. */
+    void jumpPlayback (double playedBeats);
+
     /** Whether Play plays every page, one after another, or just the page being edited. */
     bool isPlayingWholePiece() const noexcept { return playWholePiece; }
     void setPlayingWholePiece (bool);
@@ -389,6 +405,9 @@ private:
 
     controls::TransportButton playButton { controls::TransportButton::Symbol::play };          // a stop button while playing
     controls::TransportButton recordButton { controls::TransportButton::Symbol::record };
+    controls::TransportButton backButton { controls::TransportButton::Symbol::toStart };          // beside it: back to the start of the page,
+    controls::TransportButton rewindButton { controls::TransportButton::Symbol::rewind };         // back a measure,
+    controls::TransportButton fastForwardButton { controls::TransportButton::Symbol::fastForward };     // and on a measure
     controls::LoopButton loopButton;
     juce::TextButton playModeButton;    // beside Loop: Piece, to play every page, or Page, just the one being edited
     bool playWholePiece = true;

@@ -414,7 +414,11 @@ namespace controls
     */
     struct TransportButton final : public juce::TextButton
     {
-        enum class Symbol { play, stop, record };
+        /** Play, a green arrow; Stop, a black square; Record, a red circle; and the usual dark
+            symbols for going back to the start, a bar and an arrow pointing to it, rewinding, two
+            arrows pointing back, and fast forwarding, two pointing on.
+        */
+        enum class Symbol { play, stop, record, toStart, rewind, fastForward };
 
         explicit TransportButton (Symbol initialSymbol) : symbol (initialSymbol) {}
 
@@ -450,10 +454,36 @@ namespace controls
                 g.setColour (juce::Colour (0xff1b1b1b));
                 g.fillRoundedRectangle (juce::Rectangle<float> (size * 0.85f, size * 0.85f).withCentre (centre), 1.5f);
             }
-            else
+            else if (symbol == Symbol::record)
             {
                 g.setColour (juce::Colour (0xffd8413a));
                 g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (centre));
+            }
+            else
+            {
+                // Arrows side by side, pointing back or on, and for going back to the start, a bar
+                // before an arrow pointing back to it, all centred together
+                const auto height = size * 0.9f, width = height * 0.72f, barWidth = 2.2f;
+                const auto backwards = symbol != Symbol::fastForward;
+                const auto arrows = symbol == Symbol::toStart ? 1 : 2;
+                const auto total = (float) arrows * width + (symbol == Symbol::toStart ? barWidth + 0.8f : 0.0f);
+                auto left = centre.x - total / 2.0f;
+                juce::Path shape;
+
+                if (symbol == Symbol::toStart)
+                {
+                    shape.addRectangle (left, centre.y - height / 2.0f, barWidth, height);
+                    left += barWidth + 0.8f;
+                }
+
+                for (int i = 0; i < arrows; ++i, left += width)
+                    shape.addTriangle (backwards ? left + width : left, centre.y - height / 2.0f,
+                                       backwards ? left + width : left, centre.y + height / 2.0f,
+                                       backwards ? left : left + width, centre.y);
+
+                g.setColour (juce::Colour (0xff3a3d44));
+                g.fillPath (shape);
+                g.strokePath (shape, juce::PathStrokeType (1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             }
         }
 
