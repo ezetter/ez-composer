@@ -198,9 +198,13 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     tooltipWindow.setOpaque (false);
 
     playButton.setButtonText ("Play");
-    playButton.setTooltip ("Play the score, or stop it (space)");
     playButton.onClick = [this] { togglePlayback(); };
     playButton.addShortcut (juce::KeyPress (juce::KeyPress::spaceKey));
+
+    // Pause stops where it's got to, to carry on from there, where Stop goes back to the beginning.
+    pauseButton.setButtonText ("Pause");
+    pauseButton.onClick = [this] { pausePlayback(); };
+    updateTransportButtons();
 
     // Record plays the score too, and writes what's played on the keyboard into the active part.
     recordButton.setButtonText ("Record");
@@ -222,7 +226,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     // Loop is remembered from one run of the app to the next.
     playButton.setConnectedEdges (juce::Button::ConnectedOnRight);
 
-    for (auto* button : { &recordButton, &backButton, &rewindButton, &fastForwardButton })
+    for (auto* button : { &pauseButton, &recordButton, &backButton, &rewindButton, &fastForwardButton })
         button->setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
 
     loopButton.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
@@ -294,11 +298,12 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     // Clicking a button shouldn't take the keyboard focus away from the piano, which the
     // computer keyboard can play too.
-    for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &backButton, &rewindButton, &fastForwardButton, &loopButton, &metronomeButton })
+    for (auto* button : std::initializer_list<juce::Button*> { &playButton, &pauseButton, &recordButton, &backButton, &rewindButton, &fastForwardButton,
+                                                               &loopButton, &metronomeButton })
         button->setWantsKeyboardFocus (false);
 
-    for (auto* component : std::initializer_list<juce::Component*> { &playButton, &recordButton, &backButton, &rewindButton, &fastForwardButton, &loopButton,
-                                                                     &playModeButton, &metronomeButton, &tempoLabel, &tempoEditor, &partBox })
+    for (auto* component : std::initializer_list<juce::Component*> { &playButton, &pauseButton, &recordButton, &backButton, &rewindButton, &fastForwardButton,
+                                                                     &loopButton, &playModeButton, &metronomeButton, &tempoLabel, &tempoEditor, &partBox })
         addAndMakeVisible (component);
 
     staffSystems.onAddPart = [this] { addPart(); };
@@ -519,6 +524,7 @@ void MainComponent::resized()
 
     auto toolbar = bounds.removeFromTop (toolbarHeight).reduced (12, 8);
     playButton.setBounds (toolbar.removeFromLeft (46));
+    pauseButton.setBounds (toolbar.removeFromLeft (40));
     recordButton.setBounds (toolbar.removeFromLeft (46));
 
     for (auto* button : { &backButton, &rewindButton, &fastForwardButton })
@@ -684,7 +690,9 @@ void MainComponent::pagesChanged()
 
     if (switched)
     {
-        // A chord being edited is on the page that was being edited, and the new page is shown from its start.
+        // A chord being edited is on the page that was being edited, and the new page is shown
+        // from its start. Another page plays from where it plays from, not where one was paused.
+        pausedAt.reset();
         closeChordEditor();
         staffViewport.setViewPosition (0, staffViewport.getViewPositionY());
 
@@ -1420,7 +1428,10 @@ void MainComponent::togglePlayback()
         if (instrumentHost.isRecording())
             finishRecording (position);
 
+        // Stopping, it's back to the beginning.
         instrumentHost.stop();
+        stopTimer();
+        returnToBeginning();
         showPlaybackPosition();
     }
     else
@@ -1435,8 +1446,92 @@ void MainComponent::startPlaying()
     updatePerformance();
     const auto page = piece.getCurrentPage();
     lastPlayingPage = page;
-    instrumentHost.play (getPerformancePages(), loopButton.getToggleState(), toPlayedBeats (page, playbackStarts[(size_t) page]).value_or (0.0));
-    startTimerHz (30);
+
+    // From where it was paused, the same time through, if it's still played, or else from where the page plays from
+    auto from = toPlayedBeats (page, playbackStarts[(size_t) page]).value_or (0.0);
+
+    if (pausedAt.has_value() && pausedAt->page == page)
+        if (const auto resumed = findPausedBeat (*pausedAt))
+            from = *resumed;
+
+    pausedAt.reset();
+    instrumentHost.play (getPerformancePages(), loopButton.getToggleState(), from);
+
+    // Followed as it plays, if it does, which it doesn't without the audio running
+    if (instrumentHost.getPlaybackPosition().has_value())
+        startTimerHz (30);
+}
+
+void MainComponent::pausePlayback()
+{
+    const auto played = instrumentHost.getPlaybackPosition();
+
+    if (! played.has_value() || playedMeasures.empty())
+        return;
+
+    if (instrumentHost.isRecording())
+        finishRecording (played);
+
+    instrumentHost.stop();
+    stopTimer();
+
+    // Where it's got to: the measure as it's played, how many times it's been played before, and how far into it
+    const auto after = std::upper_bound (playedMeasures.begin(), playedMeasures.end(), *played,
+                                         [] (double beat, const PlayedMeasure& measure) { return beat < measure.start; });
+    const auto index = (size_t) juce::jmax (0, (int) std::distance (playedMeasures.begin(), after) - 1);
+    const auto measure = playedMeasures[index];
+    const auto timesBefore = std::count_if (playedMeasures.begin(), playedMeasures.begin() + (std::ptrdiff_t) index,
+                                            [&measure] (const PlayedMeasure& m) { return m.page == measure.page && m.measure == measure.measure; });
+    const auto beatsIn = juce::jlimit (0.0, (double) measure.beatsPerMeasure, *played - measure.start);
+
+    // The page it's paused on is shown, with its marker where it's paused, to play on from there.
+    if (measure.page != piece.getCurrentPage())
+        piece.choosePage (measure.page);
+
+    playbackStarts[(size_t) measure.page] = measure.measure * measure.beatsPerMeasure + beatsIn;
+    pausedAt = PausedPosition { measure.page, measure.measure, (int) timesBefore, beatsIn };
+    showPlaybackPosition();
+}
+
+std::optional<double> MainComponent::findPausedBeat (const PausedPosition& paused) const
+{
+    auto times = 0;
+
+    for (const auto& measure : playedMeasures)
+    {
+        if (measure.page != paused.page || measure.measure != paused.measure)
+            continue;
+
+        if (times++ == paused.timesBefore)
+            return measure.start + juce::jmin (paused.beatsIn, (double) measure.beatsPerMeasure);
+    }
+
+    return {};
+}
+
+void MainComponent::updateTransportButtons()
+{
+    const auto playing = instrumentHost.getPlaybackPosition().has_value();
+    playButton.setButtonText (playing ? "Stop" : "Play");
+    playButton.setSymbol (playing ? controls::TransportButton::Symbol::stop : controls::TransportButton::Symbol::play);
+    playButton.setTooltip (playing ? "Stop, and go back to the beginning (space)" : "Play from the ruler's marker (space)");
+
+    // Only what's playing can be paused.
+    pauseButton.setEnabled (playing);
+    pauseButton.setTooltip (playing ? "Pause: stop where it's got to, and carry on from there with Play"
+                                    : "Pause, while it plays: it stops where it's got to, for Play to carry on from there");
+}
+
+void MainComponent::returnToBeginning()
+{
+    // Every page plays from its start, and with Piece, it's back to the first page.
+    pausedAt.reset();
+    std::fill (playbackStarts.begin(), playbackStarts.end(), 0.0);
+
+    if (isPlayingWholePiece() && piece.getCurrentPage() != 0)
+        piece.choosePage (0);
+
+    scrollToMeasure (0);
 }
 
 void MainComponent::setPlayingWholePiece (bool whole)
@@ -1568,6 +1663,7 @@ void MainComponent::choosePlaybackStart (int beat)
 {
     const auto page = piece.getCurrentPage();
     playbackStarts[(size_t) page] = beat;
+    pausedAt.reset();
 
     if (instrumentHost.getPlaybackPosition().has_value())
     {
@@ -1612,6 +1708,7 @@ void MainComponent::goToPageStart()
     else
     {
         playbackStarts[(size_t) page] = 0.0;
+        pausedAt.reset();
         scrollToMeasure (0);
     }
 
@@ -1671,6 +1768,7 @@ void MainComponent::stepMeasure (int direction)
     }
 
     playbackStarts[(size_t) page] = start;
+    pausedAt.reset();
 
     if (page != piece.getCurrentPage())
         piece.choosePage (page);
@@ -1732,6 +1830,17 @@ void MainComponent::finishRecording (std::optional<double> playedBeats)
 void MainComponent::showPlaybackPosition()
 {
     const auto played = instrumentHost.getPlaybackPosition();
+
+    // Having just played to the end, by itself, it's back to the beginning, as stopping goes.
+    if (! played.has_value() && isTimerRunning())
+    {
+        if (instrumentHost.isRecording())
+            finishRecording ({});
+
+        stopTimer();
+        returnToBeginning();
+    }
+
     const auto at = played.has_value() ? toWrittenPosition (*played) : std::nullopt;
 
     // When the music goes on to another page, the page being edited goes with it, if it was the
@@ -1748,8 +1857,7 @@ void MainComponent::showPlaybackPosition()
         }
     }
 
-    playButton.setButtonText (played.has_value() ? "Stop" : "Play");
-    playButton.setSymbol (played.has_value() ? controls::TransportButton::Symbol::stop : controls::TransportButton::Symbol::play);
+    updateTransportButtons();
 
     // Shown where it is in the page as it's written, if it's playing the page being edited
     const auto position = at.has_value() && at->page == piece.getCurrentPage() ? std::optional (at->beat) : std::nullopt;
@@ -2080,6 +2188,7 @@ void MainComponent::scoreReplaced()
     history.clear();
     instrumentHost.stop();
     playbackStarts.assign ((size_t) piece.getNumPages(), 0.0);
+    pausedAt.reset();
     lastPlayingPage = -1;
     showPlaybackPosition();
     closeChordEditor();

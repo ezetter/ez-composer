@@ -259,6 +259,19 @@ private:
     /** Chooses the beat the page plays from, counted from its start, jumping there if it's playing. */
     void choosePlaybackStart (int beat);
 
+    /** Stops playing where it's got to, as Pause does, so it carries on from there, the same
+        time through, when it plays again: the page it's on is shown, its marker there.
+    */
+    void pausePlayback();
+
+    /** Back to the beginning, as stopping goes, of the piece with Piece, the first page shown, or
+        of the page with Page: every page plays from its start again.
+    */
+    void returnToBeginning();
+
+    /** Shows Play as Stop while it's playing, and Pause greyed out unless it is, with their tips. */
+    void updateTransportButtons();
+
     /** Goes back to the start of the page being edited: playing, it carries on from there, and
         stopped, the page plays from there.
     */
@@ -303,6 +316,18 @@ private:
     };
 
     std::optional<WrittenPosition> toWrittenPosition (double playedBeats) const;
+
+    /** Where playback was paused: the page and measure, as written, how many times the measure
+        had been played before, and how far into it it had got.
+    */
+    struct PausedPosition
+    {
+        int page, measure, timesBefore;
+        double beatsIn;
+    };
+
+    /** Where it was paused in what's played now, if it's still played that many times. */
+    std::optional<double> findPausedBeat (const PausedPosition&) const;
 
     /** Where a beat of a page as it's written is first played, if the page is being played. */
     std::optional<double> toPlayedBeats (int page, double writtenBeats) const;
@@ -404,6 +429,7 @@ private:
     juce::TooltipWindow tooltipWindow;
 
     controls::TransportButton playButton { controls::TransportButton::Symbol::play };          // a stop button while playing
+    controls::TransportButton pauseButton { controls::TransportButton::Symbol::pause };        // beside it, greyed out unless it's playing
     controls::TransportButton recordButton { controls::TransportButton::Symbol::record };
     controls::TransportButton backButton { controls::TransportButton::Symbol::toStart };          // beside it: back to the start of the page,
     controls::TransportButton rewindButton { controls::TransportButton::Symbol::rewind };         // back a measure,
@@ -428,6 +454,7 @@ private:
     PageTabs pageTabs;                  // along the top of the staves, a tab for each page
     PositionRuler positionRuler { score };     // under them, for choosing where the page plays from
     std::vector<double> playbackStarts { 0.0 };     // where Play and Record start on each page, in beats from its start
+    std::optional<PausedPosition> pausedAt;          // where it was paused, until it plays again or the marker moves
 
     controls::DialLookAndFeel dialLookAndFeel;
     NoteLengthPicker noteLengthPicker;  // at the top left of the score, over the staves: the length of the notes that clicks add

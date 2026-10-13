@@ -415,10 +415,11 @@ namespace controls
     struct TransportButton final : public juce::TextButton
     {
         /** Play, a green arrow; Stop, a black square; Record, a red circle; and the usual dark
-            symbols for going back to the start, a bar and an arrow pointing to it, rewinding, two
-            arrows pointing back, and fast forwarding, two pointing on.
+            symbols for pausing, two bars side by side, going back to the start, a bar and an arrow
+            pointing to it, rewinding, two arrows pointing back, and fast forwarding, two pointing
+            on. Greyed out, they're faint.
         */
-        enum class Symbol { play, stop, record, toStart, rewind, fastForward };
+        enum class Symbol { play, stop, record, pause, toStart, rewind, fastForward };
 
         explicit TransportButton (Symbol initialSymbol) : symbol (initialSymbol) {}
 
@@ -437,6 +438,7 @@ namespace controls
 
             const auto size = (float) getHeight() * 0.42f;
             const auto centre = getLocalBounds().toFloat().getCentre();
+            const auto ink = [this] (juce::Colour colour) { return isEnabled() ? colour : colour.withMultipliedAlpha (0.3f); };
 
             if (symbol == Symbol::play)
             {
@@ -445,19 +447,28 @@ namespace controls
                 const auto height = size * 1.05f, width = height * 0.88f;
                 const auto left = centre.x - width * 0.42f;
                 triangle.addTriangle (left, centre.y - height / 2.0f, left, centre.y + height / 2.0f, left + width, centre.y);
-                g.setColour (juce::Colour (0xff2e9e4f));
+                g.setColour (ink (juce::Colour (0xff2e9e4f)));
                 g.fillPath (triangle);
                 g.strokePath (triangle, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             }
             else if (symbol == Symbol::stop)
             {
-                g.setColour (juce::Colour (0xff1b1b1b));
+                g.setColour (ink (juce::Colour (0xff1b1b1b)));
                 g.fillRoundedRectangle (juce::Rectangle<float> (size * 0.85f, size * 0.85f).withCentre (centre), 1.5f);
             }
             else if (symbol == Symbol::record)
             {
-                g.setColour (juce::Colour (0xffd8413a));
+                g.setColour (ink (juce::Colour (0xffd8413a)));
                 g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (centre));
+            }
+            else if (symbol == Symbol::pause)
+            {
+                // Two upright bars, a little apart
+                const auto height = size * 0.92f, barWidth = size * 0.27f, gap = size * 0.24f;
+                g.setColour (ink (juce::Colour (0xff3a3d44)));
+
+                for (const auto left : { centre.x - gap / 2.0f - barWidth, centre.x + gap / 2.0f })
+                    g.fillRoundedRectangle (left, centre.y - height / 2.0f, barWidth, height, 1.0f);
             }
             else
             {
@@ -481,7 +492,7 @@ namespace controls
                                        backwards ? left + width : left, centre.y + height / 2.0f,
                                        backwards ? left : left + width, centre.y);
 
-                g.setColour (juce::Colour (0xff3a3d44));
+                g.setColour (ink (juce::Colour (0xff3a3d44)));
                 g.fillPath (shape);
                 g.strokePath (shape, juce::PathStrokeType (1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             }
