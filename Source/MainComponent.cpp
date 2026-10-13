@@ -199,7 +199,6 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     playButton.setButtonText ("Play");
     playButton.onClick = [this] { togglePlayback(); };
-    playButton.addShortcut (juce::KeyPress (juce::KeyPress::spaceKey));
 
     // Pause stops where it's got to, to carry on from there, where Stop goes back to the beginning.
     pauseButton.setButtonText ("Pause");
@@ -609,6 +608,18 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
     if (originatingComponent == &tempoEditor && (key == juce::KeyPress::upKey || key == juce::KeyPress::downKey))
     {
         stepTempo (key == juce::KeyPress::upKey ? 1 : -1);
+        return true;
+    }
+
+    // The space bar plays, or pauses what's playing, unless it's being typed into the tempo,
+    // which hears it first. A box being typed in otherwise keeps it for itself.
+    if (key == juce::KeyPress::spaceKey && originatingComponent != &tempoEditor)
+    {
+        if (instrumentHost.getPlaybackPosition().has_value())
+            pausePlayback();
+        else
+            togglePlayback();
+
         return true;
     }
 
@@ -1514,11 +1525,11 @@ void MainComponent::updateTransportButtons()
     const auto playing = instrumentHost.getPlaybackPosition().has_value();
     playButton.setButtonText (playing ? "Stop" : "Play");
     playButton.setSymbol (playing ? controls::TransportButton::Symbol::stop : controls::TransportButton::Symbol::play);
-    playButton.setTooltip (playing ? "Stop, and go back to the beginning (space)" : "Play from the ruler's marker (space)");
+    playButton.setTooltip (playing ? "Stop, and go back to the beginning" : "Play from the ruler's marker (space)");
 
-    // Only what's playing can be paused.
+    // Only what's playing can be paused, which the space bar does too.
     pauseButton.setEnabled (playing);
-    pauseButton.setTooltip (playing ? "Pause: stop where it's got to, and carry on from there with Play"
+    pauseButton.setTooltip (playing ? "Pause: stop where it's got to, and carry on from there with Play (space)"
                                     : "Pause, while it plays: it stops where it's got to, for Play to carry on from there");
 }
 
