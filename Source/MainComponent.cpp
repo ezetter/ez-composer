@@ -8,6 +8,7 @@
 namespace
 {
     constexpr int toolbarHeight = 44;
+    constexpr int toolbarGap = 6;               // either side of MP3, which stands apart from the buttons for playing
     constexpr int sidebarWidth = 280;
     constexpr int sidebarPadding = 14;
     constexpr int keyboardHeight = 140;
@@ -242,14 +243,13 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     // Piece plays every page, one after another, and Page just the one being edited. Loop goes
     // back to the start of whichever it is. It's remembered too.
-    playModeButton.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+    playModeButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
     playModeButton.setWantsKeyboardFocus (false);
     playModeButton.onClick = [this] { setPlayingWholePiece (! isPlayingWholePiece()); };
     setPlayingWholePiece (settings.getBoolValue (playWholePieceKey, true));
 
     // MP3 writes what's heard as the score plays to a sound file, saved as an MP3 when it stops.
     // It's not remembered, as each playback while it's on asks where to save what was heard.
-    mp3Button.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
     mp3Button.setClickingTogglesState (true);
     mp3Button.setWantsKeyboardFocus (false);
     mp3Button.setColour (juce::TextButton::buttonOnColourId, controls::accentLight);
@@ -260,7 +260,6 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     // The metronome ticks each beat as the score plays or records, and is remembered too.
     metronomeButton.setButtonText ("Metronome");
-    metronomeButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
     metronomeButton.setClickingTogglesState (true);
     metronomeButton.setToggleState (settings.getBoolValue (metronomeKey), juce::dontSendNotification);
     metronomeButton.setColour (juce::TextButton::buttonOnColourId, controls::accentLight);
@@ -550,7 +549,9 @@ void MainComponent::resized()
 
     loopButton.setBounds (toolbar.removeFromLeft (44));
     playModeButton.setBounds (toolbar.removeFromLeft (56));
+    toolbar.removeFromLeft (toolbarGap);
     mp3Button.setBounds (toolbar.removeFromLeft (44));
+    toolbar.removeFromLeft (toolbarGap);
     metronomeButton.setBounds (toolbar.removeFromLeft (44));
     toolbar.removeFromLeft (16);
     tempoLabel.setBounds (toolbar.removeFromLeft (34));
