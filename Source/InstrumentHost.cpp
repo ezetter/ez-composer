@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 
 namespace
@@ -934,8 +935,114 @@ void InstrumentHost::audioDeviceIOCallbackWithContext (const float* const*, int,
 
     processBuses (output, numSamples);
 
+    // What's heard is written as it is, before the metronome's added.
+    writeSoundFile (output, numSamples);
     addMetronome (output, numSamples);
     advancePlayback();
+}
+
+//==============================================================================
+bool InstrumentHost::startSoundFile (const juce::File& wav)
+{
+    const auto rate = getRunningSampleRate();
+
+    if (rate <= 0.0 || isWritingSoundFile())
+        return false;
+
+    wav.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (wav);
+
+    if (! static_cast<juce::FileOutputStream*> (stream.get())->openedOk())
+        return false;
+
+    auto writer = juce::WavAudioFormat().createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (rate)
+                                                                                                  .withNumChannels (2)
+                                                                                                  .withBitsPerSample (24));
+
+    if (writer == nullptr)
+        return false;
+
+    // A few seconds' room, while the thread writes it out
+    soundFileThread.startThread();
+    auto threaded = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer.release(), soundFileThread, (int) (rate * 4));
+
+    const juce::ScopedLock sl (lock);
+    soundFileWriter = std::move (threaded);
+    soundFile = wav;
+    dyingAwaySamples = std::numeric_limits<int64_t>::max() / 2;     // nothing to die away until it's played
+    quietSamples = 0;
+    soundFileState = SoundFileState::writing;
+    return true;
+}
+
+bool InstrumentHost::isWritingSoundFile() const
+{
+    return soundFileState != SoundFileState::none;
+}
+
+void InstrumentHost::finishSoundFileWhenQuiet()
+{
+    auto writing = SoundFileState::writing;
+    soundFileState.compare_exchange_strong (writing, SoundFileState::finishing);
+}
+
+juce::File InstrumentHost::closeSoundFile()
+{
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
+    juce::File file;
+
+    {
+        const juce::ScopedLock sl (lock);
+        writer = std::move (soundFileWriter);
+        file = std::exchange (soundFile, juce::File());
+        soundFileState = SoundFileState::none;
+    }
+
+    // Outside the lock, as the last of it's written out, and the file closed
+    writer = nullptr;
+    return file;
+}
+
+void InstrumentHost::writeSoundFile (const juce::AudioBuffer<float>& output, int numSamples)
+{
+    const auto state = soundFileState.load();
+
+    if (soundFileWriter == nullptr || state == SoundFileState::none || state == SoundFileState::finished)
+        return;
+
+    // Both channels, or the one twice
+    const float* channels[2] { output.getReadPointer (0), output.getReadPointer (juce::jmin (1, output.getNumChannels() - 1)) };
+
+    // Finished while it plays, it ends here.
+    if (playing && state == SoundFileState::finishing)
+    {
+        soundFileState = SoundFileState::finished;
+        return;
+    }
+
+    // Playing, everything's written.
+    if (playing)
+    {
+        soundFileWriter->write (channels, numSamples);
+        dyingAwaySamples = 0;
+        quietSamples = 0;
+        return;
+    }
+
+    // Stopped or paused, the sound dying away, until it's been quiet a moment, or long enough
+    const auto rate = sampleRate > 0.0 ? sampleRate : 48000.0;
+
+    if (dyingAwaySamples < (int64_t) (maxDyingAwaySeconds * rate) && quietSamples < (int64_t) (quietSeconds * rate))
+    {
+        soundFileWriter->write (channels, numSamples);
+        dyingAwaySamples += numSamples;
+        const auto quiet = output.getMagnitude (0, numSamples) < juce::Decibels::decibelsToGain (quietDecibels);
+        quietSamples = quiet ? quietSamples + numSamples : 0;
+        return;
+    }
+
+    if (state == SoundFileState::finishing)
+        soundFileState = SoundFileState::finished;
 }
 
 void InstrumentHost::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)

@@ -3,6 +3,7 @@
 #include "Score.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <array>
@@ -175,6 +176,35 @@ public:
     /** The keys played while recording since this was last called, in the order they were played. */
     std::vector<RecordedKey> takeRecordedKeys();
 
+    //==============================================================================
+    /** Starts writing what's heard as the score plays to a WAV file, in stereo, at the sample rate
+        the audio's running at: the instruments and their effects, as they come out of the
+        speakers, and the notes played on the keyboard, but not the metronome. While it's stopped
+        or paused, nothing's written, but for the sound dying away each time it stops. Returns
+        false if the audio isn't running, or the file can't be written.
+    */
+    bool startSoundFile (const juce::File& wav);
+
+    /** Whether a sound file's being written, or has been and is waiting to be closed. */
+    bool isWritingSoundFile() const;
+
+    /** Has the sound file finished once what's heard has died away, with the score stopped, or
+        straight away, if it's playing.
+    */
+    void finishSoundFileWhenQuiet();
+
+    /** Whether the sound file's finished, all that's going in it written, ready to be closed. */
+    bool isSoundFileFinished() const noexcept { return soundFileState == SoundFileState::finished; }
+
+    /** Closes the sound file, finished or not, with everything written to it so far, and returns it. */
+    juce::File closeSoundFile();
+
+    /** How long the sound dying away after it stops goes on at most, and how long it has to have
+        been quiet for, in seconds, and how quiet that is, in decibels.
+    */
+    static constexpr double maxDyingAwaySeconds = 5.0, quietSeconds = 0.3;
+    static constexpr float quietDecibels = -70.0f;
+
     void prepareToPlay (double sampleRate, int maximumBlockSize);
     void releaseResources();
 
@@ -271,6 +301,11 @@ private:
     void startMetronomeSound (bool downbeat, int delay);
     void addMetronome (juce::AudioBuffer<float>& output, int numSamples);
 
+    /** Writes what's heard to the sound file, if there is one, as it should be. */
+    void writeSoundFile (const juce::AudioBuffer<float>& output, int numSamples);
+
+    enum class SoundFileState { none, writing, finishing, finished };
+
     juce::Optional<PositionInfo> getPosition() const override;
 
     /** Where playback is, in beats from the start of the score, a number of samples into the block being played. */
@@ -345,6 +380,14 @@ private:
     bool releaseScoreNotes = false;     // whether the score's notes that are sounding need turning off
 
     std::atomic<double> playbackPosition { -1.0 };    // negative when stopped
+
+    // What's heard, as it's written to a file, on a thread of its own, and how far the sound
+    // dying away has got since it stopped, and how long it's been quiet
+    juce::TimeSliceThread soundFileThread { "Sound file" };
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> soundFileWriter;
+    juce::File soundFile;
+    std::atomic<SoundFileState> soundFileState { SoundFileState::none };
+    int64_t dyingAwaySamples = 0, quietSamples = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (InstrumentHost)
 };

@@ -277,6 +277,39 @@ private:
     /** Shows Play as Stop while it's playing, and Pause greyed out unless it is, with their tips. */
     void updateTransportButtons();
 
+    //==============================================================================
+    /** Turns MP3 on or off: while it's on, what's heard as the score plays is written to a sound
+        file, which is saved as an MP3 once it stops. On, it needs LAME, and without it, says how
+        to install it, and stays off. Turned off while it's writing one, that one finishes there.
+    */
+    void setMakingMP3 (bool);
+    bool isMakingMP3() const noexcept { return mp3Button.getToggleState(); }
+
+    /** Starts writing what's heard to a sound file, if MP3 is on and it's playing, unless one's being written already. */
+    void startSoundFileIfWanted();
+
+    /** Finishes the sound file being written, once what's heard has died away, and then offers to save it. */
+    void finishSoundFile();
+    void waitForSoundFile (int tries);
+
+    /** Called with each sound file of what was heard, a WAV, once the playback it's of has
+        stopped. To start with, it asks where to save it as an MP3.
+    */
+    std::function<void (const juce::File& wav)> onSoundFileReady;
+
+    /** Asks where to save a sound file as an MP3, one at a time, as they come. Cancelled, it's thrown away. */
+    void chooseWhereToSaveMP3 (const juce::File& wav);
+    void showNextMP3Dialog();
+
+    /** Makes an MP3 of a sound file with LAME, on a thread of its own, then deletes the sound
+        file, and says so if it couldn't. Calls back on the message thread with whether it did.
+    */
+    void saveMP3 (const juce::File& wav, const juce::File& mp3, std::function<void (bool saved)> onSaved = {});
+
+    /** LAME, as Homebrew installs it or on the path, if it's installed, or else a file that doesn't exist. */
+    static juce::File findLame();
+    juce::File getLame();
+
     /** Goes back to the start of the page being edited: playing, it carries on from there, and
         stopped, the page plays from there.
     */
@@ -428,6 +461,13 @@ private:
     Recorder recorder { piece };
     juce::ApplicationCommandManager commandManager;
 
+    // Sound files of what was heard, waiting to be saved as MP3s, the dialog asking where, and
+    // LAME, which makes them, on a thread of its own
+    std::vector<juce::File> soundFilesToSave;
+    std::unique_ptr<juce::FileChooser> mp3Chooser;
+    juce::File lameExecutable;
+    juce::ThreadPool mp3Encoder { juce::ThreadPoolOptions{}.withThreadName ("MP3").withNumberOfThreads (1) };
+
     // Shows the tip for whatever control the pointer rests on, in this window or any other of
     // the app's, such as the chord and effects windows
     controls::TooltipLookAndFeel tooltipLookAndFeel;
@@ -442,6 +482,7 @@ private:
     controls::LoopButton loopButton;
     juce::TextButton playModeButton;    // beside Loop: Piece, to play every page, or Page, just the one being edited
     bool playWholePiece = true;
+    juce::TextButton mp3Button { "MP3" };           // beside it: writing what's heard as it plays to an MP3
     controls::MetronomeButton metronomeButton;     // beside them
     juce::Label tempoLabel;
     juce::TextEditor tempoEditor;

@@ -247,6 +247,17 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     playModeButton.onClick = [this] { setPlayingWholePiece (! isPlayingWholePiece()); };
     setPlayingWholePiece (settings.getBoolValue (playWholePieceKey, true));
 
+    // MP3 writes what's heard as the score plays to a sound file, saved as an MP3 when it stops.
+    // It's not remembered, as each playback while it's on asks where to save what was heard.
+    mp3Button.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+    mp3Button.setClickingTogglesState (true);
+    mp3Button.setWantsKeyboardFocus (false);
+    mp3Button.setColour (juce::TextButton::buttonOnColourId, controls::accentLight);
+    mp3Button.setColour (juce::TextButton::textColourOnId, controls::accent);
+    mp3Button.setTooltip ("MP3: record what's heard as the score plays, to save as an MP3 when it stops");
+    mp3Button.onClick = [this] { setMakingMP3 (mp3Button.getToggleState()); };
+    onSoundFileReady = [this] (const juce::File& wav) { chooseWhereToSaveMP3 (wav); };
+
     // The metronome ticks each beat as the score plays or records, and is remembered too.
     metronomeButton.setButtonText ("Metronome");
     metronomeButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
@@ -302,7 +313,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
         button->setWantsKeyboardFocus (false);
 
     for (auto* component : std::initializer_list<juce::Component*> { &playButton, &pauseButton, &recordButton, &backButton, &rewindButton, &fastForwardButton,
-                                                                     &loopButton, &playModeButton, &metronomeButton, &tempoLabel, &tempoEditor, &partBox })
+                                                                     &loopButton, &playModeButton, &mp3Button, &metronomeButton, &tempoLabel, &tempoEditor, &partBox })
         addAndMakeVisible (component);
 
     staffSystems.onAddPart = [this] { addPart(); };
@@ -482,6 +493,14 @@ MainComponent::~MainComponent()
 
     tempoEditor.removeKeyListener (this);
     audioDeviceManager.removeAudioCallback (&instrumentHost);
+
+    // What was heard and hasn't been saved as an MP3 goes.
+    mp3Chooser = nullptr;
+    instrumentHost.closeSoundFile().deleteFile();
+
+    for (const auto& wav : soundFilesToSave)
+        wav.deleteFile();
+
     piece.removeChangeListener (this);
     document.removeChangeListener (this);
 
@@ -531,6 +550,7 @@ void MainComponent::resized()
 
     loopButton.setBounds (toolbar.removeFromLeft (44));
     playModeButton.setBounds (toolbar.removeFromLeft (56));
+    mp3Button.setBounds (toolbar.removeFromLeft (44));
     metronomeButton.setBounds (toolbar.removeFromLeft (44));
     toolbar.removeFromLeft (16);
     tempoLabel.setBounds (toolbar.removeFromLeft (34));
@@ -1483,6 +1503,8 @@ void MainComponent::startPlaying()
     // Followed as it plays, if it does, which it doesn't without the audio running
     if (instrumentHost.getPlaybackPosition().has_value())
         startTimerHz (30);
+
+    startSoundFileIfWanted();
 }
 
 void MainComponent::pausePlayback()
@@ -1545,8 +1567,192 @@ void MainComponent::updateTransportButtons()
                                     : "Pause, while it plays: it stops where it's got to, for Play to carry on from there");
 }
 
+void MainComponent::setMakingMP3 (bool shouldMake)
+{
+    // MP3s are made with LAME, which has to be installed.
+    if (shouldMake && ! getLame().existsAsFile())
+    {
+        mp3Button.setToggleState (false, juce::dontSendNotification);
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                          .withIconType (juce::MessageBoxIconType::InfoIcon)
+                                          .withTitle ("MP3 needs LAME")
+                                          .withMessage ("MP3 files are made with LAME, a free MP3 encoder, which isn't installed. "
+                                                        "To install it with Homebrew, run this in Terminal, then turn MP3 on again:\n\n"
+                                                        "brew install lame")
+                                          .withButton ("OK")
+                                          .withAssociatedComponent (this),
+                                      [] (int) {});
+        return;
+    }
+
+    mp3Button.setToggleState (shouldMake, juce::dontSendNotification);
+
+    if (shouldMake)
+        startSoundFileIfWanted();
+    else
+        finishSoundFile();
+}
+
+void MainComponent::startSoundFileIfWanted()
+{
+    if (! isMakingMP3() || ! instrumentHost.getPlaybackPosition().has_value() || instrumentHost.isWritingSoundFile())
+        return;
+
+    const auto wav = juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("Anthropocene Music playback", ".wav");
+
+    if (! instrumentHost.startSoundFile (wav))
+        wav.deleteFile();
+}
+
+void MainComponent::finishSoundFile()
+{
+    if (! instrumentHost.isWritingSoundFile())
+        return;
+
+    instrumentHost.finishSoundFileWhenQuiet();
+    waitForSoundFile (0);
+}
+
+void MainComponent::waitForSoundFile (int tries)
+{
+    // Once what's heard has died away, or if the audio's stopped, after long enough for it to have
+    constexpr int tryEvery = 100;
+    const auto giveUpAfter = (int) ((InstrumentHost::maxDyingAwaySeconds + 3.0) * 1000.0) / tryEvery;
+
+    if (instrumentHost.isSoundFileFinished() || tries >= giveUpAfter)
+    {
+        if (const auto wav = instrumentHost.closeSoundFile(); wav.existsAsFile() && onSoundFileReady != nullptr)
+            onSoundFileReady (wav);
+
+        // Playing again while it died away, what's heard now goes in a file of its own.
+        startSoundFileIfWanted();
+        return;
+    }
+
+    juce::Timer::callAfterDelay (tryEvery, [safeThis = juce::Component::SafePointer (this), tries]
+    {
+        if (safeThis != nullptr)
+            safeThis->waitForSoundFile (tries + 1);
+    });
+}
+
+void MainComponent::chooseWhereToSaveMP3 (const juce::File& wav)
+{
+    soundFilesToSave.push_back (wav);
+
+    if (mp3Chooser == nullptr)
+        showNextMP3Dialog();
+}
+
+void MainComponent::showNextMP3Dialog()
+{
+    if (soundFilesToSave.empty())
+        return;
+
+    // Named after the score, beside it if it's been saved, or in Music
+    const auto wav = soundFilesToSave.front();
+    const auto scoreFile = document.getFile();
+    const auto suggested = scoreFile.existsAsFile() ? scoreFile.withFileExtension (".mp3")
+                                                    : juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                                                          .getChildFile (document.getDocumentTitle()).withFileExtension (".mp3");
+
+    mp3Chooser = std::make_unique<juce::FileChooser> ("Save the playback as an MP3", suggested, "*.mp3");
+    mp3Chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                                 | juce::FileBrowserComponent::warnAboutOverwriting,
+                             [this, wav] (const juce::FileChooser& chooser)
+                             {
+                                 const auto chosen = chooser.getResult();
+
+                                 if (chosen == juce::File())
+                                     wav.deleteFile();
+                                 else
+                                     saveMP3 (wav, chosen.hasFileExtension ("mp3") ? chosen : chosen.withFileExtension (".mp3"));
+
+                                 // The next, if there is one, once this dialog's gone
+                                 juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer (this)]
+                                 {
+                                     if (safeThis == nullptr)
+                                         return;
+
+                                     safeThis->mp3Chooser.reset();
+
+                                     if (! safeThis->soundFilesToSave.empty())
+                                         safeThis->soundFilesToSave.erase (safeThis->soundFilesToSave.begin());
+
+                                     safeThis->showNextMP3Dialog();
+                                 });
+                             });
+}
+
+void MainComponent::saveMP3 (const juce::File& wav, const juce::File& mp3, std::function<void (bool)> onSaved)
+{
+    const auto lame = getLame();
+    const auto title = document.getDocumentTitle();
+
+    mp3Encoder.addJob ([safeThis = juce::Component::SafePointer (this), lame, wav, mp3, title, onSaved]
+    {
+        // Variable bit rate, quality 2, about 190 kbps, near enough to the sound itself
+        juce::ChildProcess lameProcess;
+        juce::String output;
+        auto saved = false;
+
+        if (lame.existsAsFile()
+            && lameProcess.start (juce::StringArray { lame.getFullPathName(), "--quiet", "-V", "2", "--tt", title,
+                                                      wav.getFullPathName(), mp3.getFullPathName() }))
+        {
+            output = lameProcess.readAllProcessOutput();
+            lameProcess.waitForProcessToFinish (-1);
+            saved = lameProcess.getExitCode() == 0 && mp3.getSize() > 0;
+        }
+
+        wav.deleteFile();
+
+        juce::MessageManager::callAsync ([safeThis, saved, mp3, output, onSaved]
+        {
+            if (onSaved != nullptr)
+                onSaved (saved);
+
+            if (! saved && safeThis != nullptr)
+                juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                  .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                  .withTitle ("Couldn't save the MP3")
+                                                  .withMessage ("LAME couldn't make " + mp3.getFileName() + "."
+                                                                + (output.trim().isNotEmpty() ? "\n\n" + output.trim() : juce::String()))
+                                                  .withButton ("OK")
+                                                  .withAssociatedComponent (safeThis.getComponent()),
+                                              [] (int) {});
+        });
+    });
+}
+
+juce::File MainComponent::findLame()
+{
+    // Where Homebrew puts it, on Apple silicon or Intel, or anywhere on the path, which an app
+    // opened from the Finder may not have Homebrew's folders in
+    juce::StringArray folders { "/opt/homebrew/bin", "/usr/local/bin" };
+    folders.addTokens (juce::SystemStats::getEnvironmentVariable ("PATH", {}), ":", {});
+
+    for (const auto& folder : folders)
+        if (const auto lame = juce::File (folder).getChildFile ("lame"); folder.isNotEmpty() && lame.existsAsFile())
+            return lame;
+
+    return {};
+}
+
+juce::File MainComponent::getLame()
+{
+    // Found when it's first needed, which may be after it's been installed
+    if (! lameExecutable.existsAsFile())
+        lameExecutable = findLame();
+
+    return lameExecutable;
+}
+
 void MainComponent::returnToBeginning()
 {
+    // What was heard, if it's being written, is finished, to be saved.
+    finishSoundFile();
+
     // Every page plays from its start, and with Piece, it's back to the first page.
     pausedAt.reset();
     std::fill (playbackStarts.begin(), playbackStarts.end(), 0.0);
