@@ -302,6 +302,74 @@ void Score::cloneMeasures()
     sendSynchronousChangeMessage();
 }
 
+bool Score::removeMeasures (int first, int count)
+{
+    const auto numMeasures = getNumMeasures();
+
+    if (count <= 0 || first < 0 || first + count > numMeasures || count >= numMeasures)
+        return false;
+
+    for (auto& part : parts)
+        part.measures.erase (part.measures.begin() + first, part.measures.begin() + first + count);
+
+    repeats.erase (repeats.begin() + first, repeats.begin() + first + count);
+    tidyEndings();
+    pruneTies();
+    sendSynchronousChangeMessage();
+    return true;
+}
+
+bool Score::moveMeasures (int first, int count, int toBarline)
+{
+    const auto numMeasures = getNumMeasures();
+
+    if (count <= 0 || first < 0 || first + count > numMeasures || toBarline < 0 || toBarline > numMeasures
+        || (toBarline >= first && toBarline <= first + count))
+        return false;
+
+    // The measures between where they are and where they're going move the other way, to make room.
+    const auto move = [first, count, toBarline] (auto& items)
+    {
+        if (toBarline < first)
+            std::rotate (items.begin() + toBarline, items.begin() + first, items.begin() + first + count);
+        else
+            std::rotate (items.begin() + first, items.begin() + first + count, items.begin() + toBarline);
+    };
+
+    for (auto& part : parts)
+        move (part.measures);
+
+    move (repeats);
+    tidyEndings();
+    pruneTies();
+    sendSynchronousChangeMessage();
+    return true;
+}
+
+void Score::tidyEndings()
+{
+    for (auto measure = 0; measure < getNumMeasures();)
+    {
+        const auto ending = getEnding (measure);
+
+        if (ending == 0)
+        {
+            ++measure;
+            continue;
+        }
+
+        const auto [first, last] = *getEndingSpan (measure);
+        const auto paired = ending == 1 ? hasRepeatEnd (last) && getEnding (last + 1) == 2
+                                        : getEnding (first - 1) == 1;
+
+        if (! paired)
+            for (auto m = first; m <= last; ++m)
+                repeats[(size_t) m].ending = 0;
+
+        measure = last + 1;
+    }
+}
+
 void Score::removeLastMeasure()
 {
     if (getNumMeasures() <= 1)

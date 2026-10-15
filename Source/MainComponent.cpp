@@ -29,6 +29,8 @@ namespace
     constexpr int measureButtonsGap = 14;       // between the final barline and them
     constexpr int eraserMargin = 10;            // from the eraser to the scroll bar
     constexpr int editButtonWidth = 44, editButtonGap = 6;     // the Edit button, to the eraser's left
+    constexpr int selectButtonWidth = 56;                       // and Select, between them
+    constexpr int selectionButtonHeight = 26, deleteMeasuresWidth = 64, moveMeasuresWidth = 56;
     constexpr int cloneButtonWidth = 56, cloneButtonHeight = 26;
     constexpr int rightMargin = measureButtonsGap + measureButtonsWidth + 12;      // after the final barline, for the measure buttons
 
@@ -353,6 +355,24 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     eraserButton.onClick = [this] { setErasing (! eraserButton.getToggleState()); };
     editButton.setTooltip ("Edit notes: drag a note to move it, or click one to change its length, make it staccato, or delete it");
     editButton.onClick = [this] { setEditing (! editButton.getToggleState()); };
+
+    // Select picks out whole measures, to delete or move, with the buttons over them.
+    selectButton.setTooltip ("Select measures: drag across them, then delete them, or move them between others");
+    selectButton.onClick = [this] { setSelecting (! isSelecting()); };
+    deleteMeasuresButton.onClick = [this] { deleteSelectedMeasures(); };
+    moveMeasuresButton.onClick = [this] { setMovingMeasures (! moveMeasuresButton.getToggleState()); };
+    deleteMeasuresButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xffd8413a));
+    moveMeasuresButton.setColour (juce::TextButton::textColourOffId, controls::accent);
+    moveMeasuresButton.setColour (juce::TextButton::buttonOnColourId, controls::accentLight);
+    moveMeasuresButton.setColour (juce::TextButton::textColourOnId, controls::accent);
+
+    for (auto* button : { &deleteMeasuresButton, &moveMeasuresButton })
+    {
+        button->setColour (juce::TextButton::buttonColourId, juce::Colours::white);
+        button->setWantsKeyboardFocus (false);
+        staffSystems.addChildComponent (*button);
+    }
+
     setNoteLength (1.0);
 
     scorePanel.onCopyProgression = [this] (int toPart) { copyProgression (toPart); };
@@ -371,13 +391,14 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     addAndMakeVisible (dynamicPicker);
     addAndMakeVisible (eraserButton);
     addAndMakeVisible (editButton);
+    addAndMakeVisible (selectButton);
 
     for (auto* component : std::initializer_list<juce::Component*> { &addMeasureButton, &removeMeasureButton, &cloneButton })
         staffSystems.addAndMakeVisible (component);
 
     updateRemoveMeasureButton();
-    staffSystems.onLayoutChanged = [this] { positionVolumeDials(); positionMeasureButtons(); positionRuler.repaint(); };
-    staffViewport.onScroll = [this] { positionVolumeDials(); positionMeasureButtons(); positionRuler.repaint(); };
+    staffSystems.onLayoutChanged = [this] { positionVolumeDials(); positionMeasureButtons(); positionSelectionButtons(); positionRuler.repaint(); };
+    staffViewport.onScroll = [this] { positionVolumeDials(); positionMeasureButtons(); positionSelectionButtons(); positionRuler.repaint(); };
 
     // The ruler follows the first part's staves, as they all line up, and where they've scrolled to.
     positionRuler.getView = [this] { return staffSystems.views.empty() ? nullptr : staffSystems.views[0].get(); };
@@ -595,7 +616,8 @@ void MainComponent::resized()
     dynamicPicker.setTopLeftPosition (noteLengthPicker.getRight() + 14, noteLengthPicker.getY());
     eraserButton.setBounds (staffViewport.getRight() - staffViewport.getScrollBarThickness() - eraserMargin - EraserButton::buttonWidth,
                             noteLengthPicker.getY(), EraserButton::buttonWidth, EraserButton::buttonHeight);
-    editButton.setBounds (eraserButton.getBounds().withWidth (editButtonWidth).translated (-editButtonWidth - editButtonGap, 0));
+    selectButton.setBounds (eraserButton.getBounds().withWidth (selectButtonWidth).translated (-selectButtonWidth - editButtonGap, 0));
+    editButton.setBounds (selectButton.getBounds().withWidth (editButtonWidth).translated (-editButtonWidth - editButtonGap, 0));
 
     staffSystems.setMinimumSize (staffViewport.getWidth() - staffViewport.getScrollBarThickness(),
                                  staffViewport.getHeight() - staffViewport.getScrollBarThickness());
@@ -641,6 +663,13 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         else
             togglePlayback();
 
+        return true;
+    }
+
+    // Esc lets go of the selected measures.
+    if (key == juce::KeyPress::escapeKey && selectedMeasures.has_value())
+    {
+        selectMeasures ({}, true);
         return true;
     }
 
@@ -696,6 +725,12 @@ void MainComponent::scoreChanged()
 
     updateTempoArrows();
 
+    // The selected measures stay selected while they're there.
+    if (selectedMeasures.has_value() && selectedMeasures->second >= score.getNumMeasures())
+        selectMeasures ({}, true);
+    else
+        positionSelectionButtons();
+
     // Where each page plays from stays within it, as measures come and go and the time signature changes.
     playbackStarts.resize ((size_t) piece.getNumPages(), 0.0);
 
@@ -736,7 +771,9 @@ void MainComponent::pagesChanged()
     {
         // A chord being edited is on the page that was being edited, and the new page is shown
         // from its start. Another page plays from where it plays from, not where one was paused.
+        // The measures selected were on the page that was being edited too.
         pausedAt.reset();
+        selectMeasures ({}, true);
         closeChordEditor();
         staffViewport.setViewPosition (0, staffViewport.getViewPositionY());
 
@@ -955,6 +992,14 @@ void MainComponent::insertTrack (int index, bool reloadFromSettings)
 
     view.setEditing (editButton.getToggleState());
 
+    // Selecting measures in any part selects them in all of them, and moves them in all of them.
+    view.onMeasuresSelected = [this] (std::optional<std::pair<int, int>> measures, bool finished) { selectMeasures (measures, finished); };
+    view.onMoveTargetChanged = [this] (std::optional<int> barline) { showMoveTarget (barline); };
+    view.onMeasuresMoved = [this] (int barline) { moveSelectedMeasures (barline); };
+    view.setSelecting (isSelecting());
+    view.setMeasureSelection (selectedMeasures);
+    view.setMovingMeasures (moveMeasuresButton.getToggleState());
+
     // A part being added starts at 0 dB, rather than with whatever its number had before.
     setVolume (index, reloadFromSettings ? (float) settings.getDoubleValue (getVolumeKey (index), 0.0) : 0.0f, false);
     setMuted (index, reloadFromSettings && settings.getBoolValue (getMutedKey (index), false), false);
@@ -1154,6 +1199,8 @@ void MainComponent::setNoteLength (double beats)
     if (placingScale)
         stopPlacingScale();
 
+    stopSelecting();
+
     noteLengthPicker.setLength (beats);
     dynamicPicker.setChoice ({});
     eraserButton.setToggleState (false, juce::dontSendNotification);
@@ -1187,6 +1234,7 @@ void MainComponent::setMarking (std::optional<music::Marking> marking)
         return;
     }
 
+    stopSelecting();
     dynamicPicker.setChoice (marking);
     noteLengthPicker.setChoiceShown (false);
     eraserButton.setToggleState (false, juce::dontSendNotification);
@@ -1207,6 +1255,7 @@ void MainComponent::setErasing (bool shouldErase)
     }
 
     setEditing (false);
+    stopSelecting();
     eraserButton.setToggleState (true, juce::dontSendNotification);
     dynamicPicker.setChoice ({});
     noteLengthPicker.setChoiceShown (false);
@@ -1221,10 +1270,155 @@ void MainComponent::setEditing (bool shouldEdit)
     if (shouldEdit && eraserButton.getToggleState())
         setErasing (false);
 
+    if (shouldEdit)
+        stopSelecting();
+
     editButton.setToggleState (shouldEdit, juce::dontSendNotification);
 
     for (auto& view : staffSystems.views)
         view->setEditing (shouldEdit);
+}
+
+//==============================================================================
+void MainComponent::setSelecting (bool shouldSelect)
+{
+    // Off, it's back to adding notes of the length chosen.
+    if (! shouldSelect)
+    {
+        stopSelecting();
+        setNoteLength (noteLengthPicker.getLength());
+        return;
+    }
+
+    if (placingScale)
+        stopPlacingScale();
+
+    // Clicks select measures, rather than adding notes, marking, editing or erasing.
+    setEditing (false);
+    eraserButton.setToggleState (false, juce::dontSendNotification);
+    dynamicPicker.setChoice ({});
+    noteLengthPicker.setChoiceShown (false);
+    selectButton.setToggleState (true, juce::dontSendNotification);
+
+    for (auto& view : staffSystems.views)
+    {
+        view->setErasing (false);
+        view->setSelecting (true);
+    }
+}
+
+void MainComponent::stopSelecting()
+{
+    if (! isSelecting())
+        return;
+
+    selectMeasures ({}, true);
+    selectButton.setToggleState (false, juce::dontSendNotification);
+    noteLengthPicker.setChoiceShown (true);
+
+    for (auto& view : staffSystems.views)
+        view->setSelecting (false);
+}
+
+void MainComponent::selectMeasures (std::optional<std::pair<int, int>> measures, bool finished)
+{
+    // A new selection being dragged out isn't being moved.
+    if (! finished || ! measures.has_value())
+        setMovingMeasures (false);
+
+    selectedMeasures = measures;
+    selectionFinished = finished && measures.has_value();
+
+    for (auto& view : staffSystems.views)
+        view->setMeasureSelection (measures);
+
+    positionSelectionButtons();
+}
+
+void MainComponent::deleteSelectedMeasures()
+{
+    if (! selectedMeasures.has_value())
+        return;
+
+    // The chord window's measure may be among them, or move.
+    const auto [first, last] = *selectedMeasures;
+    closeChordEditor();
+    selectMeasures ({}, true);
+    score.removeMeasures (first, last - first + 1);
+}
+
+void MainComponent::setMovingMeasures (bool shouldMove)
+{
+    moveMeasuresButton.setToggleState (shouldMove && selectedMeasures.has_value(), juce::dontSendNotification);
+
+    for (auto& view : staffSystems.views)
+        view->setMovingMeasures (moveMeasuresButton.getToggleState());
+
+    showMoveTarget ({});
+    positionSelectionButtons();
+}
+
+void MainComponent::moveSelectedMeasures (int barline)
+{
+    if (! selectedMeasures.has_value())
+        return;
+
+    const auto [first, last] = *selectedMeasures;
+    const auto count = last - first + 1;
+    showMoveTarget ({});
+    closeChordEditor();
+
+    // They stay selected where they go, the measures numbered as they are now.
+    if (score.moveMeasures (first, count, barline))
+    {
+        const auto movedTo = barline < first ? barline : barline - count;
+        selectMeasures (std::pair { movedTo, movedTo + count - 1 }, true);
+    }
+}
+
+void MainComponent::showMoveTarget (std::optional<int> barline)
+{
+    for (auto& view : staffSystems.views)
+        view->setMoveTarget (barline);
+}
+
+void MainComponent::positionSelectionButtons()
+{
+    const auto show = isSelecting() && selectionFinished && selectedMeasures.has_value() && ! staffSystems.views.empty()
+                   && selectedMeasures->second < score.getNumMeasures();
+
+    deleteMeasuresButton.setVisible (show);
+    moveMeasuresButton.setVisible (show);
+
+    if (! show)
+        return;
+
+    // Over the part of the selection that's in view, or the side of the view nearest it,
+    // halfway down what's in view
+    const auto& view = *staffSystems.views[0];
+    const auto selection = view.getMeasureArea (selectedMeasures->first).getUnion (view.getMeasureArea (selectedMeasures->second)).translated (view.getX(), 0);
+    const auto viewArea = staffViewport.getViewArea();
+    const auto width = deleteMeasuresWidth + editButtonGap + moveMeasuresWidth;
+    const auto left = juce::jmax (selection.getX(), viewArea.getX()), right = juce::jmin (selection.getRight(), viewArea.getRight());
+    const auto centreX = left <= right ? (left + right) / 2
+                       : selection.getRight() < viewArea.getX() ? viewArea.getX() + width / 2
+                                                                : viewArea.getRight() - width / 2;
+    auto pair = juce::Rectangle<int> (width, selectionButtonHeight).withCentre ({ centreX, viewArea.getCentreY() });
+    deleteMeasuresButton.setBounds (pair.removeFromLeft (deleteMeasuresWidth));
+    moveMeasuresButton.setBounds (pair.removeFromRight (moveMeasuresWidth));
+
+    for (auto* button : { &deleteMeasuresButton, &moveMeasuresButton })
+        button->toFront (false);
+
+    // A page keeps at least one measure, and all of them have nowhere to go.
+    const auto all = selectedMeasures->first == 0 && selectedMeasures->second == score.getNumMeasures() - 1;
+    deleteMeasuresButton.setEnabled (! all);
+    moveMeasuresButton.setEnabled (! all);
+    deleteMeasuresButton.setTooltip (all ? "All the measures are selected, and a page keeps at least one"
+                                         : "Delete the selected measures, in every instrument; the measures after them move up");
+    moveMeasuresButton.setTooltip (all ? juce::String ("All the measures are selected, so there's nowhere else for them to go")
+                                   : moveMeasuresButton.getToggleState() ? "Drag the selected measures to where they should go, between others. Click Move again to stop."
+                                                                         : "Move the selected measures: then drag them to where they should go, between others");
 }
 
 void MainComponent::showPartTitles()
@@ -2373,11 +2567,14 @@ bool MainComponent::perform (const InvocationInfo& invocation)
             document.saveAsInteractiveAsync (true, nullptr);
             return true;
 
+        // The measures selected may not be the same ones afterwards.
         case undoChange:
+            selectMeasures ({}, true);
             history.undo();
             return true;
 
         case redoChange:
+            selectMeasures ({}, true);
             history.redo();
             return true;
 

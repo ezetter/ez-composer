@@ -241,6 +241,21 @@ public:
     */
     void cloneMeasures();
 
+    /** Takes out some measures, one after another, in every part, with everything in them and
+        their repeat signs; the measures after them move up. Endings left without their other
+        half are taken out. Returns false, changing nothing, if the score doesn't have them all,
+        or they're all it has, as it keeps at least one.
+    */
+    bool removeMeasures (int first, int count);
+
+    /** Moves some measures, one after another, in every part, with everything in them and their
+        repeat signs, to before a barline: 0 for the start, getNumMeasures() for the end, counted
+        as the measures are before they move. Endings left without their other half are taken
+        out. Returns false, changing nothing, if the score doesn't have them all, or the barline's
+        one of theirs, where they are already.
+    */
+    bool moveMeasures (int first, int count, int toBarline);
+
     //==============================================================================
     /** Adds a note, as long as it asks, or as long as fits in what's left of the measure: the
         longest of a whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th
@@ -569,6 +584,12 @@ private:
 
     /** Lets go of ties whose notes aren't there any more, or don't follow one another now. */
     void pruneTies();
+
+    /** Takes out endings that aren't paired any more: a first ending that doesn't end with an end
+        repeat, or doesn't have a second ending just after it, and a second ending without a first
+        just before it. Their measures stay as they are.
+    */
+    void tidyEndings();
 
     int getSlotsPerMeasure() const noexcept { return beatsPerMeasure * slotsPerBeat; }
     static int toSlot (double beat) { return (int) std::lround (beat * slotsPerBeat); }

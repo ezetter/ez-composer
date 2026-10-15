@@ -52,7 +52,7 @@ public:
     void getCommandInfo (juce::CommandID, juce::ApplicationCommandInfo&) override;
     bool perform (const InvocationInfo&) override;
 
-    static constexpr int minimumWidth = 1326;     // room for the note length, staccato, dynamic, pedal and repeat buttons, and Edit and the eraser
+    static constexpr int minimumWidth = 1388;     // room for the note length, staccato, dynamic, pedal and repeat buttons, and Edit, Select and the eraser
     static constexpr int minimumHeight = 640;
 
 private:
@@ -230,6 +230,43 @@ private:
         marking as before. It turns the eraser off, and the eraser turns it off.
     */
     void setEditing (bool);
+
+    //==============================================================================
+    /** Turns selecting measures on, for dragging across the staves to select whole measures, and
+        then deleting or moving them, or off, back to adding notes. It turns editing notes and
+        the eraser off, and they turn it off, as choosing a note length, dynamic or the like does.
+        Turned off, nothing's selected.
+    */
+    void setSelecting (bool);
+    bool isSelecting() const noexcept { return selectButton.getToggleState(); }
+
+    /** Turns selecting off, leaving whatever else is chosen as it is. */
+    void stopSelecting();
+
+    /** Selects measures on the page being edited, from one to another, or none, in every part.
+        Once they're selected, with the mouse let go, Delete and Move show over them. A new
+        selection being dragged out stops moving the last.
+    */
+    void selectMeasures (std::optional<std::pair<int, int>>, bool finished);
+
+    /** Takes out the selected measures, in every part, with everything in them; the measures after them move up. */
+    void deleteSelectedMeasures();
+
+    /** Turns moving the selected measures on or off, as Move does: while it's on, they can be dragged to another place. */
+    void setMovingMeasures (bool);
+
+    /** Moves the selected measures to before a barline, as the measures are numbered before they
+        move, keeping them selected where they go, to move again.
+    */
+    void moveSelectedMeasures (int barline);
+
+    /** Shows where the selected measures would go, as they're dragged, in every part. */
+    void showMoveTarget (std::optional<int> barline);
+
+    /** Puts Delete and Move over the selected measures, halfway down what's in view, once
+        they're selected, and says what they can do, or hides them.
+    */
+    void positionSelectionButtons();
 
     /** Shows the Scale button's settings, in a box beside it. */
     void showScalePanel (juce::Component& button);
@@ -507,6 +544,10 @@ private:
     DynamicPicker dynamicPicker;        // beside it: a dynamic or hairpin to mark instead
     EraserButton eraserButton;          // at the top right of the score, over the staves: the eraser
     controls::TileTextButton editButton { "Edit" };     // to its left: editing notes
+    controls::TileTextButton selectButton { "Select" };     // between them: selecting measures
+    juce::TextButton deleteMeasuresButton { "Delete" }, moveMeasuresButton { "Move" };     // over the selected measures
+    std::optional<std::pair<int, int>> selectedMeasures;    // on the page being edited, from one measure to another
+    bool selectionFinished = false;     // the mouse has been let go, so Delete and Move show
 
     // After the final barline, halfway down what's in view: + and − for adding a measure at the
     // end and taking the last away, and Clone for repeating them all, in every part

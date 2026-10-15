@@ -203,6 +203,19 @@ The **Edit** button, just left of the eraser, turns editing on, and is blue whil
 
 Anywhere there isn't a note, clicks and drags do what they do anyway: they add notes of the length chosen, or mark the dynamic, hairpin or pedal chosen, so you can edit and add without switching back and forth. Choosing a note length, dynamic, hairpin or pedal leaves Edit on. A chord's notes aren't edited this way; clicking one takes it out of the chord, as before. Each move or change is undone in one go, tied notes and all.
 
+### Selecting measures
+
+The **Select** button, between Edit and the eraser, turns selecting measures on, and is blue while it's on. While it's on, clicks and drags on the staves select whole measures instead of adding notes, and no note length shows as chosen:
+
+- **Drag** across the staves of any instrument to select every measure from the one you pressed on to the one the mouse is over, or the first or last, past either end of the score. A click selects just the measure clicked, and a click past the last measure selects none. The measures are the page's, so they're selected in every instrument, shown as one blue box over each instrument's staves.
+- Once you let go, **Delete** and **Move** show over the selection, halfway down what's in view, staying over it as the staves scroll.
+- **Delete** takes the selected measures out of every instrument, with everything in them (notes, chords, dynamics, hairpins, pedal marks and repeat signs), and the measures after them move up to where the selection started.
+- **Move** turns moving on, and is blue while it's on. Then drag the selection along: a blue line at the barline nearest the mouse shows where the measures will go, between two others, before the first, or after the last, and letting go puts them there, in every instrument, with everything in them. On one of their own barlines, there's no line, and they stay where they are. They stay selected where they go, with Move still on, to move again; dragging from anywhere else selects measures again, and turns Move off.
+- With every measure selected, Delete and Move are greyed out, as a page keeps at least one measure, and there's nowhere else for them to go.
+- Ties between notes that don't follow one another any more let go, and a first or second ending left without its other half, or a first ending without its end repeat, is taken out, leaving its measures. A chord window that's open closes.
+- Each Delete or move is undone in one go. Esc, Undo, going to another page, or the measures going, lets go of the selection.
+- Clicking Select again goes back to adding notes. Choosing a note length, dynamic, hairpin, pedal, repeat sign, Edit or the eraser turns Select off, and turning Select on turns Edit and the eraser off.
+
 ### Chords
 
 Above each measure of each instrument is an **Add Chord** button, or **Edit Chord** if the measure has a chord. It makes the instrument active and opens the chord window for that measure, and outlines the measure while the window is open. Making another instrument active closes it, and so does deleting it or an instrument before it. For a chord that's already there, the window starts with its settings.

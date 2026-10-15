@@ -82,6 +82,41 @@ public:
     */
     void setEditing (bool);
 
+    /** Turns selecting measures on or off. While it's on, dragging along the staves selects the
+        whole measures it goes over, and a click selects the one clicked, calling
+        onMeasuresSelected as it goes, and once more when the mouse is let go; a click past the
+        measures selects none. Nothing's added or taken out.
+    */
+    void setSelecting (bool);
+    std::function<void (std::optional<std::pair<int, int>> measures, bool finished)> onMeasuresSelected;
+
+    /** Shows measures as selected, from one to another, or none. */
+    void setMeasureSelection (std::optional<std::pair<int, int>>);
+
+    /** Turns moving the selected measures on or off. While it's on, dragging them calls
+        onMoveTargetChanged with the barline nearest the mouse that they'd go to, or none, where
+        they'd stay where they are, and onMeasuresMoved with it when the mouse is let go. A drag
+        anywhere else selects, as before.
+    */
+    void setMovingMeasures (bool);
+    std::function<void (std::optional<int> barline)> onMoveTargetChanged;
+    std::function<void (int barline)> onMeasuresMoved;
+
+    /** Shows where the selected measures would go, as a line at a barline, counting from 0 before
+        the first measure, or nothing.
+    */
+    void setMoveTarget (std::optional<int> barline);
+
+    /** The barline nearest a point across the view: 0 before the first measure, up to the
+        number of measures, after the last.
+    */
+    int getBarlineAt (float x) const;
+
+    /** The barline the selected measures would go to if they were let go at a point across the
+        view, or nothing if they'd stay where they are.
+    */
+    std::optional<int> getMoveTargetAt (float x) const;
+
     /** The note of its own whose head is at a point, as it's written, for editing: its pitch,
         sharp or flat and all, and how long it is. A chord's notes aren't edited.
     */
@@ -475,6 +510,11 @@ private:
     std::optional<HairpinDrag> hairpinDrag;
     bool erasing = false, erasingStroke = false;    // the eraser's chosen, and its button's down
     bool editing = false;
+    bool selecting = false, movingMeasures = false;
+    std::optional<std::pair<int, int>> measureSelection;    // shown as selected, from one measure to another
+    std::optional<int> selectionAnchor;             // the measure a drag selecting measures started at
+    bool draggingSelection = false;                 // the selected measures being dragged, to move them
+    std::optional<int> moveTarget;                  // the barline they'd go to, shown as a line
     std::optional<Note> editHover;                  // while editing, the note of its own under the mouse
     std::optional<Note> editedNote;                 // the note the mouse went down on while editing
     std::vector<Note> editHoverChain, editedChain;  // and the notes tied to them, which move with them
