@@ -102,6 +102,17 @@ public:
     std::function<void (std::optional<int> barline)> onMoveTargetChanged;
     std::function<void (int barline)> onMeasuresMoved;
 
+    /** Called while selected measures with none after them are dragged on past the end, with 1 to
+        put an empty measure in before them, pushing them on, or -1, as they come back, to take out
+        the one before them, which the drag put in. They're expected to stay selected where they go.
+    */
+    std::function<void (int change)> onSelectionPushed;
+
+    /** Called when the selected measures are taken hold of to move them, and when they're let go,
+        so everything the drag does can count as one change.
+    */
+    std::function<void()> onSelectionDragStarted, onSelectionDragFinished;
+
     /** Shows where the selected measures would go, as a line at a barline, counting from 0 before
         the first measure, or nothing.
     */
@@ -116,6 +127,12 @@ public:
         view, or nothing if they'd stay where they are.
     */
     std::optional<int> getMoveTargetAt (float x) const;
+
+    /** Pushes the selected measures on, or back, to follow the mouse past the end of the score. */
+    void pushSelection (float x);
+
+    /** Lets go of the selected measures, if they're being dragged. */
+    void finishDraggingSelection();
 
     /** The note of its own whose head is at a point, as it's written, for editing: its pitch,
         sharp or flat and all, and how long it is. A chord's notes aren't edited this way.
@@ -544,6 +561,8 @@ private:
     std::optional<std::pair<int, int>> measureSelection;    // shown as selected, from one measure to another
     std::optional<int> selectionAnchor;             // the measure a drag selecting measures started at
     bool draggingSelection = false;                 // the selected measures being dragged, to move them
+    float selectionHold = 0.0f;                     // how far into them the mouse took hold of them
+    int measuresPushed = 0;                         // how many empty measures the drag has put in before them
     std::optional<int> moveTarget;                  // the barline they'd go to, shown as a line
     std::optional<Note> editHover;                  // while editing, the note of its own under the mouse
     std::optional<Note> editedNote;                 // the note the mouse went down on while editing

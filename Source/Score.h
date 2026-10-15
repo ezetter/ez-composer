@@ -254,6 +254,12 @@ public:
     */
     bool removeMeasures (int first, int count);
 
+    /** Puts empty measures in, in every part, before a barline: 0 for the start, getNumMeasures()
+        for the end. The measures after them move on. Endings split by them are taken out. Returns
+        false, changing nothing, if the score doesn't have the barline.
+    */
+    bool insertMeasures (int toBarline, int count);
+
     /** Moves some measures, one after another, in every part, with everything in them and their
         repeat signs, to before a barline: 0 for the start, getNumMeasures() for the end, counted
         as the measures are before they move. Endings left without their other half are taken

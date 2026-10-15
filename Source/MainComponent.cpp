@@ -996,6 +996,9 @@ void MainComponent::insertTrack (int index, bool reloadFromSettings)
     view.onMeasuresSelected = [this] (std::optional<std::pair<int, int>> measures, bool finished) { selectMeasures (measures, finished); };
     view.onMoveTargetChanged = [this] (std::optional<int> barline) { showMoveTarget (barline); };
     view.onMeasuresMoved = [this] (int barline) { moveSelectedMeasures (barline); };
+    view.onSelectionPushed = [this] (int change) { pushSelectedMeasures (change); };
+    view.onSelectionDragStarted = [this] { history.beginGesture(); };
+    view.onSelectionDragFinished = [this] { history.endGesture(); };
     view.setSelecting (isSelecting());
     view.setMeasureSelection (selectedMeasures);
     view.setMovingMeasures (moveMeasuresButton.getToggleState());
@@ -1376,6 +1379,29 @@ void MainComponent::moveSelectedMeasures (int barline)
     }
 }
 
+void MainComponent::pushSelectedMeasures (int change)
+{
+    if (! selectedMeasures.has_value() || change == 0)
+        return;
+
+    const auto [first, last] = *selectedMeasures;
+    closeChordEditor();
+
+    // An empty measure goes in before them, and they stay selected where they go; or the one
+    // before them comes out, and they're selected where they'll be first, so they stay selected.
+    if (change > 0)
+    {
+        if (score.insertMeasures (first, 1))
+            selectMeasures (std::pair { first + 1, last + 1 }, true);
+    }
+    else if (first > 0)
+    {
+        selectMeasures (std::pair { first - 1, last - 1 }, true);
+        score.removeMeasures (first - 1, 1);
+        positionSelectionButtons();
+    }
+}
+
 void MainComponent::showMoveTarget (std::optional<int> barline)
 {
     for (auto& view : staffSystems.views)
@@ -1410,15 +1436,13 @@ void MainComponent::positionSelectionButtons()
     for (auto* button : { &deleteMeasuresButton, &moveMeasuresButton })
         button->toFront (false);
 
-    // A page keeps at least one measure, and all of them have nowhere to go.
+    // A page keeps at least one measure. All of them can still be pushed on, past the end.
     const auto all = selectedMeasures->first == 0 && selectedMeasures->second == score.getNumMeasures() - 1;
     deleteMeasuresButton.setEnabled (! all);
-    moveMeasuresButton.setEnabled (! all);
     deleteMeasuresButton.setTooltip (all ? "All the measures are selected, and a page keeps at least one"
                                          : "Delete the selected measures, in every instrument; the measures after them move up");
-    moveMeasuresButton.setTooltip (all ? juce::String ("All the measures are selected, so there's nowhere else for them to go")
-                                   : moveMeasuresButton.getToggleState() ? "Drag the selected measures to where they should go, between others. Click Move again to stop."
-                                                                         : "Move the selected measures: then drag them to where they should go, between others");
+    moveMeasuresButton.setTooltip (moveMeasuresButton.getToggleState() ? "Drag the selected measures between others, or on past the end for empty measures before them. Click Move again to stop."
+                                                                       : "Move the selected measures: then drag them between others, or on past the end for empty measures before them");
 }
 
 void MainComponent::showPartTitles()

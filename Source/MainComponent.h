@@ -260,6 +260,11 @@ private:
     */
     void moveSelectedMeasures (int barline);
 
+    /** Puts an empty measure in before the selected measures, pushing them on, or takes out the
+        one before them, as they're dragged on past the end, and back. They stay selected.
+    */
+    void pushSelectedMeasures (int change);
+
     /** Shows where the selected measures would go, as they're dragged, in every part. */
     void showMoveTarget (std::optional<int> barline);
 

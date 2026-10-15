@@ -324,6 +324,21 @@ bool Score::removeMeasures (int first, int count)
     return true;
 }
 
+bool Score::insertMeasures (int toBarline, int count)
+{
+    if (count <= 0 || toBarline < 0 || toBarline > getNumMeasures())
+        return false;
+
+    for (auto& part : parts)
+        part.measures.insert (part.measures.begin() + toBarline, (size_t) count, Measure {});
+
+    repeats.insert (repeats.begin() + toBarline, (size_t) count, RepeatSigns {});
+    tidyEndings();
+    pruneTies();
+    sendSynchronousChangeMessage();
+    return true;
+}
+
 bool Score::moveMeasures (int first, int count, int toBarline)
 {
     const auto numMeasures = getNumMeasures();

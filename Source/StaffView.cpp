@@ -85,6 +85,17 @@ namespace
         return notesPerBeat >= 8 ? 17.0f : notesPerBeat >= 4 ? 10.0f : notesPerBeat == 2 ? 6.4f : 5.0f;
     }
 
+    /** How wide a measure is, but for room for an end repeat: as wide as its beats need, with room
+        before the first, including any for a start repeat, and at least the narrowest a measure
+        goes, with that room too.
+    */
+    float getMeasureWidth (int beatsPerMeasure, int notesPerBeat, float padding, float startRoom)
+    {
+        return juce::jmax (minMeasureWidth * staffSpace + startRoom,
+                           padding + measurePadding * staffSpace
+                               + ((float) beatsPerMeasure - 1.0f / (float) notesPerBeat) * getBeatWidth (notesPerBeat) * staffSpace);
+    }
+
     bool isLine (int staffPosition)
     {
         return music::mod (staffPosition, 2) == 0;
@@ -551,7 +562,7 @@ void StaffView::setSelecting (bool shouldSelect)
 {
     selecting = shouldSelect;
     selectionAnchor.reset();
-    draggingSelection = false;
+    finishDraggingSelection();
     setHoverNote ({});
     setHoverMarkPoint ({});
     setEditHover ({});
@@ -574,7 +585,46 @@ void StaffView::setMeasureSelection (std::optional<std::pair<int, int>> measures
 void StaffView::setMovingMeasures (bool shouldMove)
 {
     movingMeasures = shouldMove;
-    draggingSelection = false;
+    finishDraggingSelection();
+}
+
+void StaffView::finishDraggingSelection()
+{
+    measuresPushed = 0;
+
+    if (std::exchange (draggingSelection, false) && onSelectionDragFinished != nullptr)
+        onSelectionDragFinished();
+}
+
+void StaffView::pushSelection (float x)
+{
+    // With nothing after them, the selected measures follow the mouse on past the end, from where
+    // it took hold of them, an empty measure going in before them for each one's width they go,
+    // and coming out again as they come back, as long as it's one put in by this drag.
+    while (measureSelection.has_value() && onSelectionPushed != nullptr)
+    {
+        const auto [first, last] = *measureSelection;
+        const auto start = x - selectionHold;
+        const auto selectionX = measureLayouts[(size_t) first].x;
+        const auto emptyWidth = getMeasureWidth (score.getBeatsPerMeasure(), 1, measurePadding * staffSpace, 0.0f);
+        auto change = 0;
+
+        if (last == score.getNumMeasures() - 1 && start - selectionX > emptyWidth / 2.0f)
+            change = 1;
+        else if (measuresPushed > 0 && first > 0 && selectionX - start > measureLayouts[(size_t) first - 1].width / 2.0f)
+            change = -1;
+
+        if (change == 0)
+            return;
+
+        onSelectionPushed (change);
+
+        // Unless it didn't happen
+        if (! measureSelection.has_value() || measureSelection->first != first + change)
+            return;
+
+        measuresPushed += change;
+    }
 }
 
 void StaffView::setMoveTarget (std::optional<int> barline)
@@ -1139,7 +1189,6 @@ void StaffView::updateLayout()
     timeSignatureLeft = keySignatureLeft + (numAccidentals > 0 ? keySignatureWidth + 0.9f : 0.4f);
     firstMeasureLeft = timeSignatureLeft + 3.0f;
 
-    const auto beats = (float) score.getBeatsPerMeasure();
     auto x = firstMeasureLeft * staffSpace;
 
     measureLayouts.clear();
@@ -1182,9 +1231,7 @@ void StaffView::updateLayout()
         const auto endRoom = score.hasRepeatEnd (measure) ? repeatSignWidth * staffSpace : 0.0f;
         layout.padding += startRoom;
 
-        layout.width = juce::jmax (minMeasureWidth * staffSpace + startRoom,
-                                   layout.padding + measurePadding * staffSpace + (beats - 1.0f / (float) notesPerBeat) * layout.beatWidth)
-                     + endRoom;
+        layout.width = getMeasureWidth (score.getBeatsPerMeasure(), notesPerBeat, layout.padding, startRoom) + endRoom;
         layout.x = x;
         x += layout.width;
 
@@ -2970,6 +3017,14 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
         if (movingMeasures && measureSelection.has_value() && measure >= measureSelection->first && measure <= measureSelection->second)
         {
             draggingSelection = true;
+            measuresPushed = 0;
+            selectionHold = e.position.x - measureLayouts[(size_t) measureSelection->first].x;
+
+            if (onSelectionDragStarted != nullptr)
+                onSelectionDragStarted();
+
+            // Drag events keep coming while the mouse is held still, so the view keeps scrolling at its edge.
+            beginDragAutoRepeat (40);
             return;
         }
 
@@ -3084,11 +3139,18 @@ void StaffView::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
-    // The selected measures being moved show where they'd go, at the barline nearest the mouse.
+    // The selected measures being moved show where they'd go, at the barline nearest the mouse,
+    // unless they've been pushed on past the end, where they've gone already. Near the edge of
+    // what's in view, it scrolls, so they can go further.
     if (draggingSelection)
     {
+        if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+            viewport->autoScroll (viewport->getLocalPoint (this, e.position).roundToInt().x, viewport->getHeight() / 2, 40, 24);
+
+        pushSelection (e.position.x);
+
         if (onMoveTargetChanged != nullptr)
-            onMoveTargetChanged (getMoveTargetAt (e.position.x));
+            onMoveTargetChanged (measuresPushed > 0 ? std::nullopt : getMoveTargetAt (e.position.x));
 
         return;
     }
@@ -3180,10 +3242,11 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
     if (part < 0)
         return;
 
-    // The selected measures go where they were dragged, if it's somewhere else.
-    if (std::exchange (draggingSelection, false))
+    // The selected measures go where they were dragged, if it's somewhere else, unless they've
+    // been pushed on past the end, where they are already.
+    if (draggingSelection)
     {
-        const auto target = getMoveTargetAt (e.position.x);
+        const auto target = measuresPushed > 0 ? std::nullopt : getMoveTargetAt (e.position.x);
 
         if (onMoveTargetChanged != nullptr)
             onMoveTargetChanged ({});
@@ -3191,6 +3254,7 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
         if (target.has_value() && e.mouseWasDraggedSinceMouseDown() && onMeasuresMoved != nullptr)
             onMeasuresMoved (*target);
 
+        finishDraggingSelection();
         return;
     }
 
