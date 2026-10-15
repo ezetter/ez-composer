@@ -133,17 +133,24 @@ namespace
         return cycle;
     }
 
-    /** The notes a melodic chord's notes can be moved to: its own, and an arpeggio's octave above
-        its lowest note, where it turns, in order of pitch.
+    /** The notes a melodic chord's notes can be moved to: its own, in every octave there is, in
+        order of pitch.
     */
-    std::vector<music::Tone> getNoteChoices (const music::Chord& chord, music::ChordType type)
+    std::vector<music::Tone> getNoteChoices (const music::Chord& chord)
     {
-        auto choices = chord.tones;
+        std::vector<music::Tone> choices;
 
-        if (type == music::ChordType::arpeggioUp || type == music::ChordType::arpeggioDown)
-            for (const auto& tone : getArpeggioCycle (chord.tones, true))
-                if (std::none_of (choices.begin(), choices.end(), [&] (const music::Tone& t) { return t.midi == tone.midi; }))
-                    choices.push_back (tone);
+        for (const auto& tone : chord.tones)
+        {
+            for (int octaves = -10; octaves <= 10; ++octaves)
+            {
+                const auto shifted = shiftedByOctave (tone, octaves);
+
+                if (shifted.pitch.step >= 0 && juce::isPositiveAndBelow (shifted.midi, 128)
+                    && std::none_of (choices.begin(), choices.end(), [&] (const music::Tone& t) { return t.midi == shifted.midi; }))
+                    choices.push_back (shifted);
+            }
+        }
 
         std::sort (choices.begin(), choices.end(), [] (const music::Tone& a, const music::Tone& b) { return a.midi < b.midi; });
         return choices;
@@ -155,7 +162,7 @@ namespace
         if (measureChord.movedNotes.empty() || measureChord.movedNotes.size() != numNotes)
             return {};
 
-        const auto choices = getNoteChoices (chord, measureChord.style.type);
+        const auto choices = getNoteChoices (chord);
         std::vector<music::Tone> moved;
 
         for (auto midi : measureChord.movedNotes)
@@ -396,7 +403,7 @@ std::vector<music::Tone> getChordNoteChoices (const Score& score, int part, int 
         return {};
 
     if (const auto chord = score.getChordNotes (part, measure))
-        return getNoteChoices (*chord, measureChord->style.type);
+        return getNoteChoices (*chord);
 
     return {};
 }

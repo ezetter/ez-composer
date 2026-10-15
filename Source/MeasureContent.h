@@ -46,8 +46,8 @@ struct MeasureContent
 MeasureContent getMeasureContent (const Score&, int part, int measure);
 
 /** The notes an arpeggio's or Random chord's notes can be moved to with the Edit tool, in order of
-    pitch: the chord's own, and an arpeggio's octave above its lowest note, where it turns. None
-    for a block or rolled chord, or a measure without a chord.
+    pitch: the chord's own, in every octave. None for a block or rolled chord, or a measure
+    without a chord.
 */
 std::vector<music::Tone> getChordNoteChoices (const Score&, int part, int measure);
 

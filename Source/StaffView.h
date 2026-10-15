@@ -137,8 +137,8 @@ public:
     std::optional<ChordNote> findMovableChordNoteAt (juce::Point<float>) const;
 
     /** The chord's note a chord's note being moved would go to if it were let go at a point: the
-        one nearest on its staff to the line or space there, at the same time. Nothing if that's
-        the note it already is.
+        one, in any octave, nearest on its staff to the line or space there, at the same time.
+        Nothing if that's the note it already is.
     */
     std::optional<music::Tone> getChordNoteTarget (const ChordNote&, juce::Point<float>) const;
 
@@ -350,6 +350,12 @@ private:
     void setEditHover (std::optional<Note>);
     void setChordNoteHover (std::optional<ChordNote>);
     void showNoteMenu (const Note&);
+
+    /** The note of a measure's chord that a note it writes is: the same note, or for one in another
+        octave, such as one moved there or an arpeggio's octave at the top, the chord's note of the
+        same name.
+    */
+    int getChordToneOf (int measure, int midiNote) const;
 
     /** Moves one of a chord's notes to another of its notes, leaving the others where they are. */
     void moveChordNote (const ChordNote&, int midiNote);
