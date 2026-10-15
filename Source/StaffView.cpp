@@ -621,7 +621,10 @@ void StaffView::setEditing (bool shouldEdit)
     editedNote.reset();
     editedChain.clear();
     movePlan.clear();
+    movedChordNote.reset();
+    chordNoteTarget.reset();
     setEditHover ({});
+    setChordNoteHover ({});
 
     if (! erasing && ! scalePlacement.has_value())
         setMouseCursor (juce::MouseCursor::NormalCursor);
@@ -670,6 +673,100 @@ std::optional<Note> StaffView::findEditableNoteAt (juce::Point<float> point) con
     }
 
     return found;
+}
+
+void StaffView::setChordNoteHover (std::optional<ChordNote> chordNote)
+{
+    if (chordNote == chordNoteHover)
+        return;
+
+    chordNoteHover = chordNote;
+    repaint();
+}
+
+std::optional<StaffView::ChordNote> StaffView::findMovableChordNoteAt (juce::Point<float> point) const
+{
+    // A notehead on the line or space under the point, and near enough across, of the notes an
+    // arpeggio or Random chord writes on its own staff
+    const auto spot = getNoteAt (point);
+
+    if (! spot.has_value() || getChordNoteChoices (score, part, spot->measure).empty()
+        || score.getChord (part, spot->measure)->style.staff != spot->staff)
+        return {};
+
+    const auto& content = measureLayouts[(size_t) spot->measure].content.staves[(size_t) spot->staff];
+
+    if (content.source != StaffContent::Source::chord)
+        return {};
+
+    std::optional<ChordNote> found;
+    auto nearestDistance = 1.4f * staffSpace;
+    auto index = 0;
+
+    for (const auto& event : content.events)
+    {
+        if (event.isRest())
+            continue;
+
+        if (const auto distance = std::abs (point.x - getEventX (spot->measure, event));
+            distance <= nearestDistance && event.tones.front().pitch.step == spot->pitch.step)
+        {
+            found = ChordNote { { spot->staff, spot->measure, event.onset, event.tones.front().pitch, part, getBeats (event.duration) }, index };
+            nearestDistance = distance;
+        }
+
+        ++index;
+    }
+
+    return found;
+}
+
+std::optional<music::Tone> StaffView::getChordNoteTarget (const ChordNote& chordNote, juce::Point<float> point) const
+{
+    // Whichever of the chord's notes is nearest the line or space at the point, on the note's own staff
+    const auto staff = chordNote.note.staff;
+    const auto position = (getY (staff, 0) - point.y) / (staffSpace / 2.0f);
+    std::optional<music::Tone> nearest;
+    auto nearestDistance = std::numeric_limits<float>::max();
+
+    for (const auto& choice : getChordNoteChoices (score, part, chordNote.note.measure))
+    {
+        if (const auto distance = std::abs ((float) (choice.pitch.step - getBottomLineStep (staff)) - position); distance < nearestDistance)
+        {
+            nearest = choice;
+            nearestDistance = distance;
+        }
+    }
+
+    if (! nearest.has_value() || nearest->midi == chordNote.note.pitch.getMidiNoteNumber())
+        return {};
+
+    return nearest;
+}
+
+void StaffView::moveChordNote (const ChordNote& chordNote, int midiNote)
+{
+    const auto* chord = score.getChord (part, chordNote.note.measure);
+
+    if (chord == nullptr)
+        return;
+
+    // The notes the chord writes, as they are, with the one moved
+    const auto content = getMeasureContent (score, part, chordNote.note.measure);
+    std::vector<int> notes;
+
+    for (const auto& event : content.staves[(size_t) chord->style.staff].events)
+        if (! event.isRest())
+            notes.push_back (event.tones.front().midi);
+
+    if (! juce::isPositiveAndBelow (chordNote.index, (int) notes.size()))
+        return;
+
+    notes[(size_t) chordNote.index] = midiNote;
+
+    auto moved = *chord;
+    moved.movedNotes = std::move (notes);
+    score.setChord (part, chordNote.note.measure, moved);
 }
 
 std::optional<Note> StaffView::getMoveTarget (const Note& note, juce::Point<float> point) const
@@ -1868,7 +1965,11 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
     // notes are taken out wherever they are in the measure; a quarter note only on its own beat.
     // While editing, the note under the pointer, or being moved, is blue instead.
     // The notes tied to it are blue too, as they move with it.
-    const auto& editChain = editedNote.has_value() ? editedChain : editHoverChain;
+    // A chord's note being moved, or that would be, is blue on its own.
+    const auto chordNote = movedChordNote.has_value() ? movedChordNote : chordNoteHover;
+    const auto editChain = editedNote.has_value() ? editedChain
+                         : chordNote.has_value() ? std::vector<Note> { chordNote->note }
+                                                 : editHoverChain;
 
     if (! editChain.empty())
     {
@@ -2315,6 +2416,15 @@ void StaffView::drawStaccatoDot (juce::Graphics& g, Staff staff, float centreX, 
 
 void StaffView::drawMoveHint (juce::Graphics& g) const
 {
+    // A chord's note shows faintly on the chord's note it would go to.
+    if (movedChordNote.has_value() && chordNoteTarget.has_value())
+    {
+        auto target = movedChordNote->note;
+        target.pitch = chordNoteTarget->pitch;
+        drawGhostNote (g, target);
+        return;
+    }
+
     // Faint notes where they'd go, as where a click would add one, with faint ties between them
     if (! editedNote.has_value())
         return;
@@ -2703,13 +2813,16 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
-    // While editing, a note of its own under the pointer can be dragged or clicked.
+    // While editing, a note of its own under the pointer can be dragged or clicked, and an
+    // arpeggio's or Random chord's note dragged to another of the chord's notes.
     if (editing)
     {
         const auto editable = findEditableNoteAt (e.position);
+        const auto chordNote = editable.has_value() ? std::nullopt : findMovableChordNoteAt (e.position);
         setEditHover (editable);
+        setChordNoteHover (chordNote);
 
-        if (editable.has_value())
+        if (editable.has_value() || chordNote.has_value())
         {
             setHoverNote ({});
             setHoverMarkPoint ({});
@@ -2787,6 +2900,9 @@ void StaffView::mouseExit (const juce::MouseEvent&)
     if (! editedNote.has_value())
         setEditHover ({});
 
+    if (! movedChordNote.has_value())
+        setChordNoteHover ({});
+
     if (hoverHairpin.has_value())
     {
         hoverHairpin.reset();
@@ -2809,6 +2925,8 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
     editedNote.reset();
     editedChain.clear();
     movePlan.clear();
+    movedChordNote.reset();
+    chordNoteTarget.reset();
 
     if (e.mods.isPopupMenu())
         return;
@@ -2858,13 +2976,19 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
     }
 
     // While editing, a note of its own is moved by dragging it, or clicked for its menu, when
-    // the mouse is let go.
+    // the mouse is let go. A chord's note is moved by dragging it, and a click leaves it as it is.
     if (editing)
     {
         if (const auto note = findEditableNoteAt (e.position))
         {
             editedNote = note;
             editedChain = getTiedNotes (*note);
+            return;
+        }
+
+        if (const auto chordNote = findMovableChordNoteAt (e.position))
+        {
+            movedChordNote = chordNote;
             return;
         }
     }
@@ -2956,6 +3080,24 @@ void StaffView::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
+    // A chord's note being moved shows which of the chord's notes it would go to.
+    if (movedChordNote.has_value())
+    {
+        if (e.mouseWasDraggedSinceMouseDown())
+        {
+            const auto target = getChordNoteTarget (*movedChordNote, e.position);
+
+            if (target.has_value() != chordNoteTarget.has_value() || (target.has_value() && target->midi != chordNoteTarget->midi))
+            {
+                chordNoteTarget = target;
+                hoverHintHidden = true;
+                repaint();
+            }
+        }
+
+        return;
+    }
+
     // A note being moved shows where it would go.
     if (editedNote.has_value())
     {
@@ -3042,6 +3184,20 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
         if (start.has_value() && ! e.mods.isPopupMenu() && ! e.mouseWasDraggedSinceMouseDown())
             placeScale (*start);
 
+        return;
+    }
+
+    // A chord's note dragged while editing goes to the chord's note it's let go at.
+    if (const auto moved = std::exchange (movedChordNote, std::nullopt))
+    {
+        chordNoteTarget.reset();
+        repaint();
+
+        if (! e.mods.isPopupMenu() && e.mouseWasDraggedSinceMouseDown())
+            if (const auto target = getChordNoteTarget (*moved, e.position))
+                moveChordNote (*moved, target->midi);
+
+        setChordNoteHover (findMovableChordNoteAt (e.position));
         return;
     }
 

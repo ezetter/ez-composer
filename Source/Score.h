@@ -93,6 +93,12 @@ struct MeasureChord
     /** The alternate staff's notes, when they've been changed by hand from what the chord gives it. */
     std::optional<std::vector<music::KeyboardNote>> alternateNotes;
 
+    /** An arpeggio's or Random chord's notes as they've been moved by hand, with the Edit tool, to
+        others of its notes: a MIDI note number for each note it writes, in order. Empty while
+        they're as its chord type writes them.
+    */
+    std::vector<int> movedNotes {};
+
     bool hasNotes() const { return ! spec.isEmpty() || keyboardNotes.has_value(); }
 
     bool operator== (const MeasureChord&) const = default;

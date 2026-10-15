@@ -133,6 +133,44 @@ namespace
         return cycle;
     }
 
+    /** The notes a melodic chord's notes can be moved to: its own, and an arpeggio's octave above
+        its lowest note, where it turns, in order of pitch.
+    */
+    std::vector<music::Tone> getNoteChoices (const music::Chord& chord, music::ChordType type)
+    {
+        auto choices = chord.tones;
+
+        if (type == music::ChordType::arpeggioUp || type == music::ChordType::arpeggioDown)
+            for (const auto& tone : getArpeggioCycle (chord.tones, true))
+                if (std::none_of (choices.begin(), choices.end(), [&] (const music::Tone& t) { return t.midi == tone.midi; }))
+                    choices.push_back (tone);
+
+        std::sort (choices.begin(), choices.end(), [] (const music::Tone& a, const music::Tone& b) { return a.midi < b.midi; });
+        return choices;
+    }
+
+    /** The notes as they've been moved by hand, if they still fit: as many of them, each one of the chord's. */
+    std::optional<std::vector<music::Tone>> getMovedNotes (const music::Chord& chord, const MeasureChord& measureChord, size_t numNotes)
+    {
+        if (measureChord.movedNotes.empty() || measureChord.movedNotes.size() != numNotes)
+            return {};
+
+        const auto choices = getNoteChoices (chord, measureChord.style.type);
+        std::vector<music::Tone> moved;
+
+        for (auto midi : measureChord.movedNotes)
+        {
+            const auto choice = std::find_if (choices.begin(), choices.end(), [midi] (const music::Tone& t) { return t.midi == midi; });
+
+            if (choice == choices.end())
+                return {};
+
+            moved.push_back (*choice);
+        }
+
+        return moved;
+    }
+
     StaffContent getChordContent (const Score& score, const music::Chord& chord, const MeasureChord& measureChord)
     {
         StaffContent content;
@@ -182,6 +220,10 @@ namespace
             for (int i = 0; i < room && period > 0; ++i)
                 sequence.push_back (cycle[(size_t) (i % period)]);
         }
+
+        // Unless its notes have been moved by hand to others of the chord's
+        if (auto moved = getMovedNotes (chord, measureChord, sequence.size()))
+            sequence = std::move (*moved);
 
         auto slot = 0;
 
@@ -344,4 +386,17 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
             content.staves[(size_t) staff] = getNotesContent (score, part, staff, measure, keyAlterations);
 
     return content;
+}
+
+std::vector<music::Tone> getChordNoteChoices (const Score& score, int part, int measure)
+{
+    const auto* measureChord = score.getChord (part, measure);
+
+    if (measureChord == nullptr || ! music::isMelodic (measureChord->style.type))
+        return {};
+
+    if (const auto chord = score.getChordNotes (part, measure))
+        return getNoteChoices (*chord, measureChord->style.type);
+
+    return {};
 }

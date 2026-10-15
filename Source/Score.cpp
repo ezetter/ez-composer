@@ -225,6 +225,11 @@ void Score::followKeyChange()
                 measure.chord->spec = description.spec;
                 measure.chord->keyboardNotes = description.keyboardNotes;
             }
+            else if (measure.chord.has_value())
+            {
+                // In the new key, the chord has other notes, written as its chord type has them.
+                measure.chord->movedNotes.clear();
+            }
 
             tidyChord (measure);
         }
@@ -1102,6 +1107,7 @@ void Score::toggleChordNote (MeasureChord& chord, int midiNote) const
     const auto description = music::describeNotes (getKey(), chord.style.staff, midiNotes);
     chord.spec = description.spec;
     chord.keyboardNotes = description.keyboardNotes;
+    chord.movedNotes.clear();
 }
 
 void Score::toggleAlternateNote (int part, int measure, const music::KeyboardNote& note)
@@ -1151,7 +1157,12 @@ std::vector<music::Tone> Score::getAlternateTones (int part, int measure) const
 
 void Score::reshuffle (int part, int measure)
 {
-    tidyChord (getMeasure (part, measure), true);
+    auto& target = getMeasure (part, measure);
+
+    if (target.chord.has_value())
+        target.chord->movedNotes.clear();
+
+    tidyChord (target, true);
     sendSynchronousChangeMessage();
 }
 
@@ -1243,13 +1254,18 @@ void Score::tidyChord (Measure& measure, bool reshuffleRandomOrder)
     // only hidden, since the alternate staff can be turned off for a whole part at once.
     measure.clearNotes (chord.style.staff);
 
+    // Notes moved by hand stay where they were moved while there are as many of them.
+    const auto numSlots = juce::jmax (1, getSlotsPerMeasure() / getChordNoteLength (chord));
+
+    if (! music::isMelodic (chord.style.type) || (int) chord.movedNotes.size() != numSlots)
+        chord.movedNotes.clear();
+
     if (chord.style.type != music::ChordType::random)
         return;
 
     // A Random chord has a note for each of its note lengths that fits in the measure, and keeps
     // its order until its notes or their number change. Every note is in it, if there's room.
     const auto midiNotes = getMidiNotes (*getChordNotes (chord));
-    const auto numSlots = juce::jmax (1, getSlotsPerMeasure() / getChordNoteLength (chord));
 
     const auto orderStillFits = (int) chord.randomOrder.size() == numSlots
         && std::all_of (chord.randomOrder.begin(), chord.randomOrder.end(), [&] (int midi)
@@ -1281,7 +1297,8 @@ namespace
     // 14: repeat signs, and first and second endings
     // 15: staccato notes
     // 16: page names
-    constexpr int formatVersion = 16;
+    // 17: arpeggio and Random chord notes moved by hand
+    constexpr int formatVersion = 17;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1520,6 +1537,17 @@ juce::var Score::toJSON (bool withPartIds) const
                 order.add (midi);
 
             chordObject->setProperty ("randomOrder", order);
+
+            if (! chord.movedNotes.empty())
+            {
+                juce::Array<juce::var> moved;
+
+                for (auto midi : chord.movedNotes)
+                    moved.add (midi);
+
+                chordObject->setProperty ("movedNotes", moved);
+            }
+
             measureObject->setProperty ("chord", chordObject);
         }
 
@@ -1686,6 +1714,11 @@ juce::Result Score::loadJSON (const juce::var& json)
                 if (const auto* order = c.getProperty ("randomOrder", {}).getArray())
                     for (const auto& midi : *order)
                         chord.randomOrder.push_back (readInt (midi, 0, 127, 0));
+
+                // Notes moved by hand, from version 17
+                if (const auto* moved = c.getProperty ("movedNotes", {}).getArray())
+                    for (const auto& midi : *moved)
+                        chord.movedNotes.push_back (readInt (midi, 0, 127, 0));
 
                 // One of the note lengths there are, in 32nds
                 if (const auto length = readInt (c.getProperty ("noteLength", {}), 1, maxSlotsPerMeasure, 0); length > 0)

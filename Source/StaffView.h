@@ -118,9 +118,29 @@ public:
     std::optional<int> getMoveTargetAt (float x) const;
 
     /** The note of its own whose head is at a point, as it's written, for editing: its pitch,
-        sharp or flat and all, and how long it is. A chord's notes aren't edited.
+        sharp or flat and all, and how long it is. A chord's notes aren't edited this way.
     */
     std::optional<Note> findEditableNoteAt (juce::Point<float>) const;
+
+    /** One of the notes an arpeggio or Random chord writes on its staff, which the Edit tool moves
+        to another of the chord's notes, and which of them it is, counting from the first.
+    */
+    struct ChordNote
+    {
+        Note note;
+        int index = 0;
+
+        bool operator== (const ChordNote&) const = default;
+    };
+
+    /** The arpeggio's or Random chord's note whose head is at a point, as it's written, if any. */
+    std::optional<ChordNote> findMovableChordNoteAt (juce::Point<float>) const;
+
+    /** The chord's note a chord's note being moved would go to if it were let go at a point: the
+        one nearest on its staff to the line or space there, at the same time. Nothing if that's
+        the note it already is.
+    */
+    std::optional<music::Tone> getChordNoteTarget (const ChordNote&, juce::Point<float>) const;
 
     /** Where a note being moved would go if it were let go at a point: on the line or space
         there, at the nearest step of its length without its dot, or where a note starts, as long
@@ -328,7 +348,11 @@ private:
     /** A note being moved, where it would go. */
     void drawMoveHint (juce::Graphics&) const;
     void setEditHover (std::optional<Note>);
+    void setChordNoteHover (std::optional<ChordNote>);
     void showNoteMenu (const Note&);
+
+    /** Moves one of a chord's notes to another of its notes, leaving the others where they are. */
+    void moveChordNote (const ChordNote&, int midiNote);
 
     /** Moves notes tied together, taking them out where they were, and adding them, tied, where they're going. */
     void moveNotes (const std::vector<Note>& from, const std::vector<Note>& to);
@@ -519,6 +543,9 @@ private:
     std::optional<Note> editedNote;                 // the note the mouse went down on while editing
     std::vector<Note> editHoverChain, editedChain;  // and the notes tied to them, which move with them
     std::vector<Note> movePlan;                     // where a drag would move them
+    std::optional<ChordNote> chordNoteHover;        // while editing, the chord's note under the mouse
+    std::optional<ChordNote> movedChordNote;        // the chord's note the mouse went down on
+    std::optional<music::Tone> chordNoteTarget;     // the chord's note a drag would move it to
     MusicGlyphs menuGlyphs;                         // for the notes in a note's menu
     juce::Point<float> lastErasePoint;
     Erasable hoverErasable;

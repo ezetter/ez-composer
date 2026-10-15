@@ -231,8 +231,11 @@ void ChordEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void ChordEditor::edit (const std::function<void (MeasureChord&)>& change)
 {
+    // Whatever's chosen puts the chord's notes back where its chord type writes them, if any
+    // have been moved by hand, even if it's chosen already.
     auto newChord = chord;
     change (newChord);
+    newChord.movedNotes.clear();
 
     if (newChord == chord)
         return;
@@ -249,7 +252,7 @@ void ChordEditor::chooseChordType (int itemId)
 {
     const auto type = (music::ChordType) (itemId - 1);
 
-    if (type != chord.style.type)
+    if (type != chord.style.type || ! chord.movedNotes.empty())
         edit ([type] (MeasureChord& c) { c.style.type = type; });
 
     if (type == music::ChordType::random && score.getChord (part, measure) != nullptr && chord.hasNotes())
