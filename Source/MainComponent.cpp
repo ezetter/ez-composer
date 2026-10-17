@@ -51,11 +51,13 @@ namespace
     // And the effects, as JSON
     const char* const effectsKey = "effects";
 
-    // And how saved progressions were last applied: the chord type, clef, and note length, if one was chosen
+    // And how saved progressions were last applied: the chord type and clef
     const char* const progressionTypeKey = "progressionChordType";
     const char* const progressionClefKey = "progressionClef";
-    const char* const progressionLengthKey = "progressionNoteLength";
-    const char* const progressionRhythmKey = "progressionRhythm";       // by name
+
+    // The note length and rhythm they were kept under, before each started out Automatic and No Rhythm
+    const char* const oldProgressionLengthKey = "progressionNoteLength";
+    const char* const oldProgressionRhythmKey = "progressionRhythm";
 
     // The MIDI menu's items are numbered from here, in the order of the inputs they're for.
     constexpr int firstMidiInputItem = 1000;
@@ -393,11 +395,8 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     progressionStyle.type = (music::ChordType) juce::jlimit (0, 4, settings.getIntValue (progressionTypeKey, 0));
     progressionStyle.staff = settings.getValue (progressionClefKey) == "bass" ? Staff::bass : Staff::treble;
 
-    if (const auto length = settings.getIntValue (progressionLengthKey, 0); length > 0)
-        progressionStyle.noteLength = Score::fitNoteLength (length, length);
-
-    if (const auto* rhythm = savedRhythms.find (settings.getValue (progressionRhythmKey)); rhythm != nullptr && settings.getValue (progressionRhythmKey).isNotEmpty())
-        progressionStyle.rhythm = *rhythm;
+    settings.removeValue (oldProgressionLengthKey);
+    settings.removeValue (oldProgressionRhythmKey);
     sidebarContent.addAndMakeVisible (scorePanel);
     sidebar.setViewedComponent (&sidebarContent, false);
     sidebar.setScrollBarsShown (true, false);
@@ -1250,7 +1249,12 @@ void MainComponent::showApplyProgressionPanel (juce::Component& button)
     if (savedProgressions.getAll().empty())
         return;
 
-    auto panel = std::make_unique<ApplyProgressionPanel> (savedProgressions.getAll(), progressionStyle, activePart, getPlaybackMeasure(),
+    // With the chord type and clef chosen last, but Automatic note lengths and no rhythm, each time
+    auto startingStyle = progressionStyle;
+    startingStyle.noteLength.reset();
+    startingStyle.rhythm.reset();
+
+    auto panel = std::make_unique<ApplyProgressionPanel> (savedProgressions.getAll(), startingStyle, activePart, getPlaybackMeasure(),
                                                           score.getBeatsPerMeasure(), lastProgressionApplied, savedRhythms.getAll());
     auto* panelPointer = panel.get();
     const auto close = [panelPointer]
@@ -1273,13 +1277,11 @@ void MainComponent::showApplyProgressionPanel (juce::Component& button)
 
 void MainComponent::applyProgression (const SavedProgression& progression, const ChordStyle& style)
 {
-    // The style's kept for next time.
+    // The chord type and clef are kept for next time.
     progressionStyle = style;
     lastProgressionApplied = progression.name;
     settings.setValue (progressionTypeKey, (int) style.type);
     settings.setValue (progressionClefKey, style.staff == Staff::bass ? "bass" : "treble");
-    settings.setValue (progressionLengthKey, style.noteLength.value_or (0));
-    settings.setValue (progressionRhythmKey, style.rhythm.has_value() ? style.rhythm->name : juce::String());
 
     const auto part = activePart;
     const auto first = getPlaybackMeasure();

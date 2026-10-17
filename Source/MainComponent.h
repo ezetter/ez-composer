@@ -627,7 +627,7 @@ private:
     juce::Component::SafePointer<ApplyRhythmPanel> applyRhythmPanel;     // while it's showing
     int activePartId = 0;               // so the active part can be found again when parts are added or taken out
     ChordStyle lastChordStyle;          // what a new chord starts with: whichever was chosen last
-    ChordStyle progressionStyle;        // what a saved progression is applied with: the one chosen last
+    ChordStyle progressionStyle;        // what a saved progression was applied with last: its chord type and clef start the next
     juce::String lastProgressionApplied;
     juce::Component::SafePointer<ApplyProgressionPanel> applyProgressionPanel;     // while it's showing
     juce::Component::SafePointer<juce::Component> keyListenerTarget;
