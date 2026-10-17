@@ -31,6 +31,17 @@ struct Note
     }
 };
 
+/** A note to be written, and whether it's tied to the next note of its pitch on its staff, the
+    one that starts as it ends.
+*/
+struct PlacedNote
+{
+    Note note;
+    bool tiedToNext = false;
+
+    bool operator== (const PlacedNote&) const = default;
+};
+
 /** A crescendo or decrescendo in one of a score's parts, starting on a beat or halfway through one. */
 struct HairpinMark
 {
@@ -279,6 +290,13 @@ public:
         Beats are counted from 0, and notes start on them or on a 32nd note between them.
     */
     bool addNote (const Note&);
+
+    /** Writes notes in one go, with ties to the notes they say, in place of everything on each of
+        their staves for a stretch, in 32nds from the start of the score: notes starting in it are
+        taken out, and one held over into it ends where it starts. Adds measures at the end, in
+        every part, for any that go past it. Measures where a chord has the staff are left alone.
+    */
+    void placeNotes (int part, const std::array<std::optional<juce::Range<int>>, 2>& clearedByStaff, const std::vector<PlacedNote>&);
 
     /** The notes starting at one point of one staff, lowest first. */
     const std::vector<music::Pitch>& getNotes (int part, Staff, int measure, double beat) const;
@@ -599,6 +617,9 @@ private:
 
     Measure& getMeasure (int part, int measure);
     const Measure& getMeasure (int part, int measure) const;
+
+    /** Adds a note as addNote() does, without saying so. */
+    bool putNote (const Note&);
     void tidyChord (Measure&, bool reshuffleRandomOrder = false);
 
     /** After the key changes: chords follow their numerals, and notes set on the piano keep

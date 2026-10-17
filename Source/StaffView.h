@@ -2,6 +2,7 @@
 
 #include "MeasureContent.h"
 #include "MusicGlyphs.h"
+#include "Rhythms.h"
 #include "ScaleTool.h"
 #include "Score.h"
 
@@ -201,6 +202,20 @@ public:
     */
     void setScalePlacement (std::optional<ScaleSettings>);
     std::function<void()> onScalePlaced;
+
+    /** A saved rhythm, to be written so many times over */
+    struct RhythmPlacement
+    {
+        SavedRhythm rhythm;
+        int times = 1;
+    };
+
+    /** Turns on writing a saved rhythm, or with none, turns it off. While it's on, faint notes
+        show where it would go, and the next click on a staff writes it there, from the beat
+        clicked, at the line or space clicked, and then calls onRhythmPlaced.
+    */
+    void setRhythmPlacement (std::optional<RhythmPlacement>);
+    std::function<void()> onRhythmPlaced;
 
     /** What the eraser would take out at a point. */
     struct Erasable
@@ -443,6 +458,18 @@ private:
     void placeScale (const Note& start);
     void drawScaleHint (juce::Graphics&) const;
 
+    /** Whether the next click adds notes from the scale or a rhythm, instead of what it does otherwise */
+    bool isPlacingNotes() const noexcept { return scalePlacement.has_value() || rhythmPlacement.has_value(); }
+
+    /** Writes the rhythm being placed from a note, in place of what's on its staves there, as
+        planRhythm() plans it, adding measures if it runs past the end.
+    */
+    void placeRhythm (const Note& start);
+    void drawRhythmHint (juce::Graphics&) const;
+
+    /** A faint tie, from one note to another of its pitch, as where a drag would tie them */
+    void drawFaintTie (juce::Graphics&, const Note& from, const Note& to) const;
+
     /** The note a click at this point would add or take out. In a measure with a Random chord,
         each of whose notes goes on its own, it's the very note under the point, if there is one.
     */
@@ -548,7 +575,8 @@ private:
     double noteLength = 1.0;
     bool staccato = false;                          // whether the notes clicks add are staccato
     std::optional<ScaleSettings> scalePlacement;    // adding notes from the scale, at the next click
-    std::optional<Note> scaleHover;                 // where it would go
+    std::optional<RhythmPlacement> rhythmPlacement; // writing a rhythm, at the next click
+    std::optional<Note> scaleHover;                 // where either would go
     juce::Random random;
     std::optional<music::Marking> marking;          // marked by clicks and drags, instead of adding notes
     std::optional<std::pair<int, double>> hoverMarkPoint, pressedDynamic, pressedPedal;

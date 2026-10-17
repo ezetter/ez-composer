@@ -440,7 +440,7 @@ void StaffView::setScalePlacement (std::optional<ScaleSettings> settings)
     scaleHover.reset();
     setHoverNote ({});
 
-    if (scalePlacement.has_value())
+    if (isPlacingNotes())
         setMouseCursor (juce::MouseCursor::CrosshairCursor);
     else
         setMouseCursor (erasing ? EraserButton::createCursor() : juce::MouseCursor (juce::MouseCursor::NormalCursor));
@@ -518,6 +518,66 @@ void StaffView::placeScale (const Note& start)
         onScalePlaced();
 }
 
+void StaffView::setRhythmPlacement (std::optional<RhythmPlacement> placement)
+{
+    rhythmPlacement = std::move (placement);
+    scaleHover.reset();
+    setHoverNote ({});
+
+    if (isPlacingNotes())
+        setMouseCursor (juce::MouseCursor::CrosshairCursor);
+    else
+        setMouseCursor (erasing ? EraserButton::createCursor() : juce::MouseCursor (juce::MouseCursor::NormalCursor));
+
+    repaint();
+}
+
+void StaffView::placeRhythm (const Note& start)
+{
+    const auto plan = planRhythm (rhythmPlacement->rhythm, rhythmPlacement->times, start, score.getBeatsPerMeasure());
+    score.placeNotes (part, plan.spans, plan.notes);
+
+    if (onRhythmPlaced != nullptr)
+        onRhythmPlaced();
+}
+
+void StaffView::drawRhythmHint (juce::Graphics& g) const
+{
+    if (! rhythmPlacement.has_value() || ! scaleHover.has_value())
+        return;
+
+    // Faint notes where they'd go, with faint ties, in the measures there are, but those a chord
+    // has the staff in
+    const auto notes = planRhythm (rhythmPlacement->rhythm, rhythmPlacement->times, *scaleHover, score.getBeatsPerMeasure()).notes;
+    const auto shown = [&] (const Note& note) { return note.measure < score.getNumMeasures() && ! score.chordUsesStaff (part, note.measure, note.staff); };
+
+    for (size_t i = 0; i < notes.size(); ++i)
+    {
+        const auto& note = notes[i].note;
+
+        if (! shown (note))
+            continue;
+
+        drawGhostNote (g, note);
+
+        if (notes[i].tiedToNext && i + 1 < notes.size() && notes[i + 1].note.staff == note.staff && shown (notes[i + 1].note))
+            drawFaintTie (g, note, notes[i + 1].note);
+    }
+}
+
+void StaffView::drawFaintTie (juce::Graphics& g, const Note& from, const Note& to) const
+{
+    const auto position = from.pitch.step - getBottomLineStep (from.staff);
+    const auto upwards = position >= middleLine;
+    const auto y = getY (from.staff, position) + 0.45f * staffSpace * (upwards ? -1.0f : 1.0f);
+    const auto halfWidth = 0.6f * staffSpace;
+
+    g.setColour (hoverColour);
+    drawTie (g, { getOnsetX (from.measure, from.beat) + halfWidth + 0.15f * staffSpace, y },
+             { getOnsetX (to.measure, to.beat) - halfWidth - 0.15f * staffSpace, y }, upwards);
+    g.setColour (inkColour);
+}
+
 void StaffView::drawScaleHint (juce::Graphics& g) const
 {
     if (! scalePlacement.has_value() || ! scaleHover.has_value())
@@ -567,7 +627,7 @@ void StaffView::setSelecting (bool shouldSelect)
     setHoverMarkPoint ({});
     setEditHover ({});
 
-    if (! erasing && ! scalePlacement.has_value())
+    if (! erasing && ! isPlacingNotes())
         setMouseCursor (juce::MouseCursor::NormalCursor);
 
     repaint();
@@ -676,7 +736,7 @@ void StaffView::setEditing (bool shouldEdit)
     setEditHover ({});
     setChordNoteHover ({});
 
-    if (! erasing && ! scalePlacement.has_value())
+    if (! erasing && ! isPlacingNotes())
         setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
@@ -1662,6 +1722,7 @@ void StaffView::paint (juce::Graphics& g)
     drawPedals (g);
     drawHoverDynamic (g);
     drawScaleHint (g);
+    drawRhythmHint (g);
 
     drawEndings (g);
 
@@ -2513,18 +2574,7 @@ void StaffView::drawMoveHint (juce::Graphics& g) const
         drawGhostNote (g, note);
 
         if (i + 1 < movePlan.size())
-        {
-            const auto& next = movePlan[i + 1];
-            const auto position = note.pitch.step - getBottomLineStep (note.staff);
-            const auto upwards = position >= middleLine;
-            const auto y = getY (note.staff, position) + 0.45f * staffSpace * (upwards ? -1.0f : 1.0f);
-            const auto halfWidth = 0.6f * staffSpace;
-
-            g.setColour (hoverColour);
-            drawTie (g, { getOnsetX (note.measure, note.beat) + halfWidth + 0.15f * staffSpace, y },
-                     { getOnsetX (next.measure, next.beat) - halfWidth - 0.15f * staffSpace, y }, upwards);
-            g.setColour (inkColour);
-        }
+            drawFaintTie (g, note, movePlan[i + 1]);
     }
 }
 
@@ -2870,7 +2920,7 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
-    if (scalePlacement.has_value())
+    if (isPlacingNotes())
     {
         if (const auto start = getNoteAt (e.position); start != scaleHover)
         {
@@ -3036,8 +3086,8 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // Adding from the scale, a click says where, when the mouse is let go.
-    if (scalePlacement.has_value())
+    // Adding from the scale, or a rhythm, a click says where, when the mouse is let go.
+    if (isPlacingNotes())
     {
         pressedNote = getNoteAt (e.position);
         return;
@@ -3268,13 +3318,18 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
         return;
     }
 
-    if (scalePlacement.has_value())
+    if (isPlacingNotes())
     {
         const auto start = pressedNote;
         pressedNote.reset();
 
         if (start.has_value() && ! e.mods.isPopupMenu() && ! e.mouseWasDraggedSinceMouseDown())
-            placeScale (*start);
+        {
+            if (scalePlacement.has_value())
+                placeScale (*start);
+            else
+                placeRhythm (*start);
+        }
 
         return;
     }

@@ -384,7 +384,10 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     scorePanel.onScale = [this] (juce::Component& button) { showScalePanel (button); };
     scorePanel.onSaveProgression = [this] (juce::Component& button) { showSaveProgressionPanel (button); };
     scorePanel.onApplyProgression = [this] (juce::Component& button) { showApplyProgressionPanel (button); };
-    scorePanel.setNumSavedProgressions ((int) savedProgressions.getProgressions().size());
+    scorePanel.setNumSavedProgressions ((int) savedProgressions.getAll().size());
+    scorePanel.onSaveRhythm = [this] (juce::Component& button) { showSaveRhythmPanel (button); };
+    scorePanel.onApplyRhythm = [this] (juce::Component& button) { showApplyRhythmPanel (button); };
+    scorePanel.setNumSavedRhythms ((int) savedRhythms.getAll().size());
 
     progressionStyle.type = (music::ChordType) juce::jlimit (0, 4, settings.getIntValue (progressionTypeKey, 0));
     progressionStyle.staff = settings.getValue (progressionClefKey) == "bass" ? Staff::bass : Staff::treble;
@@ -687,9 +690,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         return true;
     }
 
-    if (key == juce::KeyPress::escapeKey && placingScale)
+    if (key == juce::KeyPress::escapeKey && (placingScale || placingRhythm))
     {
-        stopPlacingScale();
+        stopPlacingNotes();
         return true;
     }
 
@@ -994,6 +997,7 @@ void MainComponent::insertTrack (int index, bool reloadFromSettings)
 
     // Adding from the scale is done once the notes have gone in.
     view.onScalePlaced = [this] { stopPlacingScale(); };
+    view.onRhythmPlaced = [this] { stopPlacingRhythm(); };
 
     // It does what clicks on the other parts do.
     view.setNoteLength (noteLengthPicker.getLength());
@@ -1211,7 +1215,7 @@ void MainComponent::saveProgression (const juce::String& name)
             return;
 
         safeThis->savedProgressions.save (progression);
-        safeThis->scorePanel.setNumSavedProgressions ((int) safeThis->savedProgressions.getProgressions().size());
+        safeThis->scorePanel.setNumSavedProgressions ((int) safeThis->savedProgressions.getAll().size());
     };
 
     const auto* existing = savedProgressions.find (name);
@@ -1239,10 +1243,10 @@ void MainComponent::saveProgression (const juce::String& name)
 
 void MainComponent::showApplyProgressionPanel (juce::Component& button)
 {
-    if (savedProgressions.getProgressions().empty())
+    if (savedProgressions.getAll().empty())
         return;
 
-    auto panel = std::make_unique<ApplyProgressionPanel> (savedProgressions.getProgressions(), progressionStyle, activePart, getPlaybackMeasure(),
+    auto panel = std::make_unique<ApplyProgressionPanel> (savedProgressions.getAll(), progressionStyle, activePart, getPlaybackMeasure(),
                                                           score.getBeatsPerMeasure(), lastProgressionApplied);
     auto* panelPointer = panel.get();
     const auto close = [panelPointer]
@@ -1337,19 +1341,19 @@ void MainComponent::deleteSavedProgression (const juce::String& name)
 
                                       auto& library = safeThis->savedProgressions;
                                       library.remove (name);
-                                      safeThis->scorePanel.setNumSavedProgressions ((int) library.getProgressions().size());
+                                      safeThis->scorePanel.setNumSavedProgressions ((int) library.getAll().size());
 
                                       // The box shows what's left, and closes once there's nothing.
                                       if (auto* panel = safeThis->applyProgressionPanel.getComponent())
                                       {
-                                          if (library.getProgressions().empty())
+                                          if (library.getAll().empty())
                                           {
                                               if (auto* box = panel->findParentComponentOfClass<juce::CallOutBox>())
                                                   box->dismiss();
                                           }
                                           else
                                           {
-                                              panel->setProgressions (library.getProgressions());
+                                              panel->setProgressions (library.getAll());
                                           }
                                       }
                                   });
@@ -1403,10 +1407,175 @@ void MainComponent::stopPlacingScale()
         view->setScalePlacement ({});
 }
 
-void MainComponent::setNoteLength (double beats)
+void MainComponent::stopPlacingNotes()
 {
     if (placingScale)
         stopPlacingScale();
+
+    if (placingRhythm)
+        stopPlacingRhythm();
+}
+
+void MainComponent::showSaveRhythmPanel (juce::Component& button)
+{
+    if (! score.hasNotes (activePart) && ! score.hasChords (activePart))
+        return;
+
+    // From the measure it plays from, or the last, if it plays from the end
+    const auto part = activePart;
+    const auto first = juce::jmin (getPlaybackMeasure(), score.getNumMeasures() - 1);
+
+    // A name of its own to start with
+    auto number = (int) savedRhythms.getAll().size() + 1;
+
+    while (savedRhythms.find ("Rhythm " + juce::String (number)) != nullptr)
+        ++number;
+
+    auto panel = std::make_unique<SaveRhythmPanel> (part, first, getRhythmLengthChoices (score, part, first),
+                                                    [this, part, first] (int count) { return getRhythm (score, part, first, count); },
+                                                    "Rhythm " + juce::String (number));
+    auto* panelPointer = panel.get();
+    const auto close = [panelPointer]
+    {
+        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    };
+
+    panel->onCancel = close;
+    panel->onSave = [this, close, first] (const juce::String& name, int count)
+    {
+        close();
+        saveRhythm (name, first, count);
+    };
+
+    juce::CallOutBox::launchAsynchronously (std::move (panel), getLocalArea (&button, button.getLocalBounds()), this);
+}
+
+void MainComponent::saveRhythm (const juce::String& name, int firstMeasure, int numMeasures)
+{
+    auto rhythm = getRhythm (score, activePart, firstMeasure, numMeasures);
+
+    if (! rhythm.hasNotes() || name.isEmpty())
+        return;
+
+    rhythm.name = name;
+    const auto keep = [safeThis = juce::Component::SafePointer (this), rhythm]
+    {
+        if (safeThis == nullptr)
+            return;
+
+        safeThis->savedRhythms.save (rhythm);
+        safeThis->scorePanel.setNumSavedRhythms ((int) safeThis->savedRhythms.getAll().size());
+    };
+
+    const auto* existing = savedRhythms.find (name);
+
+    if (existing == nullptr)
+    {
+        keep();
+        return;
+    }
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle ("Replace " + existing->name.quoted() + "?")
+                                      .withMessage ("A rhythm called " + existing->name.quoted() + " is saved already. Saving this one replaces it.")
+                                      .withButton ("Replace")
+                                      .withButton ("Cancel")
+                                      .withAssociatedComponent (this),
+                                  [keep] (int result)
+                                  {
+                                      // Replace is 1, and Cancel 0.
+                                      if (result == 1)
+                                          keep();
+                                  });
+}
+
+void MainComponent::showApplyRhythmPanel (juce::Component& button)
+{
+    if (savedRhythms.getAll().empty())
+        return;
+
+    auto panel = std::make_unique<ApplyRhythmPanel> (savedRhythms.getAll(), lastRhythmTimes, lastRhythmPlaced);
+    auto* panelPointer = panel.get();
+    const auto close = [panelPointer]
+    {
+        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    };
+
+    applyRhythmPanel = panelPointer;
+    panel->onCancel = close;
+    panel->onDelete = [this] (const juce::String& name) { deleteSavedRhythm (name); };
+    panel->onPlace = [this, close] (const SavedRhythm& rhythm, int times)
+    {
+        close();
+        startPlacingRhythm (rhythm, times);
+    };
+
+    juce::CallOutBox::launchAsynchronously (std::move (panel), getLocalArea (&button, button.getLocalBounds()), this);
+}
+
+void MainComponent::startPlacingRhythm (const SavedRhythm& rhythm, int times)
+{
+    // Whatever tool was chosen, it's back to notes afterwards.
+    setNoteLength (noteLengthPicker.getLength());
+    lastRhythmTimes = times;
+    lastRhythmPlaced = rhythm.name;
+    placingRhythm = true;
+
+    for (auto& view : staffSystems.views)
+        view->setRhythmPlacement (StaffView::RhythmPlacement { rhythm, times });
+}
+
+void MainComponent::stopPlacingRhythm()
+{
+    placingRhythm = false;
+
+    for (auto& view : staffSystems.views)
+        view->setRhythmPlacement ({});
+}
+
+void MainComponent::deleteSavedRhythm (const juce::String& name)
+{
+    if (savedRhythms.find (name) == nullptr)
+        return;
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle ("Delete " + name.quoted() + "?")
+                                      .withMessage ("The rhythm is taken out of the ones saved, for every score. This can't be undone.")
+                                      .withButton ("Delete")
+                                      .withButton ("Cancel")
+                                      .withAssociatedComponent (this),
+                                  [safeThis = juce::Component::SafePointer (this), name] (int result)
+                                  {
+                                      if (safeThis == nullptr || result != 1)
+                                          return;
+
+                                      auto& library = safeThis->savedRhythms;
+                                      library.remove (name);
+                                      safeThis->scorePanel.setNumSavedRhythms ((int) library.getAll().size());
+
+                                      // The box shows what's left, and closes once there's nothing.
+                                      if (auto* panel = safeThis->applyRhythmPanel.getComponent())
+                                      {
+                                          if (library.getAll().empty())
+                                          {
+                                              if (auto* box = panel->findParentComponentOfClass<juce::CallOutBox>())
+                                                  box->dismiss();
+                                          }
+                                          else
+                                          {
+                                              panel->setRhythms (library.getAll());
+                                          }
+                                      }
+                                  });
+}
+
+void MainComponent::setNoteLength (double beats)
+{
+    stopPlacingNotes();
 
     stopSelecting();
 
@@ -1434,8 +1603,7 @@ void MainComponent::setStaccato (bool staccato)
 
 void MainComponent::setMarking (std::optional<music::Marking> marking)
 {
-    if (placingScale)
-        stopPlacingScale();
+    stopPlacingNotes();
 
     if (! marking.has_value())
     {
@@ -1454,8 +1622,7 @@ void MainComponent::setMarking (std::optional<music::Marking> marking)
 
 void MainComponent::setErasing (bool shouldErase)
 {
-    if (placingScale)
-        stopPlacingScale();
+    stopPlacingNotes();
 
     if (! shouldErase)
     {
@@ -1499,8 +1666,7 @@ void MainComponent::setSelecting (bool shouldSelect)
         return;
     }
 
-    if (placingScale)
-        stopPlacingScale();
+    stopPlacingNotes();
 
     // Clicks select measures, rather than adding notes, marking, editing or erasing.
     setEditing (false);

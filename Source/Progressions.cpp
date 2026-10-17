@@ -4,8 +4,6 @@
 
 namespace
 {
-    constexpr const char* progressionsKey = "savedProgressions";
-
     /** A number from the settings, or the fallback if it's missing or out of range. */
     int readInt (const juce::var& value, int lowest, int highest, int fallback)
     {
@@ -23,7 +21,7 @@ namespace
 
     std::optional<music::Spelling> readSpelling (const juce::var& value)
     {
-        const music::Spelling spelling { readInt (value[0], 0, 6, -1), readInt (value[1], -2, 2, 99) };
+        const music::Spelling spelling { readInt (getListItem (value, 0), 0, 6, -1), readInt (getListItem (value, 1), -2, 2, 99) };
 
         if (spelling.letter < 0 || spelling.alter == 99)
             return {};
@@ -35,11 +33,6 @@ namespace
     {
         return chord.keyboardNotes.has_value() ? music::createChord (key, *chord.keyboardNotes, chord.spec, chord.staff)
                                                : music::createChord (key, chord.spec, chord.staff);
-    }
-
-    bool namesMatch (const juce::String& a, const juce::String& b)
-    {
-        return a.compareIgnoreCase (b) == 0;
     }
 }
 
@@ -93,7 +86,7 @@ std::vector<MeasureChord> SavedProgression::createChords (music::Key newKey, con
 
 juce::String SavedProgression::tidyName (const juce::String& name)
 {
-    return name.replaceCharacters ("\r\n\t", "   ").trim().substring (0, maxNameLength).trimEnd();
+    return tidySavedName (name, maxNameLength);
 }
 
 juce::var SavedProgression::toJSON() const
@@ -179,7 +172,8 @@ std::optional<SavedProgression> SavedProgression::fromJSON (const juce::var& jso
 
             for (const auto& item : *notes)
             {
-                const music::KeyboardNote note { readInt (item[0], 0, 127, -1), { readInt (item[1], 0, 6, -1), readInt (item[2], -2, 2, 99) } };
+                const music::KeyboardNote note { readInt (getListItem (item, 0), 0, 127, -1),
+                                                 { readInt (getListItem (item, 1), 0, 6, -1), readInt (getListItem (item, 2), -2, 2, 99) } };
 
                 // Only real notes, spelled as they sound
                 if (note.midi >= 0 && note.spelling.letter >= 0 && note.spelling.alter != 99
@@ -218,60 +212,4 @@ SavedProgression getProgression (const Score& score, int part)
 
     progression.name = progression.getNumerals();
     return progression;
-}
-
-//==============================================================================
-ProgressionLibrary::ProgressionLibrary (juce::PropertiesFile& settingsToUse)
-    : settings (settingsToUse)
-{
-    const auto saved = juce::JSON::parse (settings.getValue (progressionsKey));
-
-    if (const auto* list = saved.getArray())
-        for (const auto& item : *list)
-            if (auto progression = SavedProgression::fromJSON (item); progression.has_value() && find (progression->name) == nullptr)
-                progressions.push_back (std::move (*progression));
-
-    std::sort (progressions.begin(), progressions.end(), [] (const SavedProgression& a, const SavedProgression& b)
-               { return a.name.compareNatural (b.name) < 0; });
-}
-
-const SavedProgression* ProgressionLibrary::find (const juce::String& name) const
-{
-    const auto found = std::find_if (progressions.begin(), progressions.end(), [&] (const SavedProgression& p) { return namesMatch (p.name, name); });
-    return found != progressions.end() ? &*found : nullptr;
-}
-
-void ProgressionLibrary::save (const SavedProgression& progression)
-{
-    erase (progression.name);
-
-    const auto at = std::find_if (progressions.begin(), progressions.end(), [&] (const SavedProgression& p)
-                                  { return progression.name.compareNatural (p.name) < 0; });
-    progressions.insert (at, progression);
-    write();
-}
-
-void ProgressionLibrary::remove (const juce::String& name)
-{
-    if (erase (name))
-        write();
-}
-
-bool ProgressionLibrary::erase (const juce::String& name)
-{
-    const auto before = progressions.size();
-    progressions.erase (std::remove_if (progressions.begin(), progressions.end(), [&] (const SavedProgression& p) { return namesMatch (p.name, name); }),
-                        progressions.end());
-    return progressions.size() != before;
-}
-
-void ProgressionLibrary::write()
-{
-    juce::Array<juce::var> list;
-
-    for (const auto& progression : progressions)
-        list.add (progression.toJSON());
-
-    settings.setValue (progressionsKey, juce::JSON::toString (juce::var (list), true));
-    settings.saveIfNeeded();
 }

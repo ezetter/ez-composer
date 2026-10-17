@@ -45,6 +45,8 @@ target_sources(AnthropoceneMusic
         Source/ProgressionPanels.cpp
         Source/Progressions.cpp
         Source/Recorder.cpp
+        Source/RhythmPanels.cpp
+        Source/Rhythms.cpp
         Source/Score.cpp
         Source/ScaleTool.cpp
         Source/ScoreDocument.cpp

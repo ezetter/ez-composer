@@ -17,6 +17,7 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     controls::makeHeading (timeSignatureHeading, "Time signature");
     controls::makeHeading (alternateHeading, "Alternate staff");
     controls::makeHeading (progressionHeading, "Progression");
+    controls::makeHeading (rhythmHeading, "Rhythm");
 
     // The key is its tonic's letter, with Major or Minor beside it.
     keyBox.setTooltip ("The key's tonic. In another key, chords follow their numerals into it, and notes keep their pitches.");
@@ -36,6 +37,12 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
 
     saveProgressionButton.onClick = [this] { if (onSaveProgression != nullptr) onSaveProgression (saveProgressionButton); };
     applyProgressionButton.onClick = [this] { if (onApplyProgression != nullptr) onApplyProgression (applyProgressionButton); };
+
+    for (auto* button : { &saveRhythmButton, &applyRhythmButton })
+        button->setWantsKeyboardFocus (false);
+
+    saveRhythmButton.onClick = [this] { if (onSaveRhythm != nullptr) onSaveRhythm (saveRhythmButton); };
+    applyRhythmButton.onClick = [this] { if (onApplyRhythm != nullptr) onApplyRhythm (applyRhythmButton); };
 
     signatureLabel.setFont (juce::FontOptions (12.0f));
     signatureLabel.setColour (juce::Label::textColourId, controls::secondaryText);
@@ -73,7 +80,8 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     for (auto* component : std::initializer_list<juce::Component*> { &keyHeading, &keyBox, &majorButton, &minorButton, &signatureLabel, &timeSignatureHeading,
                                                                      &timeSignatureBox, &alternateHeading, &alternateBox,
                                                                      &progressionHeading, &copyChordsButton, &saveProgressionButton,
-                                                                     &applyProgressionButton, &generateNotesButton })
+                                                                     &applyProgressionButton, &generateNotesButton,
+                                                                     &rhythmHeading, &saveRhythmButton, &applyRhythmButton })
         addAndMakeVisible (component);
 
     score.addChangeListener (this);
@@ -93,7 +101,7 @@ ScorePanel::~ScorePanel()
 
 int ScorePanel::getIdealHeight() const
 {
-    return 4 * (headingHeight + 2) + 7 * controlHeight + (2 + 16) + 3 * buttonGap + 3 * sectionGap;
+    return 5 * (headingHeight + 2) + 9 * controlHeight + (2 + 16) + 4 * buttonGap + 4 * sectionGap;
 }
 
 void ScorePanel::resized()
@@ -130,6 +138,13 @@ void ScorePanel::resized()
     }
 
     generateNotesButton.setBounds (bounds.removeFromTop (controlHeight));
+    bounds.removeFromTop (sectionGap);
+
+    rhythmHeading.setBounds (bounds.removeFromTop (headingHeight));
+    bounds.removeFromTop (2);
+    saveRhythmButton.setBounds (bounds.removeFromTop (controlHeight));
+    bounds.removeFromTop (buttonGap);
+    applyRhythmButton.setBounds (bounds.removeFromTop (controlHeight));
 }
 
 void ScorePanel::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -140,6 +155,12 @@ void ScorePanel::changeListenerCallback (juce::ChangeBroadcaster*)
 void ScorePanel::setNumSavedProgressions (int count)
 {
     numSavedProgressions = count;
+    update();
+}
+
+void ScorePanel::setNumSavedRhythms (int count)
+{
+    numSavedRhythms = count;
     update();
 }
 
@@ -182,6 +203,15 @@ void ScorePanel::update()
     saveProgressionButton.setTooltip (score.hasChords (part) ? "Save instrument " + from + "'s chords, to apply them again, in this score or another"
                                                              : "Instrument " + from + " has no chords to save yet. Add one with Add Chord, over a measure.");
     applyProgressionButton.setEnabled (numSavedProgressions > 0);
+
+    // So can its rhythm, with notes or chords to make one, and saved ones be written into it.
+    const auto hasMusic = score.hasNotes (part) || score.hasChords (part);
+    saveRhythmButton.setEnabled (hasMusic);
+    saveRhythmButton.setTooltip (hasMusic ? "Save the rhythm of instrument " + from + "'s notes, from where it plays from, to apply again"
+                                          : "Instrument " + from + " has no notes to save the rhythm of yet");
+    applyRhythmButton.setEnabled (numSavedRhythms > 0);
+    applyRhythmButton.setTooltip (numSavedRhythms > 0 ? "Choose a saved rhythm, then click on a staff of any instrument to write it there"
+                                                      : juce::String ("No rhythms are saved yet. Save one with Save Rhythm."));
     applyProgressionButton.setTooltip (numSavedProgressions > 0 ? "Write a saved progression's chords into instrument " + from + ", from where it plays from"
                                                                 : juce::String ("No progressions are saved yet. Save one with Save Progression."));
 

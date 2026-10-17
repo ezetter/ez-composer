@@ -1,8 +1,7 @@
 #pragma once
 
+#include "SavedLibrary.h"
 #include "Score.h"
-
-#include <juce_data_structures/juce_data_structures.h>
 
 #include <optional>
 #include <vector>
@@ -27,6 +26,7 @@ struct SavedProgression
     };
 
     static constexpr int maxNameLength = 80;
+    static constexpr const char* settingsKey = "savedProgressions";
 
     juce::String name;
     music::Key key { music::getMajorKeys()[0] };       // the key it was saved in
@@ -56,30 +56,5 @@ struct SavedProgression
 /** A part's progression: the chords of the measures that have one, in order, named for their numerals. */
 SavedProgression getProgression (const Score&, int part);
 
-/** The progressions saved, for every score, kept in the app's settings. Names are told apart
-    without regard to case.
-*/
-class ProgressionLibrary
-{
-public:
-    explicit ProgressionLibrary (juce::PropertiesFile& settings);
-
-    /** In order of name */
-    const std::vector<SavedProgression>& getProgressions() const noexcept { return progressions; }
-
-    const SavedProgression* find (const juce::String& name) const;
-
-    /** Keeps a progression, in place of one with the same name. */
-    void save (const SavedProgression&);
-    void remove (const juce::String& name);
-
-private:
-    /** Takes out the one with a name, if there is one, saying whether there was. */
-    bool erase (const juce::String& name);
-    void write();
-
-    juce::PropertiesFile& settings;
-    std::vector<SavedProgression> progressions;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProgressionLibrary)
-};
+/** The progressions saved, for every score, in the app's settings. */
+using ProgressionLibrary = SavedLibrary<SavedProgression>;

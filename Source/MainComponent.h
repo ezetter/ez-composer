@@ -16,6 +16,8 @@
 #include "PositionRuler.h"
 #include "ProgressionPanels.h"
 #include "Progressions.h"
+#include "RhythmPanels.h"
+#include "Rhythms.h"
 #include "Recorder.h"
 #include "Score.h"
 #include "ScoreDocument.h"
@@ -285,6 +287,30 @@ private:
     void stopPlacingScale();
     bool isPlacingScale() const noexcept { return placingScale; }
 
+    /** Shows how many measures to save the active part's rhythm of, from the measure it plays
+        from, and a name for it, in a box beside Save Rhythm.
+    */
+    void showSaveRhythmPanel (juce::Component& button);
+
+    /** Keeps the rhythm of the active part's measures, from one, under a name, for every score,
+        asking first if it would take the place of one saved with that name.
+    */
+    void saveRhythm (const juce::String& name, int firstMeasure, int numMeasures);
+
+    /** Shows the saved rhythms, and how many times to write one, in a box beside Apply Saved Rhythm. */
+    void showApplyRhythmPanel (juce::Component& button);
+
+    /** Makes the next click on a staff write a rhythm there, so many times over. */
+    void startPlacingRhythm (const SavedRhythm&, int times);
+    void stopPlacingRhythm();
+    bool isPlacingRhythm() const noexcept { return placingRhythm; }
+
+    /** Goes back to clicks doing what they did before, without adding notes from the scale or a rhythm. */
+    void stopPlacingNotes();
+
+    /** Takes a rhythm out of the ones saved, asking first. */
+    void deleteSavedRhythm (const juce::String& name);
+
     /** Gives another part the active part's chords, asking first if it has notes of its own. */
     void copyProgression (int toPart);
 
@@ -516,6 +542,7 @@ private:
     InstrumentHost instrumentHost;
     MidiInputs midiInputs { audioDeviceManager, instrumentHost, settings };
     ProgressionLibrary savedProgressions { settings };
+    RhythmLibrary savedRhythms { settings };
     EffectRack effectRack { instrumentHost };
 
     /** The MIDI inputs the MIDI menu showed, the last time it was opened */
@@ -594,6 +621,10 @@ private:
     int activePart = 0;
     ScaleSettings lastScale;            // what the Scale button's settings start with: the ones used last
     bool placingScale = false;
+    bool placingRhythm = false;
+    int lastRhythmTimes = 1;            // how many times over a rhythm's written: as many as last time
+    juce::String lastRhythmPlaced;
+    juce::Component::SafePointer<ApplyRhythmPanel> applyRhythmPanel;     // while it's showing
     int activePartId = 0;               // so the active part can be found again when parts are added or taken out
     ChordStyle lastChordStyle;          // what a new chord starts with: whichever was chosen last
     ChordStyle progressionStyle;        // what a saved progression is applied with: the one chosen last

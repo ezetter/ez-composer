@@ -610,6 +610,16 @@ void Score::writePerformance (Score& performance) const
 //==============================================================================
 bool Score::addNote (const Note& note)
 {
+    if (! putNote (note))
+        return false;
+
+    pruneTies();
+    sendSynchronousChangeMessage();
+    return true;
+}
+
+bool Score::putNote (const Note& note)
+{
     const auto slot = toSlot (note.beat);
     const auto slots = getSlotsPerMeasure();
 
@@ -653,9 +663,83 @@ bool Score::addNote (const Note& note)
     if (! alreadyThere)
         notes.insert (insertionPoint, note.pitch);
 
+    return true;
+}
+
+void Score::placeNotes (int part, const std::array<std::optional<juce::Range<int>>, 2>& clearedByStaff, const std::vector<PlacedNote>& notes)
+{
+    const auto slotsPerMeasure = getSlotsPerMeasure();
+    const auto toAbsolute = [&] (int measure, double beat) { return measure * slotsPerMeasure + toSlot (beat); };
+
+    // Measures for all of it
+    auto end = 0;
+
+    for (const auto& span : clearedByStaff)
+        if (span.has_value())
+            end = juce::jmax (end, span->getEnd());
+
+    for (const auto& placed : notes)
+        end = juce::jmax (end, toAbsolute (placed.note.measure, placed.note.beat) + toSlot (placed.note.length));
+
+    while (getNumMeasures() * slotsPerMeasure < end)
+    {
+        for (auto& eachPart : parts)
+            eachPart.measures.emplace_back();
+
+        repeats.emplace_back();
+    }
+
+    // Nothing left in the way on their staves
+    for (auto staff : { Staff::treble, Staff::bass })
+    {
+        const auto& span = clearedByStaff[(size_t) staff];
+
+        if (! span.has_value() || span->isEmpty())
+            continue;
+
+        for (auto at = span->getStart(); at < span->getEnd(); ++at)
+        {
+            const auto measure = at / slotsPerMeasure, slot = at % slotsPerMeasure;
+
+            if (chordUsesStaff (part, measure, staff))
+                continue;
+
+            auto& m = getMeasure (part, measure);
+            m.notes[(size_t) staff][(size_t) slot].clear();
+            m.ties[(size_t) staff][(size_t) slot].clear();
+            m.lengths[(size_t) staff][(size_t) slot] = slotsPerBeat;
+            m.staccato[(size_t) staff][(size_t) slot] = false;
+        }
+
+        // A note held over into it ends where it starts, as long as a note can be.
+        if (const auto measure = span->getStart() / slotsPerMeasure, start = span->getStart() % slotsPerMeasure; ! chordUsesStaff (part, measure, staff))
+        {
+            auto& m = getMeasure (part, measure);
+
+            for (int earlier = 0; earlier < start; ++earlier)
+                if (! m.notes[(size_t) staff][(size_t) earlier].empty() && earlier + m.lengths[(size_t) staff][(size_t) earlier] > start)
+                    m.lengths[(size_t) staff][(size_t) earlier] = fitNoteLength (start - earlier, start - earlier);
+        }
+    }
+
+    for (const auto& placed : notes)
+    {
+        const auto& note = placed.note;
+
+        if (! putNote (note) && ! hasNoteAt (part, note.staff, note.measure, note.beat, note.pitch.step))
+            continue;
+
+        if (placed.tiedToNext)
+        {
+            auto& ties = getMeasure (part, note.measure).ties[(size_t) note.staff][(size_t) toSlot (note.beat)];
+
+            if (std::find (ties.begin(), ties.end(), note.pitch) == ties.end())
+                ties.push_back (note.pitch);
+        }
+    }
+
     pruneTies();
     sendSynchronousChangeMessage();
-    return true;
 }
 
 int Score::fitNoteLength (int slots, int room)
