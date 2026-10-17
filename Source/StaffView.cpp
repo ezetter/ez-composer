@@ -3879,7 +3879,11 @@ void StaffView::resized()
 
 void StaffView::updateChordButtons()
 {
-    // As many as the measures laid out, which may be behind the score while it's changing
+    // As many as the measures laid out, which may be behind the score while it's changing. Its
+    // part may have gone, or moved, by then too: being laid out again as another part's view
+    // changes size, it can be resized before it's heard, as when New leaves fewer parts.
+    followPart();
+
     if (part < 0)
         return;
 
