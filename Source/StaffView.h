@@ -422,7 +422,11 @@ private:
         Note from;
         juce::Point<float> start, end;
         bool upwards;
+        bool byHand = true;     // a tie between notes clicked in, rather than a chord's in its rhythm
     };
+
+    /** The point the next note written on a staff after one starts, as the measure shows it, if there is one */
+    std::optional<std::pair<int, double>> getFollowingWrittenBeat (int measure, Staff, double onset) const;
 
     std::vector<TieShape> getTieShapes (int firstMeasure, int lastMeasure) const;
 

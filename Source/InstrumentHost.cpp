@@ -34,15 +34,6 @@ namespace
         int velocity;
     };
 
-    void addChord (std::vector<Sounding>& soundings, std::vector<music::Tone> tones, double start, double end, bool rolled, int velocity)
-    {
-        std::sort (tones.begin(), tones.end(), [] (const music::Tone& a, const music::Tone& b) { return a.midi < b.midi; });
-
-        const auto spread = rolled ? rolledChordSpread : blockChordSpread;
-
-        for (size_t i = 0; i < tones.size(); ++i)
-            soundings.push_back ({ tones[i].midi, start + (double) i * spread, end, velocity });
-    }
 }
 
 InstrumentHost::InstrumentHost()
@@ -658,19 +649,20 @@ std::vector<InstrumentHost::NoteEvent> InstrumentHost::createNoteEvents (const S
                 // bottom up as it starts; everything else starts together.
                 const auto spreadAsChord = staff.source == StaffContent::Source::alternate
                                         || (staff.source == StaffContent::Source::chord && ! music::isMelodic (content.chordStyle.type));
+                const auto spread = ! spreadAsChord ? 0.0 : event.rolled ? rolledChordSpread : blockChordSpread;
+                auto tones = event.tones;
 
                 if (spreadAsChord)
-                {
-                    addChord (soundings, event.tones, onset, end, event.rolled, velocity);
-                    continue;
-                }
+                    std::sort (tones.begin(), tones.end(), [] (const music::Tone& a, const music::Tone& b) { return a.midi < b.midi; });
 
-                for (const auto& tone : event.tones)
+                for (size_t toneIndex = 0; toneIndex < tones.size(); ++toneIndex)
                 {
+                    const auto& tone = tones[toneIndex];
                     const auto key = std::pair { staffIndex, tone.midi };
                     size_t index;
 
-                    // A note a tie leads to holds the note before it on, to its own end, as loud as it started.
+                    // A note a tie leads to holds the note before it on, to its own end, as loud as it
+                    // started, a chord's notes as spread as they were.
                     if (const auto held = tiedOn.find (key); held != tiedOn.end() && std::abs (soundings[held->second].end - onset) < 1.0e-9)
                     {
                         index = held->second;
@@ -680,7 +672,7 @@ std::vector<InstrumentHost::NoteEvent> InstrumentHost::createNoteEvents (const S
                     else
                     {
                         index = soundings.size();
-                        soundings.push_back ({ tone.midi, onset, end, velocity });
+                        soundings.push_back ({ tone.midi, onset + (double) toneIndex * spread, end, velocity });
                     }
 
                     const auto& tied = staff.tiedNotes;

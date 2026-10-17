@@ -1114,22 +1114,90 @@ void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChor
     if (firstMeasure < 0 || chords.empty())
         return;
 
-    for (auto& eachPart : parts)
-        while ((int) eachPart.measures.size() < firstMeasure + (int) chords.size())
-            eachPart.measures.emplace_back();
+    auto measure = firstMeasure;
 
-    while ((int) repeats.size() < getNumMeasures())
-        repeats.emplace_back();
-
-    for (size_t i = 0; i < chords.size(); ++i)
-    {
-        auto& target = getMeasure (part, firstMeasure + (int) i);
-        target.chord = chords[i];
-        tidyChord (target);
-    }
+    for (const auto& chord : chords)
+        measure += putChord (part, measure, chord);
 
     pruneTies();
     sendSynchronousChangeMessage();
+}
+
+int Score::getChordsLength (const std::vector<MeasureChord>& chords) const
+{
+    auto length = 0;
+
+    for (const auto& chord : chords)
+        length += chord.style.rhythm.has_value() ? getRhythmMeasureCount (*chord.style.rhythm, getSlotsPerMeasure()) : 1;
+
+    return length;
+}
+
+int Score::putChord (int part, int firstMeasure, const MeasureChord& chord)
+{
+    const auto count = chord.style.rhythm.has_value() ? getRhythmMeasureCount (*chord.style.rhythm, getSlotsPerMeasure()) : 1;
+
+    while (getNumMeasures() < firstMeasure + count)
+    {
+        for (auto& eachPart : parts)
+            eachPart.measures.emplace_back();
+
+        repeats.emplace_back();
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto& target = getMeasure (part, firstMeasure + i);
+        target.chord = chord;
+        target.chord->rhythmMeasure = i;
+        tidyChord (target);
+    }
+
+    return count;
+}
+
+void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> chord)
+{
+    // The measures it no longer takes are left without it.
+    const auto [first, oldCount] = getChordSpan (part, firstMeasure);
+    const auto newCount = ! chord.has_value() ? 0
+                        : chord->style.rhythm.has_value() ? getRhythmMeasureCount (*chord->style.rhythm, getSlotsPerMeasure()) : 1;
+
+    for (auto i = newCount; i < oldCount; ++i)
+        getMeasure (part, first + i).chord.reset();
+
+    if (chord.has_value())
+        putChord (part, first, *chord);
+
+    pruneTies();
+    sendSynchronousChangeMessage();
+}
+
+std::pair<int, int> Score::getChordSpan (int part, int measure) const
+{
+    const auto* chord = getChord (part, measure);
+
+    if (chord == nullptr || ! chord->style.rhythm.has_value() || chord->rhythmMeasure > measure)
+        return { measure, 1 };
+
+    // From its first, as far as each measure has it, the next of its rhythm's measures
+    const auto first = measure - chord->rhythmMeasure;
+    const auto wanted = getRhythmMeasureCount (*chord->style.rhythm, getSlotsPerMeasure());
+    auto count = 0;
+
+    for (; count < wanted && first + count < getNumMeasures(); ++count)
+    {
+        const auto* other = getChord (part, first + count);
+
+        if (other == nullptr || other->style.rhythm != chord->style.rhythm || other->rhythmMeasure != count
+            || other->spec != chord->spec || other->keyboardNotes != chord->keyboardNotes)
+            break;
+    }
+
+    if (measure >= first + count)
+        return { measure, 1 };
+
+    return { first, count };
 }
 
 bool Score::chordsWouldReplace (int part, int firstMeasure, int count, Staff staff) const
@@ -1223,6 +1291,8 @@ bool Score::chordUsesStaff (int part, int measure, Staff staff) const
 
 void Score::toggleChordNote (int part, int measure, int midiNote, const ChordStyle& styleForNewChord)
 {
+    // A chord in several measures, as its rhythm takes, changes in all of them.
+    const auto [first, count] = getChordSpan (part, measure);
     auto& target = getMeasure (part, measure);
 
     if (! target.chord.has_value())
@@ -1230,6 +1300,19 @@ void Score::toggleChordNote (int part, int measure, int midiNote, const ChordSty
 
     toggleChordNote (*target.chord, midiNote);
     tidyChord (target);
+
+    for (auto other = first; other < first + count; ++other)
+    {
+        if (other == measure)
+            continue;
+
+        auto& sharing = getMeasure (part, other);
+        sharing.chord->spec = target.chord->spec;
+        sharing.chord->keyboardNotes = target.chord->keyboardNotes;
+        sharing.chord->movedNotes.clear();
+        tidyChord (sharing);
+    }
+
     pruneTies();
     sendSynchronousChangeMessage();
 }
@@ -1299,12 +1382,23 @@ std::vector<music::Tone> Score::getAlternateTones (int part, int measure) const
 
 void Score::reshuffle (int part, int measure)
 {
-    auto& target = getMeasure (part, measure);
+    // A chord in several measures, as its rhythm takes, goes in the same new order in all of them.
+    const auto [first, count] = getChordSpan (part, measure);
+    auto& target = getMeasure (part, first);
 
     if (target.chord.has_value())
         target.chord->movedNotes.clear();
 
     tidyChord (target, true);
+
+    for (auto other = first + 1; other < first + count; ++other)
+    {
+        auto& sharing = getMeasure (part, other);
+        sharing.chord->randomOrder = target.chord->randomOrder;
+        sharing.chord->movedNotes.clear();
+        tidyChord (sharing);
+    }
+
     sendSynchronousChangeMessage();
 }
 
@@ -1396,18 +1490,27 @@ void Score::tidyChord (Measure& measure, bool reshuffleRandomOrder)
     // only hidden, since the alternate staff can be turned off for a whole part at once.
     measure.clearNotes (chord.style.staff);
 
-    // Notes moved by hand stay where they were moved while there are as many of them.
-    const auto numSlots = juce::jmax (1, getSlotsPerMeasure() / getChordNoteLength (chord));
+    // Notes moved by hand stay where they were moved while there are as many of them: one for
+    // each of its note lengths that fits in the measure, or each note its rhythm writes there.
+    const auto* rhythm = chord.style.rhythm.has_value() ? &*chord.style.rhythm : nullptr;
 
-    if (! music::isMelodic (chord.style.type) || (int) chord.movedNotes.size() != numSlots)
+    if (rhythm == nullptr)
+        chord.rhythmMeasure = 0;
+
+    const auto numWritten = rhythm != nullptr ? (int) layOutRhythm (rhythm->getHitsFor (chord.style.staff), getSlotsPerMeasure(), chord.rhythmMeasure).size()
+                                              : juce::jmax (1, getSlotsPerMeasure() / getChordNoteLength (chord));
+
+    if (! music::isMelodic (chord.style.type) || (int) chord.movedNotes.size() != numWritten)
         chord.movedNotes.clear();
 
     if (chord.style.type != music::ChordType::random)
         return;
 
-    // A Random chord has a note for each of its note lengths that fits in the measure, and keeps
-    // its order until its notes or their number change. Every note is in it, if there's room.
+    // A Random chord has a note for each of its note lengths that fits in the measure, or each of
+    // its rhythm's notes that starts afresh, and keeps its order until its notes or their number
+    // change. Every note is in it, if there's room.
     const auto midiNotes = getMidiNotes (*getChordNotes (chord));
+    const auto numSlots = rhythm != nullptr ? juce::jmax (1, countRhythmAttacks (rhythm->getHitsFor (chord.style.staff))) : numWritten;
 
     const auto orderStillFits = (int) chord.randomOrder.size() == numSlots
         && std::all_of (chord.randomOrder.begin(), chord.randomOrder.end(), [&] (int midi)
@@ -1440,7 +1543,8 @@ namespace
     // 15: staccato notes
     // 16: page names
     // 17: arpeggio and Random chord notes moved by hand
-    constexpr int formatVersion = 17;
+    // 18: chords written in a rhythm, in as many measures as it takes
+    constexpr int formatVersion = 18;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1462,6 +1566,15 @@ namespace
         return number >= lowest && number <= highest ? number : fallback;
     }
 
+    /** An item of a JSON list, or nothing if it isn't a list, or it's past the end. */
+    juce::var listItem (const juce::var& list, int index)
+    {
+        if (const auto* items = list.getArray(); items != nullptr && juce::isPositiveAndBelow (index, items->size()))
+            return items->getReference (index);
+
+        return {};
+    }
+
     std::optional<std::vector<music::KeyboardNote>> readKeyboardNotes (const juce::var& value)
     {
         const auto* list = value.getArray();
@@ -1473,8 +1586,8 @@ namespace
 
         for (const auto& item : *list)
         {
-            const music::KeyboardNote note { readInt (item[0], 0, 127, -1),
-                                             { readInt (item[1], 0, 6, -1), readInt (item[2], -2, 2, 99) } };
+            const music::KeyboardNote note { readInt (listItem (item, 0), 0, 127, -1),
+                                             { readInt (listItem (item, 1), 0, 6, -1), readInt (listItem (item, 2), -2, 2, 99) } };
 
             // Skip anything that isn't a real note, or whose spelling doesn't match its pitch.
             if (note.midi >= 0 && note.spelling.letter >= 0 && note.spelling.alter != 99
@@ -1484,6 +1597,140 @@ namespace
 
         return notes;
     }
+}
+
+//==============================================================================
+int Rhythm::getLength() const noexcept
+{
+    return numMeasures * beatsPerMeasure * Score::slotsPerBeat;
+}
+
+juce::String Rhythm::describe() const
+{
+    const auto count = [] (size_t n) { return juce::String ((int) n) + (n == 1 ? " note" : " notes"); };
+    const auto measures = juce::String (numMeasures) + (numMeasures == 1 ? " measure" : " measures") + " of " + juce::String (beatsPerMeasure) + "/4";
+    const auto& treble = staves[(size_t) music::Staff::treble];
+    const auto& bass = staves[(size_t) music::Staff::bass];
+
+    if (! treble.empty() && ! bass.empty())
+        return measures + ": " + count (treble.size()) + " on the treble staff, " + juce::String ((int) bass.size()) + " on the bass";
+
+    return measures + ": " + count (treble.empty() ? bass.size() : treble.size()) + " on one staff";
+}
+
+juce::var Rhythm::toJSON() const
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty ("name", name);
+    object->setProperty ("beatsPerMeasure", beatsPerMeasure);
+    object->setProperty ("measures", numMeasures);
+
+    for (auto staff : { music::Staff::treble, music::Staff::bass })
+    {
+        juce::Array<juce::var> hits;
+
+        for (const auto& hit : staves[(size_t) staff])
+            hits.add (juce::Array<juce::var> { hit.onset, hit.length, hit.staccato, hit.tiedToNext });
+
+        object->setProperty (staff == music::Staff::treble ? "treble" : "bass", hits);
+    }
+
+    return juce::var (object);
+}
+
+std::optional<Rhythm> Rhythm::fromJSON (const juce::var& json)
+{
+    if (! json.isObject())
+        return {};
+
+    Rhythm rhythm;
+    rhythm.name = json.getProperty ("name", {}).toString().replaceCharacters ("\r\n\t", "   ").trim().substring (0, maxNameLength).trimEnd();
+    rhythm.beatsPerMeasure = readInt (json.getProperty ("beatsPerMeasure", {}), 1, Score::maxBeatsPerMeasure, 4);
+    rhythm.numMeasures = readInt (json.getProperty ("measures", {}), 1, 1000, 1);
+
+    // Notes in order, each after the one before ends, within the rhythm, as long as a note can be
+    for (auto staff : { music::Staff::treble, music::Staff::bass })
+    {
+        auto& hits = rhythm.staves[(size_t) staff];
+
+        if (const auto* list = json.getProperty (staff == music::Staff::treble ? "treble" : "bass", {}).getArray())
+        {
+            for (const auto& item : *list)
+            {
+                const Hit hit { readInt (listItem (item, 0), 0, rhythm.getLength() - 1, -1), readInt (listItem (item, 1), 1, Score::maxSlotsPerMeasure, -1),
+                                (bool) listItem (item, 2), (bool) listItem (item, 3) };
+
+                if (hit.onset >= 0 && hit.length > 0 && hit.onset + hit.length <= rhythm.getLength()
+                    && (hits.empty() || hits.back().onset + hits.back().length <= hit.onset))
+                    hits.push_back (hit);
+            }
+        }
+    }
+
+    if (! rhythm.hasNotes())
+        return {};
+
+    return rhythm;
+}
+
+int getRhythmMeasureCount (const Rhythm& rhythm, int slotsPerMeasure)
+{
+    return juce::jmax (1, (rhythm.getLength() + slotsPerMeasure - 1) / juce::jmax (1, slotsPerMeasure));
+}
+
+namespace
+{
+    /** Whether a hit starts afresh, rather than being tied on from the one before */
+    bool startsAfresh (const Rhythm::Hit* previous, const Rhythm::Hit& hit)
+    {
+        return previous == nullptr || ! previous->tiedToNext || previous->onset + previous->length != hit.onset;
+    }
+}
+
+std::vector<RhythmNote> layOutRhythm (const std::vector<Rhythm::Hit>& hits, int slotsPerMeasure, int measureIndex)
+{
+    std::vector<RhythmNote> notes;
+    const auto from = measureIndex * slotsPerMeasure, to = from + slotsPerMeasure;
+    const Rhythm::Hit* previous = nullptr;
+    auto attack = -1;
+
+    for (const auto& hit : hits)
+    {
+        if (startsAfresh (previous, hit))
+            ++attack;
+
+        previous = &hit;
+
+        // In notes that fit, as long as they can be, tied together, up to each barline
+        const auto end = hit.onset + hit.length;
+
+        for (auto at = hit.onset; at < end;)
+        {
+            const auto piece = Score::fitNoteLength (end - at, slotsPerMeasure - at % slotsPerMeasure);
+            const auto last = at + piece >= end;
+
+            if (at >= from && at < to)
+                notes.push_back ({ at - from, piece, last && hit.staccato, ! last || hit.tiedToNext, attack });
+
+            at += piece;
+        }
+    }
+
+    return notes;
+}
+
+int countRhythmAttacks (const std::vector<Rhythm::Hit>& hits)
+{
+    const Rhythm::Hit* previous = nullptr;
+    auto attacks = 0;
+
+    for (const auto& hit : hits)
+    {
+        attacks += startsAfresh (previous, hit) ? 1 : 0;
+        previous = &hit;
+    }
+
+    return attacks;
 }
 
 void Score::clear()
@@ -1672,6 +1919,12 @@ juce::var Score::toJSON (bool withPartIds) const
 
             if (chord.style.noteLength.has_value())
                 chordObject->setProperty ("noteLength", *chord.style.noteLength);
+
+            if (chord.style.rhythm.has_value())
+            {
+                chordObject->setProperty ("rhythm", chord.style.rhythm->toJSON());
+                chordObject->setProperty ("rhythmMeasure", chord.rhythmMeasure);
+            }
 
             juce::Array<juce::var> order;
 
@@ -1865,6 +2118,12 @@ juce::Result Score::loadJSON (const juce::var& json)
                 // One of the note lengths there are, in 32nds
                 if (const auto length = readInt (c.getProperty ("noteLength", {}), 1, maxSlotsPerMeasure, 0); length > 0)
                     chord.style.noteLength = fitNoteLength (length, length);
+
+                // The rhythm it's written in, and which of its measures this is, from version 18
+                chord.style.rhythm = Rhythm::fromJSON (c.getProperty ("rhythm", {}));
+
+                if (chord.style.rhythm.has_value())
+                    chord.rhythmMeasure = readInt (c.getProperty ("rhythmMeasure", {}), 0, chord.style.rhythm->numMeasures * maxBeatsPerMeasure, 0);
 
                 measure.chord = chord;
             }

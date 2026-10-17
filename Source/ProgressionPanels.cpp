@@ -91,7 +91,8 @@ void SaveProgressionPanel::resized()
 
 //==============================================================================
 ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression>& saved, const ChordStyle& style, int part, int measure,
-                                              int beatsPerMeasure, const juce::String& chosenName)
+                                              int beatsPerMeasure, const juce::String& chosenName, std::vector<Rhythm> savedRhythms)
+    : rhythms (std::move (savedRhythms))
 {
     controls::makeHeading (heading, "Apply Saved Progression");
     makeLabel (targetLabel, "Into instrument " + juce::String (part + 1) + ", from measure " + juce::String (measure + 1)
@@ -101,6 +102,7 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     makeLabel (typeLabel, "Chord type");
     makeLabel (clefLabel, "Clef");
     makeLabel (lengthLabel, "Note length");
+    makeLabel (rhythmLabel, "Rhythm");
 
     list.setRowHeight (listRowHeight);
     list.setColour (juce::ListBox::outlineColourId, juce::Colours::black.withAlpha (0.15f));
@@ -135,6 +137,20 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
 
     lengthBox.setTooltip ("How long the chords' notes are. Automatic leaves it to the chord type, as the chord window does.");
 
+    // Or a saved rhythm, in place of the note length, the one applied last if it's still there
+    rhythmBox.addItem ("No rhythm", 1);
+
+    for (size_t i = 0; i < rhythms.size(); ++i)
+        rhythmBox.addItem (rhythms[i].name, (int) i + 2);
+
+    const auto chosenRhythm = style.rhythm.has_value()
+                                ? std::find_if (rhythms.begin(), rhythms.end(), [&] (const Rhythm& r) { return r.name == style.rhythm->name; })
+                                : rhythms.end();
+    rhythmBox.setSelectedId (chosenRhythm != rhythms.end() ? (int) std::distance (rhythms.begin(), chosenRhythm) + 2 : 1, juce::dontSendNotification);
+    rhythmBox.setTooltip ("A saved rhythm for each chord's notes to go in, in place of the note length, in as many measures as it takes");
+    rhythmBox.onChange = [this] { updateLength(); };
+    updateLength();
+
     deleteButton.setTooltip ("Delete the chosen progression from the ones saved");
     cancelButton.setTooltip ("Close without applying a progression");
     applyButton.setTooltip ("Write the chosen progression's chords in, adding measures at the end if they don't all fit");
@@ -150,7 +166,8 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     applyButton.onClick = [this] { apply(); };
 
     for (auto* component : std::initializer_list<juce::Component*> { &heading, &targetLabel, &list, &typeLabel, &typeBox, &clefLabel, &trebleButton, &bassButton,
-                                                                     &lengthLabel, &lengthBox, &deleteButton, &cancelButton, &applyButton })
+                                                                     &lengthLabel, &lengthBox, &rhythmLabel, &rhythmBox,
+                                                                     &deleteButton, &cancelButton, &applyButton })
         addAndMakeVisible (component);
 
     for (auto* button : { &deleteButton, &cancelButton, &applyButton })
@@ -163,7 +180,7 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     list.selectRow (chosen != progressions.end() ? (int) std::distance (progressions.begin(), chosen) : 0);
     updateButtons();
 
-    setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap * 2 + 3 * (rowHeight + gap) + gap + rowHeight);
+    setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap * 2 + 4 * (rowHeight + gap) + gap + rowHeight);
 }
 
 void ApplyProgressionPanel::setProgressions (const std::vector<SavedProgression>& saved)
@@ -195,7 +212,16 @@ ChordStyle ApplyProgressionPanel::getStyle() const
     if (const auto index = lengthBox.getSelectedId() - 2; juce::isPositiveAndBelow (index, (int) getChordNoteLengths().size()))
         style.noteLength = getChordNoteLengths()[(size_t) index].first;
 
+    if (const auto index = rhythmBox.getSelectedId() - 2; juce::isPositiveAndBelow (index, (int) rhythms.size()))
+        style.rhythm = rhythms[(size_t) index];
+
     return style;
+}
+
+void ApplyProgressionPanel::updateLength()
+{
+    // A rhythm says how long the notes are instead.
+    lengthBox.setEnabled (rhythmBox.getSelectedId() <= 1);
 }
 
 void ApplyProgressionPanel::apply()
@@ -284,6 +310,11 @@ void ApplyProgressionPanel::resized()
     auto lengthRow = bounds.removeFromTop (rowHeight);
     lengthLabel.setBounds (lengthRow.removeFromLeft (labelWidth));
     lengthBox.setBounds (lengthRow);
+    bounds.removeFromTop (gap);
+
+    auto rhythmRow = bounds.removeFromTop (rowHeight);
+    rhythmLabel.setBounds (rhythmRow.removeFromLeft (labelWidth));
+    rhythmBox.setBounds (rhythmRow);
     bounds.removeFromTop (gap * 2);
 
     auto buttons = bounds.removeFromTop (rowHeight);

@@ -42,10 +42,11 @@ class ApplyProgressionPanel final : public juce::Component,
 {
 public:
     /** For a part, from a measure, in measures of so many beats, starting with a style, and with
-        a progression chosen, if it's among them, or else the first.
+        a progression chosen, if it's among them, or else the first, and the saved rhythms to
+        write its chords in to choose from.
     */
     ApplyProgressionPanel (const std::vector<SavedProgression>&, const ChordStyle&, int part, int measure, int beatsPerMeasure,
-                           const juce::String& chosenName);
+                           const juce::String& chosenName, std::vector<Rhythm> rhythms = {});
 
     /** Shows the progressions again, e.g. once one's been deleted, keeping the one chosen if it's still there. */
     void setProgressions (const std::vector<SavedProgression>&);
@@ -75,9 +76,12 @@ private:
     void updateButtons();
 
     std::vector<SavedProgression> progressions;
-    juce::Label heading, targetLabel, typeLabel, clefLabel, lengthLabel;
+    void updateLength();
+
+    juce::Label heading, targetLabel, typeLabel, clefLabel, lengthLabel, rhythmLabel;
     juce::ListBox list { "Saved progressions", this };
-    juce::ComboBox typeBox, lengthBox;
+    juce::ComboBox typeBox, lengthBox, rhythmBox;
+    std::vector<Rhythm> rhythms;
     juce::TextButton trebleButton { "Treble clef" }, bassButton { "Bass clef" };
     juce::TextButton deleteButton { "Delete" }, cancelButton { "Cancel" }, applyButton { "Apply" };
 

@@ -37,7 +37,7 @@ public:
 
         if (const auto* list = saved.getArray())
             for (const auto& entry : *list)
-                if (auto item = Item::fromJSON (entry); item.has_value() && find (item->name) == nullptr)
+                if (auto item = Item::fromJSON (entry); item.has_value() && item->name.isNotEmpty() && find (item->name) == nullptr)
                     items.push_back (std::move (*item));
 
         std::sort (items.begin(), items.end(), [] (const Item& a, const Item& b) { return a.name.compareNatural (b.name) < 0; });

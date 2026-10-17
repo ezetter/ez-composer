@@ -72,8 +72,84 @@ struct PedalSpan
     }
 };
 
+/** A rhythm saved to use again, in this score or another, to write notes in, or chords: when the
+    notes written on each staff of some measures start, how long each is, whether it's staccato,
+    and whether it's tied to the next, whatever their pitches. The rests are the gaps between
+    them. A rhythm that had notes on both staves keeps them on their own staves, in step with
+    each other.
+*/
+struct Rhythm
+{
+    /** A note, or notes starting together, in 32nds from the rhythm's start */
+    struct Hit
+    {
+        int onset = 0;
+        int length = 8;
+        bool staccato = false;
+        bool tiedToNext = false;
+
+        bool operator== (const Hit&) const = default;
+    };
+
+    static constexpr int maxNameLength = 80;
+    static constexpr const char* settingsKey = "savedRhythms";
+
+    juce::String name;
+    int beatsPerMeasure = 4;        // of the measures it was saved from
+    int numMeasures = 1;
+    std::array<std::vector<Hit>, 2> staves;     // the treble staff's and the bass staff's, in order
+
+    /** How long it is, in 32nds: as long as its measures */
+    int getLength() const noexcept;
+
+    bool hasNotes (music::Staff staff) const noexcept { return ! staves[(size_t) staff].empty(); }
+    bool hasNotes() const noexcept { return hasNotes (music::Staff::treble) || hasNotes (music::Staff::bass); }
+
+    /** The hits a chord on a staff goes in: the staff's own, or for a rhythm on one staff, that one's. */
+    const std::vector<Hit>& getHitsFor (music::Staff staff) const noexcept
+    {
+        return staves[(size_t) (hasNotes (staff) ? staff : music::getOtherStaff (staff))];
+    }
+
+    /** e.g. "2 measures of 4/4: 6 notes on the treble staff, 4 on the bass" */
+    juce::String describe() const;
+
+    juce::var toJSON() const;
+
+    /** A rhythm from JSON, or nothing if it isn't one, or has no notes. */
+    static std::optional<Rhythm> fromJSON (const juce::var&);
+
+    bool operator== (const Rhythm&) const = default;
+};
+
+/** A note a rhythm gives in one of the measures it's written in, in 32nds from the measure's start */
+struct RhythmNote
+{
+    int onset = 0;
+    int length = 8;
+    bool staccato = false;
+    bool tiedToNext = false;
+    int attack = 0;         // which of the notes that start afresh it is, from the rhythm's first: notes tied on from it are the same one
+
+    bool operator== (const RhythmNote&) const = default;
+};
+
+/** How many measures of so many 32nds a rhythm takes, one after another, its notes running on
+    over the barlines: as many as its length needs, and at least one.
+*/
+int getRhythmMeasureCount (const Rhythm&, int slotsPerMeasure);
+
+/** The notes some of a rhythm's hits give in one of the measures it takes, counting from 0: those
+    that start or are still sounding in it, each cut into notes of the lengths there are, tied
+    together, where it won't go in one, and at the barline.
+*/
+std::vector<RhythmNote> layOutRhythm (const std::vector<Rhythm::Hit>&, int slotsPerMeasure, int measureIndex);
+
+/** How many of some hits start afresh, not tied on from the one before */
+int countRhythmAttacks (const std::vector<Rhythm::Hit>&);
+
 /** How a measure's chord is written: which staff it's on, as what type of chord, and in notes
-    how long. What the other staff shows is up to the score, for every chord alike.
+    how long, or in a rhythm. What the other staff shows is up to the score, for every chord alike.
 */
 struct ChordStyle
 {
@@ -84,6 +160,13 @@ struct ChordStyle
         one chosen, they're as long as the chord type makes them: see Score::getChordNoteLength().
     */
     std::optional<int> noteLength;
+
+    /** A saved rhythm the chord's notes go in, in place of the note length: a block or rolled
+        chord's notes all together for each of its notes, as long as it, and an arpeggio's or Random
+        chord's one at a time, the next for each that starts afresh, a tied note holding it on. It
+        takes as many measures as it needs, the chord going in each of them.
+    */
+    std::optional<Rhythm> rhythm;
 
     bool operator== (const ChordStyle&) const = default;
 };
@@ -109,6 +192,11 @@ struct MeasureChord
         they're as its chord type writes them.
     */
     std::vector<int> movedNotes {};
+
+    /** Which of its rhythm's measures this is, counting from 0, when its rhythm takes more than
+        one: the same chord goes in each of them, one after another.
+    */
+    int rhythmMeasure = 0;
 
     bool hasNotes() const { return ! spec.isEmpty() || keyboardNotes.has_value(); }
 
@@ -458,10 +546,26 @@ public:
     */
     void setChord (int part, int measure, std::optional<MeasureChord>);
 
-    /** Sets a part's chords in measures one after another, from one measure on, as setChord()
-        does, adding measures at the end, in every part, for any that don't fit.
+    /** Sets a part's chords one after another, from one measure on, as setChord() does, each
+        in as many measures as its rhythm takes, or one, adding measures at the end, in every
+        part, for any that don't fit.
     */
     void setChords (int part, int firstMeasure, const std::vector<MeasureChord>&);
+
+    /** How many measures chords take, one after another, each as many as its rhythm takes, or one */
+    int getChordsLength (const std::vector<MeasureChord>&) const;
+
+    /** Sets the chord that starts in a measure, as the chord window does: with a rhythm that
+        takes more than one measure, in as many, one after another, adding measures at the end,
+        in every part, if they're needed. The measures it was in that it no longer takes are left
+        without one. With none, takes it out of all the measures it was in.
+    */
+    void writeChord (int part, int firstMeasure, std::optional<MeasureChord>);
+
+    /** The measures the chord in a measure is in, as the first and how many: those its rhythm
+        takes, from the first of them, as far as they all have it; or just the measure.
+    */
+    std::pair<int, int> getChordSpan (int part, int measure) const;
 
     /** Whether chords written on a staff in some of a part's measures would take the place of
         anything there: a chord with notes, or notes on that staff, or, while the part's alternate
@@ -620,6 +724,11 @@ private:
 
     /** Adds a note as addNote() does, without saying so. */
     bool putNote (const Note&);
+
+    /** Writes a chord in as many measures as its rhythm takes, or one, from one, adding measures
+        at the end for any that don't fit, without saying so. Returns how many it took.
+    */
+    int putChord (int part, int firstMeasure, const MeasureChord&);
     void tidyChord (Measure&, bool reshuffleRandomOrder = false);
 
     /** After the key changes: chords follow their numerals, and notes set on the piano keep

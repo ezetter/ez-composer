@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Controls.h"
+#include "Rhythms.h"
 #include "Score.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -28,8 +29,10 @@ class ChordEditor final : public juce::Component,
                           private juce::ChangeListener
 {
 public:
-    /** Edits the chord in a measure of one part, or starts a new one there in the given style. */
-    ChordEditor (Score&, int part, int measure, const ChordStyle& styleForNewChord);
+    /** Edits the chord starting in a measure of one part, or starts a new one there in the given
+        style, with the saved rhythms to choose from for it.
+    */
+    ChordEditor (Score&, int part, int measure, const ChordStyle& styleForNewChord, std::vector<Rhythm> savedRhythms = {});
     ~ChordEditor() override;
 
     int getPart() const noexcept { return part; }
@@ -81,6 +84,10 @@ private:
     controls::ReselectableComboBox chordTypeBox;     // beside the title
     juce::Label noteLengthLabel;
     juce::ComboBox noteLengthBox;           // how long the chord's notes are
+    juce::Label rhythmLabel;
+    juce::ComboBox rhythmBox;               // or the rhythm they go in
+    std::vector<Rhythm> savedRhythms;
+    std::vector<Rhythm> rhythmChoices;      // the rhythms the box has, after No Rhythm, in order
     juce::Label nameLabel, notesLabel, fitLabel, keyboardNotesLabel;
     juce::TextButton removeButton { "Remove Chord" }, doneButton { "Done" };
 

@@ -35,10 +35,11 @@ const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths()
     return lengths;
 }
 
-ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit, const ChordStyle& styleForNewChord)
+ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit, const ChordStyle& styleForNewChord, std::vector<Rhythm> rhythms)
     : score (scoreToEdit),
       part (partToEdit),
-      measure (measureToEdit)
+      measure (measureToEdit),
+      savedRhythms (std::move (rhythms))
 {
     chord.style = styleForNewChord;
     loadChord();
@@ -158,6 +159,21 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
             edit ([index] (MeasureChord& c) { c.style.noteLength = noteLengths[(size_t) index].first; });
     };
 
+    // Or a saved rhythm, in place of the note length
+    rhythmLabel.setText ("Rhythm", juce::dontSendNotification);
+    rhythmLabel.setFont (juce::FontOptions (13.0f));
+    rhythmLabel.setBorderSize ({});
+    rhythmBox.setTooltip ("A saved rhythm for the chord's notes to go in, in place of the note length, in as many measures as it takes");
+    rhythmBox.onChange = [this]
+    {
+        const auto index = rhythmBox.getSelectedId() - 2;
+
+        if (rhythmBox.getSelectedId() == 1)
+            edit ([] (MeasureChord& c) { c.style.rhythm.reset(); });
+        else if (juce::isPositiveAndBelow (index, (int) rhythmChoices.size()))
+            edit ([rhythm = rhythmChoices[(size_t) index]] (MeasureChord& c) { c.style.rhythm = rhythm; });
+    };
+
 
     for (auto* label : { &nameLabel, &notesLabel, &fitLabel, &keyboardNotesLabel })
     {
@@ -171,7 +187,7 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     keyboardNotesLabel.setJustificationType (juce::Justification::topLeft);
 
     doneButton.setTooltip ("Close the window (Return or Esc). Every change is in the score already.");
-    removeButton.onClick = [this] { score.setChord (part, measure, std::nullopt); };
+    removeButton.onClick = [this] { score.writeChord (part, measure, std::nullopt); };
 
     // Return or Escape closes the window, as well as Done.
     doneButton.addShortcut (juce::KeyPress (juce::KeyPress::returnKey));
@@ -185,7 +201,7 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
              &title, &flatButton, &sharpButton, &majorButton, &minorButton, &alterButton, &numeralBox, &addedNoteBox,
              &positionButtons[0], &positionButtons[1], &positionButtons[2], &positionButtons[3],
              &octaveButtons[0], &octaveButtons[1], &octaveButtons[2], &trebleButton, &bassButton,
-             &chordTypeBox, &noteLengthLabel, &noteLengthBox,
+             &chordTypeBox, &noteLengthLabel, &noteLengthBox, &rhythmLabel, &rhythmBox,
              &nameLabel, &notesLabel, &fitLabel, &keyboardNotesLabel, &removeButton, &doneButton })
         addAndMakeVisible (component);
 
@@ -251,8 +267,9 @@ void ChordEditor::edit (const std::function<void (MeasureChord&)>& change)
     if (newChord.spec != chord.spec || newChord.keyboardNotes != chord.keyboardNotes || newChord.style.staff != chord.style.staff)
         newChord.alternateNotes.reset();
 
-    // Every change goes straight into the score, which sends it back here to show.
-    score.setChord (part, measure, newChord);
+    // Every change goes straight into the score, which sends it back here to show, in as many
+    // measures as its rhythm takes.
+    score.writeChord (part, measure, newChord);
 }
 
 void ChordEditor::chooseChordType (int itemId)
@@ -363,6 +380,30 @@ void ChordEditor::update()
 
     noteLengthBox.setSelectedId (selected, juce::dontSendNotification);
 
+    // A rhythm says how long the notes are instead. The chord's own is among those to choose
+    // from, even if it isn't saved, or a saved one by its name is different now.
+    rhythmChoices = savedRhythms;
+
+    if (style.rhythm.has_value() && std::find (rhythmChoices.begin(), rhythmChoices.end(), *style.rhythm) == rhythmChoices.end())
+        rhythmChoices.push_back (*style.rhythm);
+
+    rhythmBox.clear (juce::dontSendNotification);
+    rhythmBox.addItem ("No rhythm", 1);
+
+    for (size_t i = 0; i < rhythmChoices.size(); ++i)
+    {
+        const auto& rhythm = rhythmChoices[i];
+        const auto unsaved = i >= savedRhythms.size();
+        rhythmBox.addItem ((rhythm.name.isNotEmpty() ? rhythm.name : juce::String ("Rhythm")) + (unsaved ? juce::String (" (this chord's)") : juce::String()), (int) i + 2);
+    }
+
+    const auto chosen = style.rhythm.has_value() ? std::find (rhythmChoices.begin(), rhythmChoices.end(), *style.rhythm) : rhythmChoices.end();
+    rhythmBox.setSelectedId (chosen != rhythmChoices.end() ? (int) std::distance (rhythmChoices.begin(), chosen) + 2 : 1, juce::dontSendNotification);
+
+    noteLengthBox.setEnabled (! style.rhythm.has_value());
+    noteLengthBox.setTooltip (style.rhythm.has_value() ? "The rhythm says how long the chord's notes are. Choose No Rhythm to choose a length."
+                                                       : "How long the chord's notes are: block and rolled chords play again in them, the others a note at a time");
+
 
     // The chord's tones, as the builder's chord tones table lists them
     const auto notes = score.getChordNotes (chord);
@@ -422,7 +463,7 @@ int ChordEditor::getIdealHeight() const
     // Enough for the keyboard notes too, which only show some of the time.
     return padding + rowHeight + gap
          + 3 * (rowHeight + gap) + 3 * (segmentHeight + gap)
-         + sectionGap - gap + rowHeight
+         + sectionGap - gap + rowHeight + gap + rowHeight
          + sectionGap + 3 * infoLineHeight + 34
          + sectionGap + buttonHeight + padding;
 }
@@ -483,6 +524,10 @@ void ChordEditor::resized()
     auto lengthRow = bounds.removeFromTop (rowHeight);
     noteLengthLabel.setBounds (lengthRow.removeFromLeft (86));
     noteLengthBox.setBounds (lengthRow);
+    bounds.removeFromTop (gap);
+    auto rhythmRow = bounds.removeFromTop (rowHeight);
+    rhythmLabel.setBounds (rhythmRow.removeFromLeft (86));
+    rhythmBox.setBounds (rhythmRow);
     bounds.removeFromTop (sectionGap);
 
     nameLabel.setBounds (bounds.removeFromTop (infoLineHeight));

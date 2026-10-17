@@ -1,6 +1,7 @@
 #include "MeasureContent.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace
 {
@@ -178,6 +179,51 @@ namespace
         return moved;
     }
 
+    /** A chord's notes in its rhythm, in one of the measures it takes: all its notes together for
+        each of the rhythm's notes, for a block or rolled chord, or the next of the notes it plays
+        in turn for each that starts afresh, the one before held on for each tied on, with rests
+        between them. A measure the rhythm has no notes in has a whole rest.
+    */
+    StaffContent getRhythmContent (const Score& score, const std::vector<RhythmNote>& notes, StaffContent::Source source,
+                                   const std::function<std::vector<music::Tone> (int attack)>& tonesFor, bool rolled)
+    {
+        StaffContent content;
+        content.source = source;
+        const auto beats = score.getBeatsPerMeasure();
+        const auto measureLength = beats * Score::slotsPerBeat;
+
+        if (notes.empty())
+        {
+            content.events.push_back ({ 0.0, Duration::whole, {}, false, true });
+            return content;
+        }
+
+        auto slot = 0;
+        std::optional<int> lastAttack;
+
+        for (const auto& note : notes)
+        {
+            addRests (content.events, slot, note.onset, beats);
+
+            // Rolled as it starts, not as it's held on
+            const auto onset = (double) note.onset / Score::slotsPerBeat;
+            auto tones = tonesFor (note.attack);
+            content.events.push_back ({ onset, getDurationForBeats ((double) note.length / Score::slotsPerBeat), tones,
+                                        rolled && lastAttack != note.attack, false, note.staccato });
+            lastAttack = note.attack;
+
+            if (note.tiedToNext)
+                for (const auto& tone : tones)
+                    content.tiedNotes.push_back ({ onset, tone.pitch });
+
+            slot = note.onset + note.length;
+        }
+
+        addRests (content.events, slot, measureLength, beats);
+        setNotesPerBeat (content);
+        return content;
+    }
+
     StaffContent getChordContent (const Score& score, const music::Chord& chord, const MeasureChord& measureChord)
     {
         StaffContent content;
@@ -192,6 +238,49 @@ namespace
             content.events.push_back ({ (double) slot / Score::slotsPerBeat, getDurationForBeats ((double) slots / Score::slotsPerBeat),
                                         std::move (tones), rolled, false });
         };
+
+        // In a rhythm, its notes go as the rhythm's do, in place of the note length.
+        if (measureChord.style.rhythm.has_value())
+        {
+            const auto& hits = measureChord.style.rhythm->getHitsFor (measureChord.style.staff);
+            const auto notes = layOutRhythm (hits, measureLength, measureChord.rhythmMeasure);
+
+            if (! music::isMelodic (type))
+                return getRhythmContent (score, notes, StaffContent::Source::chord, [&] (int) { return chord.tones; }, type == music::ChordType::rolled);
+
+            // One note at a time, going round as the chord type has them, the next for each of the
+            // rhythm's notes that starts afresh: an arpeggio up and down, or the random order
+            auto sequence = type == music::ChordType::random ? getSequence (chord, measureChord)
+                                                              : getArpeggioCycle (chord.tones, type == music::ChordType::arpeggioUp);
+
+            if (sequence.empty())
+                sequence = chord.tones;
+
+            auto inRhythm = getRhythmContent (score, notes, StaffContent::Source::chord,
+                                              [&] (int attack) { return std::vector<music::Tone> { sequence[(size_t) (attack % (int) sequence.size())] }; }, false);
+
+            // Unless its notes have been moved by hand to others of the chord's
+            std::vector<StaffEvent*> written;
+
+            for (auto& event : inRhythm.events)
+                if (! event.isRest())
+                    written.push_back (&event);
+
+            if (const auto moved = getMovedNotes (chord, measureChord, written.size()))
+            {
+                inRhythm.tiedNotes.clear();
+
+                for (size_t i = 0; i < written.size(); ++i)
+                    written[i]->tones = { (*moved)[i] };
+
+                // Ties hold on only notes that stay the same, and the last on into the next measure.
+                for (size_t i = 0; i < written.size(); ++i)
+                    if (notes[i].tiedToNext && (i + 1 == written.size() || (*moved)[i].midi == (*moved)[i + 1].midi))
+                        inRhythm.tiedNotes.push_back ({ written[i]->onset, (*moved)[i].pitch });
+            }
+
+            return inRhythm;
+        }
 
         if (! music::isMelodic (type))
         {
@@ -376,9 +465,15 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
                 auto& alternate = content.staves[(size_t) otherStaff];
                 alternate.source = StaffContent::Source::alternate;
 
-                if (auto tones = score.getAlternateTones (part, measure); ! tones.empty())
-                    alternate.events.push_back ({ 0.0, getFullMeasureDuration (score.getBeatsPerMeasure()), std::move (tones),
-                                                  score.getAlternateStaff (part) == music::AlternateStaff::rolledChord, false });
+                // In a rhythm with notes on both staves, the other staff's go as its notes do.
+                const auto& rhythm = measureChord->style.rhythm;
+                const auto rolled = score.getAlternateStaff (part) == music::AlternateStaff::rolledChord;
+
+                if (auto tones = score.getAlternateTones (part, measure); ! tones.empty() && rhythm.has_value() && rhythm->hasNotes (otherStaff) && rhythm->hasNotes (style.staff))
+                    alternate = getRhythmContent (score, layOutRhythm (rhythm->staves[(size_t) otherStaff], score.getBeatsPerMeasure() * Score::slotsPerBeat, measureChord->rhythmMeasure),
+                                                  StaffContent::Source::alternate, [&] (int) { return tones; }, rolled);
+                else if (! tones.empty())
+                    alternate.events.push_back ({ 0.0, getFullMeasureDuration (score.getBeatsPerMeasure()), std::move (tones), rolled, false });
                 else
                     alternate.events.push_back ({ 0.0, Duration::whole, {}, false, true });
                 filled[(size_t) otherStaff] = true;

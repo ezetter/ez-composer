@@ -3618,6 +3618,10 @@ StaffView::Erasable StaffView::findErasableAt (juce::Point<float> point) const
 
     for (const auto& tie : getTieShapes (nearMeasure - 1, nearMeasure))
     {
+        // A chord's ties are its rhythm's, to change in the chord window.
+        if (! tie.byHand)
+            continue;
+
         for (int i = 0; i <= 20 && ! found.tie.has_value(); ++i)
             if (point.getDistanceFrom (getPointOnTie (tie, (float) i / 20.0f)) <= 0.5f * staffSpace)
                 found.tie = tie.from;
@@ -3783,9 +3787,6 @@ std::optional<StaffView::TiePoint> StaffView::getTiePoint (int measure, Staff st
 
     const auto& content = measureLayouts[(size_t) measure].content.staves[(size_t) staff];
 
-    if (content.source != StaffContent::Source::notes)
-        return {};
-
     for (const auto& event : content.events)
     {
         if (event.isRest() || ! juce::exactlyEqual (event.onset, beat))
@@ -3842,6 +3843,27 @@ float StaffView::getTieHeight (juce::Point<float> start, juce::Point<float> end,
     return juce::jlimit (0.5f, 1.6f, 0.12f * (end.x - start.x) / staffSpace + 0.3f) * staffSpace * (upwards ? -1.0f : 1.0f);
 }
 
+std::optional<std::pair<int, double>> StaffView::getFollowingWrittenBeat (int measure, Staff staff, double onset) const
+{
+    if (! juce::isPositiveAndBelow (measure, (int) measureLayouts.size()))
+        return {};
+
+    // Where the note ends, in its measure, or the start of the next
+    for (const auto& event : measureLayouts[(size_t) measure].content.staves[(size_t) staff].events)
+    {
+        if (event.isRest() || ! juce::exactlyEqual (event.onset, onset))
+            continue;
+
+        if (const auto end = onset + getBeats (event.duration); end < (double) score.getBeatsPerMeasure() - 1.0e-9)
+            return std::pair { measure, end };
+
+        if (measure + 1 < (int) measureLayouts.size())
+            return std::pair { measure + 1, 0.0 };
+    }
+
+    return {};
+}
+
 std::vector<StaffView::TieShape> StaffView::getTieShapes (int firstMeasure, int lastMeasure) const
 {
     std::vector<TieShape> shapes;
@@ -3850,9 +3872,13 @@ std::vector<StaffView::TieShape> StaffView::getTieShapes (int firstMeasure, int 
     {
         for (auto staff : { Staff::treble, Staff::bass })
         {
-            for (const auto& [onset, pitch] : measureLayouts[(size_t) measure].content.staves[(size_t) staff].tiedNotes)
+            // Notes clicked in are tied as the score has them, and a chord's in its rhythm as they're written.
+            const auto& content = measureLayouts[(size_t) measure].content.staves[(size_t) staff];
+            const auto byHand = content.source == StaffContent::Source::notes;
+
+            for (const auto& [onset, pitch] : content.tiedNotes)
             {
-                const auto next = score.getFollowingBeat (part, staff, measure, onset);
+                const auto next = byHand ? score.getFollowingBeat (part, staff, measure, onset) : getFollowingWrittenBeat (measure, staff, onset);
                 const auto from = getTiePoint (measure, staff, onset, pitch);
                 const auto to = next.has_value() ? getTiePoint (next->first, staff, next->second, pitch) : std::nullopt;
 
@@ -3863,7 +3889,7 @@ std::vector<StaffView::TieShape> StaffView::getTieShapes (int firstMeasure, int 
                 const auto offset = 0.45f * staffSpace * (from->upwards ? -1.0f : 1.0f);
                 shapes.push_back ({ Note { staff, measure, onset, pitch, part, 1.0 },
                                     from->centre.translated (from->halfWidth + 0.15f * staffSpace, offset),
-                                    to->centre.translated (-to->halfWidth - 0.15f * staffSpace, offset), from->upwards });
+                                    to->centre.translated (-to->halfWidth - 0.15f * staffSpace, offset), from->upwards, byHand });
             }
         }
     }

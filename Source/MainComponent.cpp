@@ -55,6 +55,7 @@ namespace
     const char* const progressionTypeKey = "progressionChordType";
     const char* const progressionClefKey = "progressionClef";
     const char* const progressionLengthKey = "progressionNoteLength";
+    const char* const progressionRhythmKey = "progressionRhythm";       // by name
 
     // The MIDI menu's items are numbered from here, in the order of the inputs they're for.
     constexpr int firstMidiInputItem = 1000;
@@ -394,6 +395,9 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     if (const auto length = settings.getIntValue (progressionLengthKey, 0); length > 0)
         progressionStyle.noteLength = Score::fitNoteLength (length, length);
+
+    if (const auto* rhythm = savedRhythms.find (settings.getValue (progressionRhythmKey)); rhythm != nullptr && settings.getValue (progressionRhythmKey).isNotEmpty())
+        progressionStyle.rhythm = *rhythm;
     sidebarContent.addAndMakeVisible (scorePanel);
     sidebar.setViewedComponent (&sidebarContent, false);
     sidebar.setScrollBarsShown (true, false);
@@ -1247,7 +1251,7 @@ void MainComponent::showApplyProgressionPanel (juce::Component& button)
         return;
 
     auto panel = std::make_unique<ApplyProgressionPanel> (savedProgressions.getAll(), progressionStyle, activePart, getPlaybackMeasure(),
-                                                          score.getBeatsPerMeasure(), lastProgressionApplied);
+                                                          score.getBeatsPerMeasure(), lastProgressionApplied, savedRhythms.getAll());
     auto* panelPointer = panel.get();
     const auto close = [panelPointer]
     {
@@ -1275,11 +1279,12 @@ void MainComponent::applyProgression (const SavedProgression& progression, const
     settings.setValue (progressionTypeKey, (int) style.type);
     settings.setValue (progressionClefKey, style.staff == Staff::bass ? "bass" : "treble");
     settings.setValue (progressionLengthKey, style.noteLength.value_or (0));
+    settings.setValue (progressionRhythmKey, style.rhythm.has_value() ? style.rhythm->name : juce::String());
 
     const auto part = activePart;
     const auto first = getPlaybackMeasure();
     const auto chords = progression.createChords (score.getKey(), style);
-    const auto count = (int) chords.size();
+    const auto count = score.getChordsLength (chords);     // in measures, each chord as many as its rhythm takes
 
     if (chords.empty())
         return;
@@ -1962,7 +1967,10 @@ void MainComponent::editChord (int part, int measure)
     closeChordEditor();
     setActivePart (part);
 
-    auto editor = std::make_unique<ChordEditor> (score, part, measure, lastChordStyle);
+    // A chord in several measures, as its rhythm takes, is edited where it starts.
+    measure = score.getChordSpan (part, measure).first;
+
+    auto editor = std::make_unique<ChordEditor> (score, part, measure, lastChordStyle, savedRhythms.getAll());
     auto* editorPointer = editor.get();
 
     editor->onChordChanged = [this, editorPointer]

@@ -4,16 +4,6 @@
 
 namespace
 {
-    /** A number from the settings, or the fallback if it's missing or out of range. */
-    int readInt (const juce::var& value, int lowest, int highest, int fallback)
-    {
-        if (! (value.isInt() || value.isInt64() || value.isDouble()))
-            return fallback;
-
-        const auto number = (int) value;
-        return number >= lowest && number <= highest ? number : fallback;
-    }
-
     int toSlots (double beats)
     {
         return (int) std::lround (beats * Score::slotsPerBeat);
@@ -34,74 +24,6 @@ namespace
 }
 
 //==============================================================================
-juce::String SavedRhythm::describe() const
-{
-    const auto count = [] (size_t n) { return juce::String ((int) n) + (n == 1 ? " note" : " notes"); };
-    const auto measures = juce::String (numMeasures) + (numMeasures == 1 ? " measure" : " measures") + " of " + juce::String (beatsPerMeasure) + "/4";
-    const auto& treble = staves[(size_t) Staff::treble];
-    const auto& bass = staves[(size_t) Staff::bass];
-
-    if (! treble.empty() && ! bass.empty())
-        return measures + ": " + count (treble.size()) + " on the treble staff, " + juce::String ((int) bass.size()) + " on the bass";
-
-    return measures + ": " + count (treble.empty() ? bass.size() : treble.size()) + " on one staff";
-}
-
-juce::var SavedRhythm::toJSON() const
-{
-    auto* object = new juce::DynamicObject();
-    object->setProperty ("name", name);
-    object->setProperty ("beatsPerMeasure", beatsPerMeasure);
-    object->setProperty ("measures", numMeasures);
-
-    for (auto staff : { Staff::treble, Staff::bass })
-    {
-        juce::Array<juce::var> hits;
-
-        for (const auto& hit : staves[(size_t) staff])
-            hits.add (juce::Array<juce::var> { hit.onset, hit.length, hit.staccato, hit.tiedToNext });
-
-        object->setProperty (staff == Staff::treble ? "treble" : "bass", hits);
-    }
-
-    return juce::var (object);
-}
-
-std::optional<SavedRhythm> SavedRhythm::fromJSON (const juce::var& json)
-{
-    if (! json.isObject())
-        return {};
-
-    SavedRhythm rhythm;
-    rhythm.name = tidySavedName (json.getProperty ("name", {}).toString(), maxNameLength);
-    rhythm.beatsPerMeasure = readInt (json.getProperty ("beatsPerMeasure", {}), 1, Score::maxBeatsPerMeasure, 4);
-    rhythm.numMeasures = readInt (json.getProperty ("measures", {}), 1, 1000, 1);
-
-    // Notes in order, each after the one before ends, within the rhythm, as long as a note can be
-    for (auto staff : { Staff::treble, Staff::bass })
-    {
-        auto& hits = rhythm.staves[(size_t) staff];
-
-        if (const auto* list = json.getProperty (staff == Staff::treble ? "treble" : "bass", {}).getArray())
-        {
-            for (const auto& item : *list)
-            {
-                const Hit hit { readInt (getListItem (item, 0), 0, rhythm.getLength() - 1, -1), readInt (getListItem (item, 1), 1, Score::maxSlotsPerMeasure, -1),
-                                (bool) getListItem (item, 2), (bool) getListItem (item, 3) };
-
-                if (hit.onset >= 0 && hit.length > 0 && hit.onset + hit.length <= rhythm.getLength()
-                    && (hits.empty() || hits.back().onset + hits.back().length <= hit.onset))
-                    hits.push_back (hit);
-            }
-        }
-    }
-
-    if (rhythm.name.isEmpty() || ! rhythm.hasNotes())
-        return {};
-
-    return rhythm;
-}
-
 //==============================================================================
 SavedRhythm getRhythm (const Score& score, int part, int firstMeasure, int numMeasures)
 {
