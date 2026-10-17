@@ -3496,7 +3496,45 @@ std::optional<Note> StaffView::getNoteToClickAt (juce::Point<float> point) const
         if (const auto onset = findWrittenNoteOnset (*note, point.x))
             note->beat = *onset;
 
+    // A note doesn't go under one still sounding, which it would cut short, but where that one
+    // ends, the next point a note can start: in the measure, or at the start of the next. After
+    // the last measure, there's nowhere.
+    if (note.has_value() && ! score.chordUsesStaff (part, note->measure, note->staff))
+    {
+        if (const auto end = getHeldNoteEnd (note->staff, note->measure, note->beat))
+        {
+            if (*end < score.getBeatsPerMeasure())
+                note->beat = *end;
+            else if (note->measure + 1 < score.getNumMeasures())
+                note = Note { note->staff, note->measure + 1, 0.0, note->pitch, note->part, note->length, note->staccato };
+            else
+                note.reset();
+        }
+    }
+
     return note;
+}
+
+std::optional<double> StaffView::getHeldNoteEnd (Staff staff, int measure, double beat) const
+{
+    // As long as they're shown, which may be shorter than they were added, in a shorter time signature
+    const auto slots = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+    const auto slot = (int) std::lround (beat * Score::slotsPerBeat);
+
+    for (int earlier = 0; earlier < slot; ++earlier)
+    {
+        const auto earlierBeat = (double) earlier / Score::slotsPerBeat;
+
+        if (score.getNotes (part, staff, measure, earlierBeat).empty())
+            continue;
+
+        const auto added = (int) std::lround (score.getNoteLength (part, staff, measure, earlierBeat) * Score::slotsPerBeat);
+
+        if (const auto end = earlier + Score::fitNoteLength (added, slots - earlier); end > slot)
+            return (double) end / Score::slotsPerBeat;
+    }
+
+    return {};
 }
 
 void StaffView::writeOutRandomChordWithout (int measure, Staff staff, double beat, int midi)

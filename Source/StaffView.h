@@ -472,8 +472,15 @@ private:
 
     /** The note a click at this point would add or take out. In a measure with a Random chord,
         each of whose notes goes on its own, it's the very note under the point, if there is one.
+        One that would start while a note before it on its staff is still sounding goes where that
+        note ends instead, or at the start of the next measure, or nowhere, after the last.
     */
     std::optional<Note> getNoteToClickAt (juce::Point<float>) const;
+
+    /** Where a note before a point in a measure, on a staff, ends, in beats, if it's still
+        sounding at that point: the measure's end, if it lasts till then.
+    */
+    std::optional<double> getHeldNoteEnd (Staff, int measure, double beat) const;
 
     /** Whether a measure has a Random chord with notes. */
     bool hasRandomChord (int measure) const;
