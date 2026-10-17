@@ -9,6 +9,15 @@
 #include <functional>
 #include <optional>
 
+/** The chord types, as the chord window names them, in the order of music::ChordType. */
+juce::StringArray getChordTypeNames();
+
+/** The note lengths a chord's notes can be chosen to have, in 32nds, longest first, and their
+    names. A whole note is as long as the measure, whatever the time signature: a dotted half in
+    3/4. Dotted notes aren't among them.
+*/
+const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths();
+
 /** Defines the chord in one measure, with the same settings as the Chord Progression Builder's
     chord panels, plus the clef and chord type it's written with.
 

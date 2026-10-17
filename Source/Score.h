@@ -440,6 +440,18 @@ public:
     */
     void setChord (int part, int measure, std::optional<MeasureChord>);
 
+    /** Sets a part's chords in measures one after another, from one measure on, as setChord()
+        does, adding measures at the end, in every part, for any that don't fit.
+    */
+    void setChords (int part, int firstMeasure, const std::vector<MeasureChord>&);
+
+    /** Whether chords written on a staff in some of a part's measures would take the place of
+        anything there: a chord with notes, or notes on that staff, or, while the part's alternate
+        staff shows something, on the other one, which they'd hide. Notes past the end of a
+        shorter time signature's measures count too. Measures past the end don't.
+    */
+    bool chordsWouldReplace (int part, int firstMeasure, int count, Staff) const;
+
     /** Takes out a measure's chord, and puts these notes on its staves instead of anything they
         had, e.g. to write the chord's notes out one by one, so they can be changed on their own.
     */

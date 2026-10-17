@@ -42,6 +42,8 @@ target_sources(AnthropoceneMusic
         Source/Piece.cpp
         Source/PluginWindow.cpp
         Source/PositionRuler.cpp
+        Source/ProgressionPanels.cpp
+        Source/Progressions.cpp
         Source/Recorder.cpp
         Source/Score.cpp
         Source/ScaleTool.cpp

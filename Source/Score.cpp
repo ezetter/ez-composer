@@ -1025,6 +1025,49 @@ void Score::setChord (int part, int measure, std::optional<MeasureChord> chord)
     sendSynchronousChangeMessage();
 }
 
+void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChord>& chords)
+{
+    if (firstMeasure < 0 || chords.empty())
+        return;
+
+    for (auto& eachPart : parts)
+        while ((int) eachPart.measures.size() < firstMeasure + (int) chords.size())
+            eachPart.measures.emplace_back();
+
+    while ((int) repeats.size() < getNumMeasures())
+        repeats.emplace_back();
+
+    for (size_t i = 0; i < chords.size(); ++i)
+    {
+        auto& target = getMeasure (part, firstMeasure + (int) i);
+        target.chord = chords[i];
+        tidyChord (target);
+    }
+
+    pruneTies();
+    sendSynchronousChangeMessage();
+}
+
+bool Score::chordsWouldReplace (int part, int firstMeasure, int count, Staff staff) const
+{
+    const auto bothStaves = getAlternateStaff (part) != music::AlternateStaff::none;
+    const auto hasNotes = [] (const Measure& m, Staff s)
+    {
+        const auto& slots = m.notes[(size_t) s];
+        return std::any_of (slots.begin(), slots.end(), [] (const std::vector<music::Pitch>& pitches) { return ! pitches.empty(); });
+    };
+
+    for (auto measure = juce::jmax (0, firstMeasure); measure < juce::jmin (getNumMeasures(), firstMeasure + count); ++measure)
+    {
+        const auto& m = getMeasure (part, measure);
+
+        if ((m.chord.has_value() && m.chord->hasNotes()) || hasNotes (m, staff) || (bothStaves && hasNotes (m, music::getOtherStaff (staff))))
+            return true;
+    }
+
+    return false;
+}
+
 void Score::replaceChordWithNotes (int part, int measure, const std::vector<Note>& notes)
 {
     auto& target = getMeasure (part, measure);

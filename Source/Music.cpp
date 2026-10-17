@@ -595,6 +595,35 @@ Chord createChord (Key key, const std::vector<KeyboardNote>& notes, const ChordS
     return chord;
 }
 
+std::vector<int> transposeNotes (const std::vector<KeyboardNote>& notes, Key from, Staff fromStaff, Key to, Staff toStaff)
+{
+    if (notes.empty())
+        return {};
+
+    // From one tonic to the other, the nearer way: letters, and the semitones they make
+    constexpr int middleC = 28;
+    const auto letters = mod (to.tonic.letter - from.tonic.letter + 3, 7) - 3;
+    const auto semitones = Pitch { middleC + from.tonic.letter + letters, to.tonic.alter }.getMidiNoteNumber()
+                         - Pitch { middleC + from.tonic.letter, from.tonic.alter }.getMidiNoteNumber();
+
+    // The lowest note, as many octaves into the other staff's chords' range
+    const auto lowestStep = createTones (from, notes).front().pitch.step;
+    const auto movedStep = lowestStep + letters;
+    const auto octaves = floorDivide (lowestStep - getLowestChordLetter (fromStaff), 7);
+    const auto rangeStart = getLowestChordLetter (toStaff);
+    const auto placedStep = rangeStart + mod (movedStep - rangeStart, 7) + 7 * octaves;
+    const auto shift = semitones + 12 * ((placedStep - movedStep) / 7);
+
+    std::vector<int> moved;
+
+    for (const auto& note : notes)
+        if (juce::isPositiveAndBelow (note.midi + shift, 128))
+            moved.push_back (note.midi + shift);
+
+    std::sort (moved.begin(), moved.end());
+    return moved;
+}
+
 NotesDescription describeNotes (Key key, Staff staff, std::vector<int> midiNotes)
 {
     std::sort (midiNotes.begin(), midiNotes.end());

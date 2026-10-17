@@ -14,6 +14,8 @@
 #include "PianoKeyboard.h"
 #include "Piece.h"
 #include "PositionRuler.h"
+#include "ProgressionPanels.h"
+#include "Progressions.h"
 #include "Recorder.h"
 #include "Score.h"
 #include "ScoreDocument.h"
@@ -286,6 +288,31 @@ private:
     /** Gives another part the active part's chords, asking first if it has notes of its own. */
     void copyProgression (int toPart);
 
+    /** Shows Save Progression's name for the active part's chords, in a box beside its button. */
+    void showSaveProgressionPanel (juce::Component& button);
+
+    /** Keeps the active part's chord progression under a name, for every score, asking first
+        if it would take the place of one saved with that name.
+    */
+    void saveProgression (const juce::String& name);
+
+    /** Shows the saved progressions, and how to write them, in a box beside Apply Saved Progression. */
+    void showApplyProgressionPanel (juce::Component& button);
+
+    /** Writes a saved progression's chords into the active part, a chord to a measure, from the
+        measure it plays from, adding measures at the end if they don't all fit, and asking first
+        if they'd take the place of notes or chords already there.
+    */
+    void applyProgression (const SavedProgression&, const ChordStyle&);
+
+    /** Takes a progression out of the ones saved, asking first. */
+    void deleteSavedProgression (const juce::String& name);
+
+    /** The measure of the page being edited that it's playing, if it's playing it, or else plays
+        from: up to the number of measures, after the last.
+    */
+    int getPlaybackMeasure() const;
+
     /** Opens the chord window for a measure of a part, to add a chord or edit the one it has.
         The part becomes the active one.
     */
@@ -488,6 +515,7 @@ private:
     juce::AudioDeviceManager audioDeviceManager;
     InstrumentHost instrumentHost;
     MidiInputs midiInputs { audioDeviceManager, instrumentHost, settings };
+    ProgressionLibrary savedProgressions { settings };
     EffectRack effectRack { instrumentHost };
 
     /** The MIDI inputs the MIDI menu showed, the last time it was opened */
@@ -568,6 +596,9 @@ private:
     bool placingScale = false;
     int activePartId = 0;               // so the active part can be found again when parts are added or taken out
     ChordStyle lastChordStyle;          // what a new chord starts with: whichever was chosen last
+    ChordStyle progressionStyle;        // what a saved progression is applied with: the one chosen last
+    juce::String lastProgressionApplied;
+    juce::Component::SafePointer<ApplyProgressionPanel> applyProgressionPanel;     // while it's showing
     juce::Component::SafePointer<juce::Component> keyListenerTarget;
 
     // Last, so it goes before the score it edits

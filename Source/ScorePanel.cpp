@@ -7,7 +7,7 @@ namespace
     constexpr int headingHeight = 16;
     constexpr int controlHeight = 28;
     constexpr int sectionGap = 12;
-    constexpr int buttonGap = 6;        // between Copy Chords and Generate Notes from Key
+    constexpr int buttonGap = 6;        // between the progression's buttons
 }
 
 ScorePanel::ScorePanel (Score& scoreToEdit)
@@ -30,6 +30,12 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     generateNotesButton.setWantsKeyboardFocus (false);
     generateNotesButton.setTooltip ("Add notes from the key's scale, in order or at random, where you click on a staff");
     generateNotesButton.onClick = [this] { if (onScale != nullptr) onScale (generateNotesButton); };
+
+    for (auto* button : { &saveProgressionButton, &applyProgressionButton })
+        button->setWantsKeyboardFocus (false);
+
+    saveProgressionButton.onClick = [this] { if (onSaveProgression != nullptr) onSaveProgression (saveProgressionButton); };
+    applyProgressionButton.onClick = [this] { if (onApplyProgression != nullptr) onApplyProgression (applyProgressionButton); };
 
     signatureLabel.setFont (juce::FontOptions (12.0f));
     signatureLabel.setColour (juce::Label::textColourId, controls::secondaryText);
@@ -66,7 +72,8 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
 
     for (auto* component : std::initializer_list<juce::Component*> { &keyHeading, &keyBox, &majorButton, &minorButton, &signatureLabel, &timeSignatureHeading,
                                                                      &timeSignatureBox, &alternateHeading, &alternateBox,
-                                                                     &progressionHeading, &copyChordsButton, &generateNotesButton })
+                                                                     &progressionHeading, &copyChordsButton, &saveProgressionButton,
+                                                                     &applyProgressionButton, &generateNotesButton })
         addAndMakeVisible (component);
 
     score.addChangeListener (this);
@@ -86,7 +93,7 @@ ScorePanel::~ScorePanel()
 
 int ScorePanel::getIdealHeight() const
 {
-    return 4 * (headingHeight + 2) + 5 * controlHeight + (2 + 16) + buttonGap + 3 * sectionGap;
+    return 4 * (headingHeight + 2) + 7 * controlHeight + (2 + 16) + 3 * buttonGap + 3 * sectionGap;
 }
 
 void ScorePanel::resized()
@@ -116,13 +123,23 @@ void ScorePanel::resized()
 
     progressionHeading.setBounds (bounds.removeFromTop (headingHeight));
     bounds.removeFromTop (2);
-    copyChordsButton.setBounds (bounds.removeFromTop (controlHeight));
-    bounds.removeFromTop (buttonGap);
+    for (auto* button : { &copyChordsButton, &saveProgressionButton, &applyProgressionButton })
+    {
+        button->setBounds (bounds.removeFromTop (controlHeight));
+        bounds.removeFromTop (buttonGap);
+    }
+
     generateNotesButton.setBounds (bounds.removeFromTop (controlHeight));
 }
 
 void ScorePanel::changeListenerCallback (juce::ChangeBroadcaster*)
 {
+    update();
+}
+
+void ScorePanel::setNumSavedProgressions (int count)
+{
+    numSavedProgressions = count;
     update();
 }
 
@@ -159,6 +176,14 @@ void ScorePanel::update()
 
     // The chords go from this part to the other, or to one chosen from a menu.
     const auto from = juce::String (part + 1);
+
+    // The part's chords can be saved, and saved ones applied to it.
+    saveProgressionButton.setEnabled (score.hasChords (part));
+    saveProgressionButton.setTooltip (score.hasChords (part) ? "Save instrument " + from + "'s chords, to apply them again, in this score or another"
+                                                             : "Instrument " + from + " has no chords to save yet. Add one with Add Chord, over a measure.");
+    applyProgressionButton.setEnabled (numSavedProgressions > 0);
+    applyProgressionButton.setTooltip (numSavedProgressions > 0 ? "Write a saved progression's chords into instrument " + from + ", from where it plays from"
+                                                                : juce::String ("No progressions are saved yet. Save one with Save Progression."));
 
     if (score.getNumParts() == 1)
     {

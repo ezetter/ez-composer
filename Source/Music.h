@@ -195,6 +195,14 @@ namespace music
 
     NotesDescription describeNotes (Key, Staff, std::vector<int> midiNotes);
 
+    /** Notes set on the piano for a chord in one key, on one staff, moved to where they'd be in
+        another key, on another staff, as MIDI note numbers: by as far as from one key's tonic to
+        the other's, up or down, whichever's nearer, and by octaves, so the lowest note is as many
+        octaves into the other staff's chords' range as it was into the first's, as a spec's
+        chord is. Notes moved off the piano are left out.
+    */
+    std::vector<int> transposeNotes (const std::vector<KeyboardNote>&, Key from, Staff fromStaff, Key to, Staff toStaff);
+
     //==============================================================================
     /** What the other staff of the grand staff shows under or over a chord. */
     enum class AlternateStaff { none, root, octave, blockChord, rolledChord };

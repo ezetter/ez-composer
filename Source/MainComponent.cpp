@@ -51,6 +51,11 @@ namespace
     // And the effects, as JSON
     const char* const effectsKey = "effects";
 
+    // And how saved progressions were last applied: the chord type, clef, and note length, if one was chosen
+    const char* const progressionTypeKey = "progressionChordType";
+    const char* const progressionClefKey = "progressionClef";
+    const char* const progressionLengthKey = "progressionNoteLength";
+
     // The MIDI menu's items are numbered from here, in the order of the inputs they're for.
     constexpr int firstMidiInputItem = 1000;
 
@@ -377,6 +382,15 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     scorePanel.onCopyProgression = [this] (int toPart) { copyProgression (toPart); };
     scorePanel.onScale = [this] (juce::Component& button) { showScalePanel (button); };
+    scorePanel.onSaveProgression = [this] (juce::Component& button) { showSaveProgressionPanel (button); };
+    scorePanel.onApplyProgression = [this] (juce::Component& button) { showApplyProgressionPanel (button); };
+    scorePanel.setNumSavedProgressions ((int) savedProgressions.getProgressions().size());
+
+    progressionStyle.type = (music::ChordType) juce::jlimit (0, 4, settings.getIntValue (progressionTypeKey, 0));
+    progressionStyle.staff = settings.getValue (progressionClefKey) == "bass" ? Staff::bass : Staff::treble;
+
+    if (const auto length = settings.getIntValue (progressionLengthKey, 0); length > 0)
+        progressionStyle.noteLength = Score::fitNoteLength (length, length);
     sidebarContent.addAndMakeVisible (scorePanel);
     sidebar.setViewedComponent (&sidebarContent, false);
     sidebar.setScrollBarsShown (true, false);
@@ -1158,6 +1172,198 @@ void MainComponent::copyProgression (int to)
                                       if (safeThis != nullptr && result == 1)
                                           safeThis->score.copyChords (from, to);
                                   });
+}
+
+void MainComponent::showSaveProgressionPanel (juce::Component& button)
+{
+    if (! score.hasChords (activePart))
+        return;
+
+    auto panel = std::make_unique<SaveProgressionPanel> (getProgression (score, activePart), activePart);
+    auto* panelPointer = panel.get();
+    const auto close = [panelPointer]
+    {
+        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    };
+
+    panel->onCancel = close;
+    panel->onSave = [this, close] (const juce::String& name)
+    {
+        close();
+        saveProgression (name);
+    };
+
+    juce::CallOutBox::launchAsynchronously (std::move (panel), getLocalArea (&button, button.getLocalBounds()), this);
+}
+
+void MainComponent::saveProgression (const juce::String& name)
+{
+    auto progression = getProgression (score, activePart);
+
+    if (progression.chords.empty())
+        return;
+
+    progression.name = name;
+    const auto keep = [safeThis = juce::Component::SafePointer (this), progression]
+    {
+        if (safeThis == nullptr)
+            return;
+
+        safeThis->savedProgressions.save (progression);
+        safeThis->scorePanel.setNumSavedProgressions ((int) safeThis->savedProgressions.getProgressions().size());
+    };
+
+    const auto* existing = savedProgressions.find (name);
+
+    if (existing == nullptr)
+    {
+        keep();
+        return;
+    }
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle ("Replace " + existing->name.quoted() + "?")
+                                      .withMessage ("A progression called " + existing->name.quoted() + " is saved already. Saving this one replaces it.")
+                                      .withButton ("Replace")
+                                      .withButton ("Cancel")
+                                      .withAssociatedComponent (this),
+                                  [keep] (int result)
+                                  {
+                                      // Replace is 1, and Cancel 0.
+                                      if (result == 1)
+                                          keep();
+                                  });
+}
+
+void MainComponent::showApplyProgressionPanel (juce::Component& button)
+{
+    if (savedProgressions.getProgressions().empty())
+        return;
+
+    auto panel = std::make_unique<ApplyProgressionPanel> (savedProgressions.getProgressions(), progressionStyle, activePart, getPlaybackMeasure(),
+                                                          score.getBeatsPerMeasure(), lastProgressionApplied);
+    auto* panelPointer = panel.get();
+    const auto close = [panelPointer]
+    {
+        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    };
+
+    applyProgressionPanel = panelPointer;
+    panel->onCancel = close;
+    panel->onDelete = [this] (const juce::String& name) { deleteSavedProgression (name); };
+    panel->onApply = [this, close] (const SavedProgression& progression, const ChordStyle& style)
+    {
+        close();
+        applyProgression (progression, style);
+    };
+
+    juce::CallOutBox::launchAsynchronously (std::move (panel), getLocalArea (&button, button.getLocalBounds()), this);
+}
+
+void MainComponent::applyProgression (const SavedProgression& progression, const ChordStyle& style)
+{
+    // The style's kept for next time.
+    progressionStyle = style;
+    lastProgressionApplied = progression.name;
+    settings.setValue (progressionTypeKey, (int) style.type);
+    settings.setValue (progressionClefKey, style.staff == Staff::bass ? "bass" : "treble");
+    settings.setValue (progressionLengthKey, style.noteLength.value_or (0));
+
+    const auto part = activePart;
+    const auto first = getPlaybackMeasure();
+    const auto chords = progression.createChords (score.getKey(), style);
+    const auto count = (int) chords.size();
+
+    if (chords.empty())
+        return;
+
+    const auto write = [safeThis = juce::Component::SafePointer (this), part, first, chords]
+    {
+        if (safeThis == nullptr || ! juce::isPositiveAndBelow (part, safeThis->score.getNumParts()))
+            return;
+
+        // The chord window's measure may be among them.
+        safeThis->closeChordEditor();
+        safeThis->score.setChords (part, juce::jmin (first, safeThis->score.getNumMeasures()), chords);
+        safeThis->scrollToMeasure (first);
+    };
+
+    if (! score.chordsWouldReplace (part, first, count, style.staff))
+    {
+        write();
+        return;
+    }
+
+    // The measures it goes into that are there already
+    const auto last = juce::jmin (first + count, score.getNumMeasures()) - 1;
+    const auto measures = last > first ? "Measures " + juce::String (first + 1) + controls::fromUTF8 ("\xe2\x80\x93") + juce::String (last + 1)
+                                       : "Measure " + juce::String (first + 1);
+    const auto partName = "instrument " + juce::String (part + 1);
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle ("Replace " + partName + "'s notes?")
+                                      .withMessage (measures + " of " + partName + " already have notes or chords, which the progression's chords take the place of.")
+                                      .withButton ("Replace")
+                                      .withButton ("Cancel")
+                                      .withAssociatedComponent (this),
+                                  [write] (int result)
+                                  {
+                                      // Replace is 1, and Cancel 0.
+                                      if (result == 1)
+                                          write();
+                                  });
+}
+
+void MainComponent::deleteSavedProgression (const juce::String& name)
+{
+    if (savedProgressions.find (name) == nullptr)
+        return;
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle ("Delete " + name.quoted() + "?")
+                                      .withMessage ("The progression is taken out of the ones saved, for every score. This can't be undone.")
+                                      .withButton ("Delete")
+                                      .withButton ("Cancel")
+                                      .withAssociatedComponent (this),
+                                  [safeThis = juce::Component::SafePointer (this), name] (int result)
+                                  {
+                                      if (safeThis == nullptr || result != 1)
+                                          return;
+
+                                      auto& library = safeThis->savedProgressions;
+                                      library.remove (name);
+                                      safeThis->scorePanel.setNumSavedProgressions ((int) library.getProgressions().size());
+
+                                      // The box shows what's left, and closes once there's nothing.
+                                      if (auto* panel = safeThis->applyProgressionPanel.getComponent())
+                                      {
+                                          if (library.getProgressions().empty())
+                                          {
+                                              if (auto* box = panel->findParentComponentOfClass<juce::CallOutBox>())
+                                                  box->dismiss();
+                                          }
+                                          else
+                                          {
+                                              panel->setProgressions (library.getProgressions());
+                                          }
+                                      }
+                                  });
+}
+
+int MainComponent::getPlaybackMeasure() const
+{
+    auto beat = playbackStarts[(size_t) piece.getCurrentPage()];
+
+    if (const auto played = instrumentHost.getPlaybackPosition())
+        if (const auto at = toWrittenPosition (*played); at.has_value() && at->page == piece.getCurrentPage())
+            beat = at->beat;
+
+    return juce::jlimit (0, score.getNumMeasures(), (int) std::floor (beat / score.getBeatsPerMeasure() + 1.0e-9));
 }
 
 void MainComponent::showScalePanel (juce::Component& button)
