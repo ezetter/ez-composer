@@ -1109,7 +1109,7 @@ void Score::setChord (int part, int measure, std::optional<MeasureChord> chord)
     sendSynchronousChangeMessage();
 }
 
-void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChord>& chords)
+void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChord>& chords, int measuresPerChord)
 {
     if (firstMeasure < 0 || chords.empty())
         return;
@@ -1117,25 +1117,31 @@ void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChor
     auto measure = firstMeasure;
 
     for (const auto& chord : chords)
-        measure += putChord (part, measure, chord);
+        measure += putChord (part, measure, chord, measuresPerChord);
 
     pruneTies();
     sendSynchronousChangeMessage();
 }
 
-int Score::getChordsLength (const std::vector<MeasureChord>& chords) const
+int Score::getChordsLength (const std::vector<MeasureChord>& chords, int measuresPerChord) const
 {
     auto length = 0;
 
     for (const auto& chord : chords)
-        length += chord.style.rhythm.has_value() ? getRhythmMeasureCount (*chord.style.rhythm, getSlotsPerMeasure()) : 1;
+        length += juce::jmax (measuresPerChord, getRhythmMeasureCount (chord));
 
     return length;
 }
 
-int Score::putChord (int part, int firstMeasure, const MeasureChord& chord)
+int Score::getRhythmMeasureCount (const MeasureChord& chord) const
 {
-    const auto count = chord.style.rhythm.has_value() ? getRhythmMeasureCount (*chord.style.rhythm, getSlotsPerMeasure()) : 1;
+    return chord.style.rhythm.has_value() ? ::getRhythmMeasureCount (*chord.style.rhythm, getSlotsPerMeasure()) : 1;
+}
+
+int Score::putChord (int part, int firstMeasure, const MeasureChord& chord, int numMeasures)
+{
+    const auto rhythmMeasures = getRhythmMeasureCount (chord);
+    const auto count = juce::jmax (numMeasures, rhythmMeasures);
 
     while (getNumMeasures() < firstMeasure + count)
     {
@@ -1149,7 +1155,7 @@ int Score::putChord (int part, int firstMeasure, const MeasureChord& chord)
     {
         auto& target = getMeasure (part, firstMeasure + i);
         target.chord = chord;
-        target.chord->rhythmMeasure = i;
+        target.chord->rhythmMeasure = i % rhythmMeasures;
         tidyChord (target);
     }
 
@@ -1161,7 +1167,7 @@ void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> 
     // The measures it no longer takes are left without it.
     const auto [first, oldCount] = getChordSpan (part, firstMeasure);
     const auto newCount = ! chord.has_value() ? 0
-                        : chord->style.rhythm.has_value() ? getRhythmMeasureCount (*chord->style.rhythm, getSlotsPerMeasure()) : 1;
+                        : getRhythmMeasureCount (*chord);
 
     for (auto i = newCount; i < oldCount; ++i)
         getMeasure (part, first + i).chord.reset();
@@ -1182,7 +1188,7 @@ std::pair<int, int> Score::getChordSpan (int part, int measure) const
 
     // From its first, as far as each measure has it, the next of its rhythm's measures
     const auto first = measure - chord->rhythmMeasure;
-    const auto wanted = getRhythmMeasureCount (*chord->style.rhythm, getSlotsPerMeasure());
+    const auto wanted = getRhythmMeasureCount (*chord);
     auto count = 0;
 
     for (; count < wanted && first + count < getNumMeasures(); ++count)

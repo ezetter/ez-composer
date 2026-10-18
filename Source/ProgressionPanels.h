@@ -56,8 +56,15 @@ public:
 
     ChordStyle getStyle() const;
 
-    /** Called when Apply is clicked, or a progression double-clicked. */
-    std::function<void (const SavedProgression&, const ChordStyle&)> onApply;
+    static constexpr int maxMeasuresPerChord = 16;
+
+    /** How many measures each chord goes in, one after another: 1 to start with */
+    int getMeasuresPerChord() const;
+
+    /** Called when Apply is clicked, or a progression double-clicked, with the progression, the
+        style to write its chords in, and how many measures each goes in.
+    */
+    std::function<void (const SavedProgression&, const ChordStyle&, int measuresPerChord)> onApply;
 
     /** Called when Delete is clicked, with the chosen progression's name. */
     std::function<void (const juce::String& name)> onDelete;
@@ -78,7 +85,8 @@ private:
     std::vector<SavedProgression> progressions;
     void updateLength();
 
-    juce::Label heading, targetLabel, typeLabel, clefLabel, lengthLabel, rhythmLabel;
+    juce::Label heading, targetLabel, typeLabel, clefLabel, lengthLabel, rhythmLabel, measuresLabel;
+    juce::Slider measuresSlider;
     juce::ListBox list { "Saved progressions", this };
     juce::ComboBox typeBox, lengthBox, rhythmBox;
     std::vector<Rhythm> rhythms;

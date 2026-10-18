@@ -546,14 +546,15 @@ public:
     */
     void setChord (int part, int measure, std::optional<MeasureChord>);
 
-    /** Sets a part's chords one after another, from one measure on, as setChord() does, each
-        in as many measures as its rhythm takes, or one, adding measures at the end, in every
-        part, for any that don't fit.
+    /** Sets a part's chords one after another, from one measure on, as setChord() does, each in
+        so many measures, or as many as its rhythm takes, if that's more, the rhythm starting again
+        in the measures after it takes, adding measures at the end, in every part, for any that
+        don't fit.
     */
-    void setChords (int part, int firstMeasure, const std::vector<MeasureChord>&);
+    void setChords (int part, int firstMeasure, const std::vector<MeasureChord>&, int measuresPerChord = 1);
 
-    /** How many measures chords take, one after another, each as many as its rhythm takes, or one */
-    int getChordsLength (const std::vector<MeasureChord>&) const;
+    /** How many measures chords take, one after another, as setChords() writes them */
+    int getChordsLength (const std::vector<MeasureChord>&, int measuresPerChord = 1) const;
 
     /** Sets the chord that starts in a measure, as the chord window does: with a rhythm that
         takes more than one measure, in as many, one after another, adding measures at the end,
@@ -725,10 +726,14 @@ private:
     /** Adds a note as addNote() does, without saying so. */
     bool putNote (const Note&);
 
-    /** Writes a chord in as many measures as its rhythm takes, or one, from one, adding measures
-        at the end for any that don't fit, without saying so. Returns how many it took.
+    /** Writes a chord in so many measures, or as many as its rhythm takes, if that's more, from
+        one, its rhythm starting again in the measures after it takes, adding measures at the end
+        for any that don't fit, without saying so. Returns how many it took.
     */
-    int putChord (int part, int firstMeasure, const MeasureChord&);
+    int putChord (int part, int firstMeasure, const MeasureChord&, int numMeasures = 1);
+
+    /** How many measures a chord takes in its rhythm, or one without one */
+    int getRhythmMeasureCount (const MeasureChord&) const;
     void tidyChord (Measure&, bool reshuffleRandomOrder = false);
 
     /** After the key changes: chords follow their numerals, and notes set on the piano keep

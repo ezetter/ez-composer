@@ -96,13 +96,21 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
 {
     controls::makeHeading (heading, "Apply Saved Progression");
     makeLabel (targetLabel, "Into instrument " + juce::String (part + 1) + ", from measure " + juce::String (measure + 1)
-                                + ", where it plays from, a chord to a measure");
+                                + ", where it plays from, its chords one after another");
     targetLabel.setColour (juce::Label::textColourId, controls::secondaryText);
     targetLabel.setJustificationType (juce::Justification::topLeft);
     makeLabel (typeLabel, "Chord type");
     makeLabel (clefLabel, "Clef");
     makeLabel (lengthLabel, "Note length");
     makeLabel (rhythmLabel, "Rhythm");
+    makeLabel (measuresLabel, "Measures per chord");
+
+    // Its tip first, so its buttons and box get it too, as its style makes them
+    measuresSlider.setTooltip ("How many measures each chord goes in, one after another, at least as many as its rhythm takes");
+    measuresSlider.setSliderStyle (juce::Slider::IncDecButtons);
+    measuresSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 44, rowHeight);
+    measuresSlider.setRange (1, maxMeasuresPerChord, 1);
+    measuresSlider.setValue (1, juce::dontSendNotification);
 
     list.setRowHeight (listRowHeight);
     list.setColour (juce::ListBox::outlineColourId, juce::Colours::black.withAlpha (0.15f));
@@ -166,7 +174,7 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     applyButton.onClick = [this] { apply(); };
 
     for (auto* component : std::initializer_list<juce::Component*> { &heading, &targetLabel, &list, &typeLabel, &typeBox, &clefLabel, &trebleButton, &bassButton,
-                                                                     &lengthLabel, &lengthBox, &rhythmLabel, &rhythmBox,
+                                                                     &lengthLabel, &lengthBox, &rhythmLabel, &rhythmBox, &measuresLabel, &measuresSlider,
                                                                      &deleteButton, &cancelButton, &applyButton })
         addAndMakeVisible (component);
 
@@ -180,7 +188,7 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     list.selectRow (chosen != progressions.end() ? (int) std::distance (progressions.begin(), chosen) : 0);
     updateButtons();
 
-    setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap * 2 + 4 * (rowHeight + gap) + gap + rowHeight);
+    setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap * 2 + 5 * (rowHeight + gap) + gap + rowHeight);
 }
 
 void ApplyProgressionPanel::setProgressions (const std::vector<SavedProgression>& saved)
@@ -190,9 +198,15 @@ void ApplyProgressionPanel::setProgressions (const std::vector<SavedProgression>
     progressions = saved;
     list.updateContent();
 
+    // The same one, or else the one in its place, or the last, if there are any
     const auto chosen = std::find_if (progressions.begin(), progressions.end(), [&] (const SavedProgression& p) { return p.name == chosenName; });
-    list.selectRow (chosen != progressions.end() ? (int) std::distance (progressions.begin(), chosen)
-                                                 : juce::jmin (chosenRow, (int) progressions.size() - 1));
+
+    if (progressions.empty())
+        list.deselectAllRows();
+    else
+        list.selectRow (chosen != progressions.end() ? (int) std::distance (progressions.begin(), chosen)
+                                                     : juce::jlimit (0, (int) progressions.size() - 1, chosenRow));
+
     updateButtons();
     list.repaint();
 }
@@ -218,6 +232,11 @@ ChordStyle ApplyProgressionPanel::getStyle() const
     return style;
 }
 
+int ApplyProgressionPanel::getMeasuresPerChord() const
+{
+    return juce::jlimit (1, maxMeasuresPerChord, juce::roundToInt (measuresSlider.getValue()));
+}
+
 void ApplyProgressionPanel::updateLength()
 {
     // A rhythm says how long the notes are instead.
@@ -231,7 +250,7 @@ void ApplyProgressionPanel::apply()
     {
         const auto progression = *chosen;
         const auto style = getStyle();
-        onApply (progression, style);
+        onApply (progression, style, getMeasuresPerChord());
     }
 }
 
@@ -315,6 +334,11 @@ void ApplyProgressionPanel::resized()
     auto rhythmRow = bounds.removeFromTop (rowHeight);
     rhythmLabel.setBounds (rhythmRow.removeFromLeft (labelWidth));
     rhythmBox.setBounds (rhythmRow);
+    bounds.removeFromTop (gap);
+
+    auto measuresRow = bounds.removeFromTop (rowHeight);
+    measuresLabel.setBounds (measuresRow.removeFromLeft (130));
+    measuresSlider.setBounds (measuresRow.removeFromLeft (110));
     bounds.removeFromTop (gap * 2);
 
     auto buttons = bounds.removeFromTop (rowHeight);

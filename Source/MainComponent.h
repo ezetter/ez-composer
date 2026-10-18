@@ -325,11 +325,12 @@ private:
     /** Shows the saved progressions, and how to write them, in a box beside Apply Saved Progression. */
     void showApplyProgressionPanel (juce::Component& button);
 
-    /** Writes a saved progression's chords into the active part, a chord to a measure, from the
-        measure it plays from, adding measures at the end if they don't all fit, and asking first
-        if they'd take the place of notes or chords already there.
+    /** Writes a saved progression's chords into the active part, one after another, each in so
+        many measures, or as many as its rhythm takes, from the measure it plays from, adding
+        measures at the end if they don't all fit, and asking first if they'd take the place of
+        notes or chords already there.
     */
-    void applyProgression (const SavedProgression&, const ChordStyle&);
+    void applyProgression (const SavedProgression&, const ChordStyle&, int measuresPerChord = 1);
 
     /** Takes a progression out of the ones saved, asking first. */
     void deleteSavedProgression (const juce::String& name);

@@ -179,8 +179,14 @@ void ApplyRhythmPanel::setRhythms (const std::vector<SavedRhythm>& saved)
     rhythms = saved;
     list.updateContent();
 
+    // The same one, or else the one in its place, or the last, if there are any
     const auto chosen = std::find_if (rhythms.begin(), rhythms.end(), [&] (const SavedRhythm& r) { return r.name == chosenName; });
-    list.selectRow (chosen != rhythms.end() ? (int) std::distance (rhythms.begin(), chosen) : juce::jmin (chosenRow, (int) rhythms.size() - 1));
+
+    if (rhythms.empty())
+        list.deselectAllRows();
+    else
+        list.selectRow (chosen != rhythms.end() ? (int) std::distance (rhythms.begin(), chosen) : juce::jlimit (0, (int) rhythms.size() - 1, chosenRow));
+
     updateButtons();
     list.repaint();
 }

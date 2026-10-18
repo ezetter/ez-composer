@@ -1266,16 +1266,16 @@ void MainComponent::showApplyProgressionPanel (juce::Component& button)
     applyProgressionPanel = panelPointer;
     panel->onCancel = close;
     panel->onDelete = [this] (const juce::String& name) { deleteSavedProgression (name); };
-    panel->onApply = [this, close] (const SavedProgression& progression, const ChordStyle& style)
+    panel->onApply = [this, close] (const SavedProgression& progression, const ChordStyle& style, int measuresPerChord)
     {
         close();
-        applyProgression (progression, style);
+        applyProgression (progression, style, measuresPerChord);
     };
 
     juce::CallOutBox::launchAsynchronously (std::move (panel), getLocalArea (&button, button.getLocalBounds()), this);
 }
 
-void MainComponent::applyProgression (const SavedProgression& progression, const ChordStyle& style)
+void MainComponent::applyProgression (const SavedProgression& progression, const ChordStyle& style, int measuresPerChord)
 {
     // The chord type and clef are kept for next time.
     progressionStyle = style;
@@ -1286,19 +1286,19 @@ void MainComponent::applyProgression (const SavedProgression& progression, const
     const auto part = activePart;
     const auto first = getPlaybackMeasure();
     const auto chords = progression.createChords (score.getKey(), style);
-    const auto count = score.getChordsLength (chords);     // in measures, each chord as many as its rhythm takes
+    const auto count = score.getChordsLength (chords, measuresPerChord);       // in measures
 
     if (chords.empty())
         return;
 
-    const auto write = [safeThis = juce::Component::SafePointer (this), part, first, chords]
+    const auto write = [safeThis = juce::Component::SafePointer (this), part, first, chords, measuresPerChord]
     {
         if (safeThis == nullptr || ! juce::isPositiveAndBelow (part, safeThis->score.getNumParts()))
             return;
 
         // The chord window's measure may be among them.
         safeThis->closeChordEditor();
-        safeThis->score.setChords (part, juce::jmin (first, safeThis->score.getNumMeasures()), chords);
+        safeThis->score.setChords (part, juce::jmin (first, safeThis->score.getNumMeasures()), chords, measuresPerChord);
         safeThis->scrollToMeasure (first);
     };
 
