@@ -19,7 +19,10 @@ public:
     /** Starts a new, empty score with no file: one page, with two empty parts. */
     void startNewScore();
 
-    static constexpr auto fileExtension = ".amscore";
+    static constexpr auto fileExtension = ".ezscore";
+
+    /** The extension scores were saved with when the app was called Anthropocene Music, which open too */
+    static constexpr auto oldFileExtension = ".amscore";
 
     /** Supplies a part's instrument and its settings to save with the score, as JSON. */
     std::function<juce::var (int part)> getInstrumentToSave;

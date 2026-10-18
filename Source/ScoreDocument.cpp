@@ -7,7 +7,7 @@ namespace
 }
 
 ScoreDocument::ScoreDocument (Piece& pieceToUse, juce::PropertiesFile& settingsToUse)
-    : FileBasedDocument (fileExtension, juce::String ("*") + fileExtension, "Open a score", "Save the score"),
+    : FileBasedDocument (fileExtension, juce::String ("*") + fileExtension + ";*" + oldFileExtension, "Open a score", "Save the score"),
       piece (pieceToUse),
       settings (settingsToUse)
 {
@@ -15,7 +15,8 @@ ScoreDocument::ScoreDocument (Piece& pieceToUse, juce::PropertiesFile& settingsT
     recentScores.restoreFromString (settings.getValue (recentScoresKey));
 
     // Before there was a list, only the last score chosen in a file dialog was remembered.
-    if (const juce::File last (settings.getValue (lastScoreKey)); recentScores.getNumFiles() == 0 && last.hasFileExtension (fileExtension)
+    if (const juce::File last (settings.getValue (lastScoreKey)); recentScores.getNumFiles() == 0
+                                                                  && last.hasFileExtension (juce::String (fileExtension) + ";" + oldFileExtension)
                                                                   && last.existsAsFile())
         recentScores.addFile (last);
 
