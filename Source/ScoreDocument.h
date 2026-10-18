@@ -21,8 +21,15 @@ public:
 
     static constexpr auto fileExtension = ".ezscore";
 
-    /** The extension scores were saved with when the app was called Anthropocene Music, which open too */
+    /** The extension scores were saved with when the app was called Anthropocene Music, which open
+        too. Saved again, such a score moves to the new extension.
+    */
     static constexpr auto oldFileExtension = ".amscore";
+
+    /** How a score's old file is put out of the way, once it's been saved with the new extension:
+        moved to the Trash, so it can still be got back.
+    */
+    static inline std::function<bool (const juce::File&)> putOldFileAway = [] (const juce::File& file) { return file.moveToTrash(); };
 
     /** Supplies a part's instrument and its settings to save with the score, as JSON. */
     std::function<juce::var (int part)> getInstrumentToSave;
@@ -78,6 +85,9 @@ private:
     Piece& piece;
     juce::PropertiesFile& settings;
     bool replacingScore = false;
+
+    /** The file the score was opened from, or last saved to: Save, rather than Save As, writes to it. */
+    juce::File savedFile;
     juce::RecentlyOpenedFilesList recentScores;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ScoreDocument)

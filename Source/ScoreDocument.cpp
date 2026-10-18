@@ -35,6 +35,7 @@ void ScoreDocument::startNewScore()
     replacingScore = false;
 
     setFile ({});
+    savedFile = juce::File();
     setChangedFlag (false);
 }
 
@@ -115,7 +116,10 @@ juce::Result ScoreDocument::loadDocument (const juce::File& file)
         loadEffects (effects);
 
     if (result.wasOk())
+    {
+        savedFile = file;
         rememberRecentScore (file);
+    }
 
     return result;
 }
@@ -162,13 +166,30 @@ juce::Result ScoreDocument::saveDocument (const juce::File& file)
         json.getDynamicObject()->setProperty ("muted", muted);
     }
 
-    if (file.replaceWithText (juce::JSON::toString (json)))
+    // Saved again, a score from when the app was called Anthropocene Music moves to the new
+    // extension, its old file going to the Trash, unless there's a score with that name already.
+    // Saved as an .amscore file on purpose, with Save As, it stays one.
+    auto target = file;
+
+    if (file == savedFile && file.hasFileExtension (oldFileExtension))
+        if (const auto moved = file.withFileExtension (fileExtension); ! moved.exists())
+            target = moved;
+
+    if (! target.replaceWithText (juce::JSON::toString (json)))
+        return juce::Result::fail ("Couldn't write to " + target.getFullPathName());
+
+    if (target != file)
     {
-        rememberRecentScore (file);
-        return juce::Result::ok();
+        if (putOldFileAway != nullptr)
+            putOldFileAway (file);
+
+        recentScores.removeFile (file);
+        setFile (target);
     }
 
-    return juce::Result::fail ("Couldn't write to " + file.getFullPathName());
+    savedFile = target;
+    rememberRecentScore (target);
+    return juce::Result::ok();
 }
 
 juce::File ScoreDocument::getLastDocumentOpened()
