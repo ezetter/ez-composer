@@ -1143,6 +1143,10 @@ int Score::putChord (int part, int firstMeasure, const MeasureChord& chord, int 
     const auto rhythmMeasures = getRhythmMeasureCount (chord);
     const auto count = juce::jmax (numMeasures, rhythmMeasures);
 
+    // A block chord with its note length left to its type, lasting the measure, is tied over
+    // from each of its measures to the next. One chosen to last the measure is played again.
+    const auto tied = ! chord.style.rhythm.has_value() && chord.style.type == music::ChordType::block && ! chord.style.noteLength.has_value();
+
     while (getNumMeasures() < firstMeasure + count)
     {
         for (auto& eachPart : parts)
@@ -1156,6 +1160,7 @@ int Score::putChord (int part, int firstMeasure, const MeasureChord& chord, int 
         auto& target = getMeasure (part, firstMeasure + i);
         target.chord = chord;
         target.chord->rhythmMeasure = i % rhythmMeasures;
+        target.chord->tiedToNext = tied && i + 1 < count;
         tidyChord (target);
     }
 
@@ -1503,6 +1508,10 @@ void Score::tidyChord (Measure& measure, bool reshuffleRandomOrder)
     if (rhythm == nullptr)
         chord.rhythmMeasure = 0;
 
+    // Only a block chord with its note length left to its type is tied over.
+    if (rhythm != nullptr || chord.style.type != music::ChordType::block || chord.style.noteLength.has_value())
+        chord.tiedToNext = false;
+
     const auto numWritten = rhythm != nullptr ? (int) layOutRhythm (rhythm->getHitsFor (chord.style.staff), getSlotsPerMeasure(), chord.rhythmMeasure).size()
                                               : juce::jmax (1, getSlotsPerMeasure() / getChordNoteLength (chord));
 
@@ -1550,7 +1559,8 @@ namespace
     // 16: page names
     // 17: arpeggio and Random chord notes moved by hand
     // 18: chords written in a rhythm, in as many measures as it takes
-    constexpr int formatVersion = 18;
+    // 19: block chords tied over to the same chord in the next measure
+    constexpr int formatVersion = 19;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1932,6 +1942,9 @@ juce::var Score::toJSON (bool withPartIds) const
                 chordObject->setProperty ("rhythmMeasure", chord.rhythmMeasure);
             }
 
+            if (chord.tiedToNext)
+                chordObject->setProperty ("tiedToNext", true);
+
             juce::Array<juce::var> order;
 
             for (auto midi : chord.randomOrder)
@@ -2130,6 +2143,9 @@ juce::Result Score::loadJSON (const juce::var& json)
 
                 if (chord.style.rhythm.has_value())
                     chord.rhythmMeasure = readInt (c.getProperty ("rhythmMeasure", {}), 0, chord.style.rhythm->numMeasures * maxBeatsPerMeasure, 0);
+
+                // Tied over to the next measure, from version 19
+                chord.tiedToNext = (bool) c.getProperty ("tiedToNext", false);
 
                 measure.chord = chord;
             }

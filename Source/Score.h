@@ -198,6 +198,13 @@ struct MeasureChord
     */
     int rhythmMeasure = 0;
 
+    /** Whether a block chord with its note length left to its type, lasting the whole measure,
+        is tied over the barline to the same chord in the next measure, as when a progression puts
+        it in several measures one after another. It's tied only while the next measure has the
+        same chord.
+    */
+    bool tiedToNext = false;
+
     bool hasNotes() const { return ! spec.isEmpty() || keyboardNotes.has_value(); }
 
     bool operator== (const MeasureChord&) const = default;

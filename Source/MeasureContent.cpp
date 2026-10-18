@@ -440,6 +440,33 @@ Duration getFullMeasureDuration (int beatsPerMeasure)
                                 : Duration::half;
 }
 
+namespace
+{
+    /** Whether a chord's tied over to the next measure, and the next has the same one, written the same way */
+    bool isTiedOver (const Score& score, int part, int measure, const MeasureChord& chord)
+    {
+        const auto* next = measure + 1 < score.getNumMeasures() ? score.getChord (part, measure + 1) : nullptr;
+
+        return chord.tiedToNext && next != nullptr && next->hasNotes() && next->spec == chord.spec && next->keyboardNotes == chord.keyboardNotes
+            && next->style == chord.style && next->alternateNotes == chord.alternateNotes;
+    }
+
+    /** Ties the notes of a staff's last note or chord, if it lasts to the end of the measure */
+    void tieOver (StaffContent& content, int beatsPerMeasure)
+    {
+        if (content.events.empty() || content.events.back().isRest())
+            return;
+
+        const auto& last = content.events.back();
+
+        if (last.onset + getBeats (last.duration) < (double) beatsPerMeasure - 1.0e-9)
+            return;
+
+        for (const auto& tone : last.tones)
+            content.tiedNotes.push_back ({ last.onset, tone.pitch });
+    }
+}
+
 MeasureContent getMeasureContent (const Score& score, int part, int measure)
 {
     MeasureContent content;
@@ -478,6 +505,12 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
                     alternate.events.push_back ({ 0.0, Duration::whole, {}, false, true });
                 filled[(size_t) otherStaff] = true;
             }
+
+            // Held on into the next measure, the alternate staff's notes with it
+            if (isTiedOver (score, part, measure, *measureChord))
+                for (auto staff : { style.staff, otherStaff })
+                    if (filled[(size_t) staff])
+                        tieOver (content.staves[(size_t) staff], score.getBeatsPerMeasure());
         }
     }
 
