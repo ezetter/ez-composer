@@ -565,15 +565,22 @@ public:
 
     /** Sets the chord that starts in a measure, as the chord window does: with a rhythm that
         takes more than one measure, in as many, one after another, adding measures at the end,
-        in every part, if they're needed. The measures it was in that it no longer takes are left
+        in every part, if they're needed; and one tied over several measures in all of them,
+        still tied, if it can be. The measures it was in that it no longer takes are left
         without one. With none, takes it out of all the measures it was in.
     */
     void writeChord (int part, int firstMeasure, std::optional<MeasureChord>);
 
     /** The measures the chord in a measure is in, as the first and how many: those its rhythm
-        takes, from the first of them, as far as they all have it; or just the measure.
+        takes, from the first of them, as far as they all have it, or those it's tied over from
+        and to; or just the measure. Changing the chord changes it in all of them.
     */
     std::pair<int, int> getChordSpan (int part, int measure) const;
+
+    /** Whether a measure's chord is tied over to the next measure's, which has the same chord,
+        written the same way, so they're one chord.
+    */
+    bool isChordTiedOver (int part, int measure) const;
 
     /** Whether chords written on a staff in some of a part's measures would take the place of
         anything there: a chord with notes, or notes on that staff, or, while the part's alternate

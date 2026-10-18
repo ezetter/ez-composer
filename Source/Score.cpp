@@ -1169,26 +1169,57 @@ int Score::putChord (int part, int firstMeasure, const MeasureChord& chord, int 
 
 void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> chord)
 {
-    // The measures it no longer takes are left without it.
+    // One tied over several measures goes in all of them still, tied if it can be. The measures
+    // it no longer takes are left without it.
     const auto [first, oldCount] = getChordSpan (part, firstMeasure);
-    const auto newCount = ! chord.has_value() ? 0
-                        : getRhythmMeasureCount (*chord);
+    const auto wasTied = oldCount > 1 && isChordTiedOver (part, first);
+    const auto measures = wasTied ? oldCount : 1;
+    const auto newCount = ! chord.has_value() ? 0 : juce::jmax (measures, getRhythmMeasureCount (*chord));
 
     for (auto i = newCount; i < oldCount; ++i)
         getMeasure (part, first + i).chord.reset();
 
     if (chord.has_value())
-        putChord (part, first, *chord);
+        putChord (part, first, *chord, measures);
 
     pruneTies();
     sendSynchronousChangeMessage();
+}
+
+bool Score::isChordTiedOver (int part, int measure) const
+{
+    if (! juce::isPositiveAndBelow (measure + 1, getNumMeasures()))
+        return false;
+
+    const auto* chord = getChord (part, measure);
+    const auto* next = getChord (part, measure + 1);
+
+    return chord != nullptr && next != nullptr && chord->tiedToNext && next->hasNotes() && next->spec == chord->spec
+        && next->keyboardNotes == chord->keyboardNotes && next->style == chord->style && next->alternateNotes == chord->alternateNotes;
 }
 
 std::pair<int, int> Score::getChordSpan (int part, int measure) const
 {
     const auto* chord = getChord (part, measure);
 
-    if (chord == nullptr || ! chord->style.rhythm.has_value() || chord->rhythmMeasure > measure)
+    if (chord == nullptr)
+        return { measure, 1 };
+
+    // Tied over from one measure to the next, it's the same chord in all of them.
+    if (! chord->style.rhythm.has_value())
+    {
+        auto first = measure, last = measure;
+
+        while (first > 0 && isChordTiedOver (part, first - 1))
+            --first;
+
+        while (isChordTiedOver (part, last))
+            ++last;
+
+        return { first, last - first + 1 };
+    }
+
+    if (chord->rhythmMeasure > measure)
         return { measure, 1 };
 
     // From its first, as far as each measure has it, the next of its rhythm's measures
@@ -1348,6 +1379,7 @@ void Score::toggleChordNote (MeasureChord& chord, int midiNote) const
 
 void Score::toggleAlternateNote (int part, int measure, const music::KeyboardNote& note)
 {
+    const auto span = getChordSpan (part, measure);
     auto& target = getMeasure (part, measure);
 
     if (! target.chord.has_value() || ! target.chord->hasNotes() || getAlternateStaff (part) == music::AlternateStaff::none)
@@ -1370,6 +1402,11 @@ void Score::toggleAlternateNote (int part, int measure, const music::KeyboardNot
 
     if (std::erase_if (notes, [&] (const music::KeyboardNote& n) { return n.midi == note.midi; }) == 0)
         notes.push_back (note);
+
+    // A chord in several measures, tied over them or in its rhythm, changes in all of them.
+    for (auto other = span.first; other < span.first + span.second; ++other)
+        if (other != measure)
+            getMeasure (part, other).chord->alternateNotes = chord.alternateNotes;
 
     sendSynchronousChangeMessage();
 }
