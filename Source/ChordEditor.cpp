@@ -174,14 +174,19 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     noteLengthLabel.setFont (juce::FontOptions (13.0f));
     noteLengthLabel.setBorderSize ({});
 
+    // Two measures first, the longest, then the measure and shorter
+    noteLengthBox.addItem ("Two measures", twoMeasuresItemId);
+
     for (size_t i = 0; i < noteLengths.size(); ++i)
         noteLengthBox.addItem (noteLengths[i].second, (int) i + 1);
 
     noteLengthBox.setTooltip ("How long the chord's notes are: block and rolled chords play again in them, the others a note at a time");
     noteLengthBox.onChange = [this]
     {
-        if (const auto index = noteLengthBox.getSelectedId() - 1; juce::isPositiveAndBelow (index, (int) noteLengths.size()))
-            edit ([index] (MeasureChord& c) { c.style.noteLength = noteLengths[(size_t) index].first; });
+        if (noteLengthBox.getSelectedId() == twoMeasuresItemId)
+            edit ([] (MeasureChord& c) { c.style.noteLength.reset(); c.style.measures = 2; });
+        else if (const auto index = noteLengthBox.getSelectedId() - 1; juce::isPositiveAndBelow (index, (int) noteLengths.size()))
+            edit ([index] (MeasureChord& c) { c.style.noteLength = noteLengths[(size_t) index].first; c.style.measures = 1; });
     };
 
     // Or a saved rhythm, in place of the note length
@@ -414,7 +419,9 @@ void ChordEditor::update()
             selected = (int) i + 1;
     }
 
-    noteLengthBox.setSelectedId (selected, juce::dontSendNotification);
+    // Two measures, only for a block or rolled chord, which is held over them
+    noteLengthBox.setItemEnabled (twoMeasuresItemId, ! music::isMelodic (style.type));
+    noteLengthBox.setSelectedId (style.measures > 1 ? twoMeasuresItemId : selected, juce::dontSendNotification);
 
     // A rhythm says how long the notes are instead. The chord's own is among those to choose
     // from, even if it isn't saved, or a saved one by its name is different now.

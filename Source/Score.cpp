@@ -1141,11 +1141,12 @@ int Score::getRhythmMeasureCount (const MeasureChord& chord) const
 int Score::putChord (int part, int firstMeasure, const MeasureChord& chord, int numMeasures)
 {
     const auto rhythmMeasures = getRhythmMeasureCount (chord);
-    const auto count = juce::jmax (numMeasures, rhythmMeasures);
+    const auto count = juce::jmax (numMeasures, rhythmMeasures, chord.style.measures);
 
     // A block chord with its note length left to its type, lasting the measure, is tied over
-    // from each of its measures to the next. One chosen to last the measure is played again.
-    const auto tied = ! chord.style.rhythm.has_value() && chord.style.type == music::ChordType::block && ! chord.style.noteLength.has_value();
+    // from each of its measures to the next, and so is one lasting two measures. One chosen to
+    // last the measure is played again.
+    const auto tied = chord.style.canTieOver();
 
     while (getNumMeasures() < firstMeasure + count)
     {
@@ -1171,10 +1172,12 @@ void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> 
 {
     // One tied over several measures goes in all of them still, tied if it can be. The measures
     // it no longer takes are left without it.
+    // One lasting two measures as its note length goes back to one when it's chosen to last one.
     const auto [first, oldCount] = getChordSpan (part, firstMeasure);
-    const auto wasTied = oldCount > 1 && isChordTiedOver (part, first);
+    const auto* oldChord = getChord (part, first);
+    const auto wasTied = oldCount > 1 && isChordTiedOver (part, first) && oldChord->style.measures <= 1;
     const auto measures = wasTied ? oldCount : 1;
-    const auto newCount = ! chord.has_value() ? 0 : juce::jmax (measures, getRhythmMeasureCount (*chord));
+    const auto newCount = ! chord.has_value() ? 0 : juce::jmax (measures, getRhythmMeasureCount (*chord), chord->style.measures);
 
     for (auto i = newCount; i < oldCount; ++i)
         getMeasure (part, first + i).chord.reset();
@@ -1545,8 +1548,14 @@ void Score::tidyChord (Measure& measure, bool reshuffleRandomOrder)
     if (rhythm == nullptr)
         chord.rhythmMeasure = 0;
 
-    // Only a block chord with its note length left to its type is tied over.
-    if (rhythm != nullptr || chord.style.type != music::ChordType::block || chord.style.noteLength.has_value())
+    // Only a block or rolled chord without a rhythm lasts two measures, and only one that can be
+    // is tied over.
+    if (rhythm != nullptr || music::isMelodic (chord.style.type))
+        chord.style.measures = 1;
+
+    chord.style.measures = juce::jlimit (1, 2, chord.style.measures);
+
+    if (! chord.style.canTieOver())
         chord.tiedToNext = false;
 
     const auto numWritten = rhythm != nullptr ? (int) layOutRhythm (rhythm->getHitsFor (chord.style.staff), getSlotsPerMeasure(), chord.rhythmMeasure).size()
@@ -1599,7 +1608,8 @@ namespace
     // 18: chords written in a rhythm, in as many measures as it takes
     // 19: block chords tied over to the same chord in the next measure
     // 20: suspended chords, sus2 and sus4
-    constexpr int formatVersion = 20;
+    // 21: block and rolled chords lasting two measures
+    constexpr int formatVersion = 21;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1987,6 +1997,9 @@ juce::var Score::toJSON (bool withPartIds) const
             if (chord.tiedToNext)
                 chordObject->setProperty ("tiedToNext", true);
 
+            if (chord.style.measures > 1)
+                chordObject->setProperty ("measures", chord.style.measures);
+
             juce::Array<juce::var> order;
 
             for (auto midi : chord.randomOrder)
@@ -2188,8 +2201,9 @@ juce::Result Score::loadJSON (const juce::var& json)
                 if (chord.style.rhythm.has_value())
                     chord.rhythmMeasure = readInt (c.getProperty ("rhythmMeasure", {}), 0, chord.style.rhythm->numMeasures * maxBeatsPerMeasure, 0);
 
-                // Tied over to the next measure, from version 19
+                // Tied over to the next measure, from version 19, lasting two measures, from version 21
                 chord.tiedToNext = (bool) c.getProperty ("tiedToNext", false);
+                chord.style.measures = readInt (c.getProperty ("measures", {}), 1, 2, 1);
 
                 measure.chord = chord;
             }

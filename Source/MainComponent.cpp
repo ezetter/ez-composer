@@ -1252,6 +1252,7 @@ void MainComponent::showApplyProgressionPanel (juce::Component& button)
     // With the chord type and clef chosen last, but Automatic note lengths and no rhythm, each time
     auto startingStyle = progressionStyle;
     startingStyle.noteLength.reset();
+    startingStyle.measures = 1;
     startingStyle.rhythm.reset();
 
     auto panel = std::make_unique<ApplyProgressionPanel> (savedProgressions.getAll(), startingStyle, activePart, getPlaybackMeasure(),

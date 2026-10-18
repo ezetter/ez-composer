@@ -142,6 +142,7 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     typeBox.addItemList (getChordTypeNames(), 1);
     typeBox.setSelectedId ((int) style.type + 1, juce::dontSendNotification);
     typeBox.setTooltip ("How the chords are written and played, as in the chord window");
+    typeBox.onChange = [this] { updateLength(); };
 
     controls::makeSegmented ({ &trebleButton, &bassButton }, 3001);
     trebleButton.setToggleState (style.staff == Staff::treble, juce::dontSendNotification);
@@ -152,6 +153,7 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     // Automatic, as the chord type has them, or one of the lengths that fit in a measure
     const auto& noteLengths = getChordNoteLengths();
     lengthBox.addItem ("Automatic", 1);
+    lengthBox.addItem ("Two measures", twoMeasuresItemId);
 
     for (size_t i = 0; i < noteLengths.size(); ++i)
     {
@@ -161,6 +163,9 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
         if (style.noteLength == noteLengths[i].first)
             lengthBox.setSelectedId ((int) i + 2, juce::dontSendNotification);
     }
+
+    if (style.measures > 1)
+        lengthBox.setSelectedId (twoMeasuresItemId, juce::dontSendNotification);
 
     if (lengthBox.getSelectedId() == 0)
         lengthBox.setSelectedId (1, juce::dontSendNotification);
@@ -246,7 +251,9 @@ ChordStyle ApplyProgressionPanel::getStyle() const
     style.type = (music::ChordType) juce::jlimit (0, 4, typeBox.getSelectedId() - 1);
     style.staff = bassButton.getToggleState() ? Staff::bass : Staff::treble;
 
-    if (const auto index = lengthBox.getSelectedId() - 2; juce::isPositiveAndBelow (index, (int) getChordNoteLengths().size()))
+    if (lengthBox.getSelectedId() == twoMeasuresItemId)
+        style.measures = 2;
+    else if (const auto index = lengthBox.getSelectedId() - 2; juce::isPositiveAndBelow (index, (int) getChordNoteLengths().size()))
         style.noteLength = getChordNoteLengths()[(size_t) index].first;
 
     if (const auto index = rhythmBox.getSelectedId() - 2; juce::isPositiveAndBelow (index, (int) rhythms.size()))
@@ -271,6 +278,13 @@ void ApplyProgressionPanel::updateLength()
 {
     // A rhythm says how long the notes are instead.
     lengthBox.setEnabled (rhythmBox.getSelectedId() <= 1);
+
+    // Two measures only for a block or rolled chord, which is held over them
+    const auto melodic = music::isMelodic ((music::ChordType) juce::jlimit (0, 4, typeBox.getSelectedId() - 1));
+    lengthBox.setItemEnabled (twoMeasuresItemId, ! melodic);
+
+    if (melodic && lengthBox.getSelectedId() == twoMeasuresItemId)
+        lengthBox.setSelectedId (1, juce::dontSendNotification);
 }
 
 void ApplyProgressionPanel::apply()

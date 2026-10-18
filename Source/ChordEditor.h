@@ -19,6 +19,9 @@ juce::StringArray getChordTypeNames();
 */
 const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths();
 
+/** The note length menus' item for a block or rolled chord lasting two measures, tied over */
+constexpr int twoMeasuresItemId = 100;
+
 /** Defines the chord in one measure, with the same settings as the Chord Progression Builder's
     chord panels, plus the clef and chord type it's written with.
 

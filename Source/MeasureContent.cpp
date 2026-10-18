@@ -502,6 +502,12 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
                 for (auto staff : { style.staff, otherStaff })
                     if (filled[(size_t) staff])
                         tieOver (content.staves[(size_t) staff], score.getBeatsPerMeasure());
+
+            // Held on from the measure before, a rolled chord isn't rolled again.
+            if (measure > 0 && score.isChordTiedOver (part, measure - 1))
+                for (auto& staffContent : content.staves)
+                    if (! staffContent.events.empty())
+                        staffContent.events.front().rolled = false;
         }
     }
 

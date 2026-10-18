@@ -168,6 +168,22 @@ struct ChordStyle
     */
     std::optional<Rhythm> rhythm;
 
+    /** How many measures a block or rolled chord lasts, as chosen in the chord window: 1, or 2
+        for Two measures, the chord lasting each of them, tied over from the first to the second.
+    */
+    int measures = 1;
+
+    /** Whether a chord written this way in several measures, one after another, is tied over from
+        each to the next: a block chord with its note length left to its type, or a block or
+        rolled chord lasting two measures.
+    */
+    bool canTieOver() const noexcept
+    {
+        return ! rhythm.has_value()
+            && ((type == music::ChordType::block && ! noteLength.has_value())
+                || (measures > 1 && (type == music::ChordType::block || type == music::ChordType::rolled)));
+    }
+
     bool operator== (const ChordStyle&) const = default;
 };
 
