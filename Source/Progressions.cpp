@@ -84,6 +84,23 @@ std::vector<MeasureChord> SavedProgression::createChords (music::Key newKey, con
     return created;
 }
 
+SavedProgression SavedProgression::suspended (music::Suspension suspension) const
+{
+    auto progression = *this;
+
+    for (auto& chord : progression.chords)
+    {
+        if (chord.spec.isEmpty() || suspension == music::Suspension::none)
+            continue;
+
+        chord.spec.suspension = suspension;
+        music::tidySuspension (chord.spec);
+        chord.keyboardNotes.reset();
+    }
+
+    return progression;
+}
+
 juce::String SavedProgression::tidyName (const juce::String& name)
 {
     return tidySavedName (name, maxNameLength);
