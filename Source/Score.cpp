@@ -1598,7 +1598,8 @@ namespace
     // 17: arpeggio and Random chord notes moved by hand
     // 18: chords written in a rhythm, in as many measures as it takes
     // 19: block chords tied over to the same chord in the next measure
-    constexpr int formatVersion = 19;
+    // 20: suspended chords, sus2 and sus4
+    constexpr int formatVersion = 20;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1962,6 +1963,9 @@ juce::var Score::toJSON (bool withPartIds) const
             chordObject->setProperty ("addedNote", (int) chord.spec.addedNote);
             chordObject->setProperty ("inversion", chord.spec.inversion);
             chordObject->setProperty ("octave", chord.spec.octave);
+
+            if (chord.spec.suspension != music::Suspension::none)
+                chordObject->setProperty ("suspension", (int) chord.spec.suspension);
             chordObject->setProperty ("staff", chord.style.staff == Staff::treble ? "treble" : "bass");
             chordObject->setProperty ("type", (int) chord.style.type);
 
@@ -2143,6 +2147,8 @@ juce::Result Score::loadJSON (const juce::var& json)
                 chord.spec.addedNote = (music::AddedNote) readInt (c.getProperty ("addedNote", {}), 0, 6, 0);
                 chord.spec.inversion = readInt (c.getProperty ("inversion", {}), 0, 3, 0);
                 chord.spec.octave = readInt (c.getProperty ("octave", {}), -1, 1, 0);
+                chord.spec.suspension = (music::Suspension) readInt (c.getProperty ("suspension", {}), 0, 2, 0);
+                music::tidySuspension (chord.spec);
                 chord.style.staff = c.getProperty ("staff", {}).toString() == "bass" ? Staff::bass : Staff::treble;
                 chord.style.type = (music::ChordType) readInt (c.getProperty ("type", {}), 0, 4, 0);
                 chordAlternates.push_back ((music::AlternateStaff) readInt (c.getProperty ("alternate", {}), 0, 4, 0));

@@ -109,6 +109,9 @@ juce::var SavedProgression::toJSON() const
         chordObject->setProperty ("addedNote", (int) chord.spec.addedNote);
         chordObject->setProperty ("inversion", chord.spec.inversion);
         chordObject->setProperty ("octave", chord.spec.octave);
+
+        if (chord.spec.suspension != music::Suspension::none)
+            chordObject->setProperty ("suspension", (int) chord.spec.suspension);
         chordObject->setProperty ("staff", chord.staff == Staff::treble ? "treble" : "bass");
 
         if (chord.keyboardNotes.has_value())
@@ -153,6 +156,8 @@ std::optional<SavedProgression> SavedProgression::fromJSON (const juce::var& jso
         chord.spec.addedNote = (music::AddedNote) readInt (c.getProperty ("addedNote", {}), 0, 6, 0);
         chord.spec.inversion = readInt (c.getProperty ("inversion", {}), 0, 3, 0);
         chord.spec.octave = readInt (c.getProperty ("octave", {}), -1, 1, 0);
+        chord.spec.suspension = (music::Suspension) readInt (c.getProperty ("suspension", {}), 0, 2, 0);
+        music::tidySuspension (chord.spec);
         chord.staff = c.getProperty ("staff", {}).toString() == "bass" ? Staff::bass : Staff::treble;
 
         // The combinations the chord panel allows: an added note suits the chord's quality and

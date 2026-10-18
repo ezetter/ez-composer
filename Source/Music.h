@@ -114,6 +114,19 @@ namespace music
     /** The added notes that suit a major or a minor chord. */
     std::vector<AddedNote> getAddedNoteChoices (bool minor);
 
+    /** A chord's 3rd, or the 2nd or 4th in its place, which makes it neither major nor minor */
+    enum class Suspension { none, sus2, sus4 };
+
+    /** "sus2", "sus4", or nothing */
+    juce::String getSuspensionText (Suspension);
+
+    struct ChordSpec;
+
+    /** Makes a suspended chord's spec one the panel allows: a major chord's, not + or °, with a
+        major chord's 7th or 9th in place of a minor one's. Leaves others as they are.
+    */
+    void tidySuspension (ChordSpec&);
+
     /** Everything the chord panel sets. */
     struct ChordSpec
     {
@@ -125,6 +138,7 @@ namespace music
         AddedNote addedNote = AddedNote::none;
         int inversion = 0;            // 0 for root position; 3 only with an added note
         int octave = 0;               // -1, 0 or 1
+        Suspension suspension = Suspension::none;     // with a 2nd or 4th in place of the 3rd, neither major nor minor, nor + or °
 
         bool isEmpty() const noexcept { return degree < 0; }
 
@@ -151,6 +165,7 @@ namespace music
         juce::String numeral;         // e.g. "♭VII" or "vi"; empty when the notes don't make a chord the panel can describe
         juce::String sign;            // "+", "°" or empty
         juce::String seventhMark;     // "M" on a major 7th or 9th
+        juce::String suspension;      // "sus2" or "sus4", after the figures, or empty
         juce::StringArray figures;    // figured-bass marks after the numeral, e.g. "6" and "5"
         juce::String label;           // e.g. "V7", "IM7" or "vii°"
         Spelling root;

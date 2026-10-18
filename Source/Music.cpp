@@ -63,12 +63,13 @@ namespace
         std::optional<ChordSpec> spec;    // how the panel describes the shape, if it can
     };
 
-    ChordSpec makeSpec (bool minor, bool altered, AddedNote addedNote)
+    ChordSpec makeSpec (bool minor, bool altered, AddedNote addedNote, Suspension suspension = Suspension::none)
     {
         ChordSpec spec;
         spec.minor = minor;
         spec.altered = altered;
         spec.addedNote = addedNote;
+        spec.suspension = suspension;
         return spec;
     }
 
@@ -89,8 +90,13 @@ namespace
             { "dominant 9th",        "9",                                  { { 0, 0 }, { 2, 4 }, { 4, 7 }, { 6, 10 }, { 8, 14 } }, makeSpec (false, false, AddedNote::dominant9th) },
             { "major 9th",           "maj9",                               { { 0, 0 }, { 2, 4 }, { 4, 7 }, { 6, 11 }, { 8, 14 } }, makeSpec (false, false, AddedNote::major9th) },
             { "minor 9th",           "m9",                                 { { 0, 0 }, { 2, 3 }, { 4, 7 }, { 6, 10 }, { 8, 14 } }, makeSpec (true,  false, AddedNote::minor9th) },
-            { "suspended 2nd",       "sus2",                               { { 0, 0 }, { 1, 2 }, { 4, 7 } },            std::nullopt },
-            { "suspended 4th",       "sus4",                               { { 0, 0 }, { 3, 5 }, { 4, 7 } },            std::nullopt },
+            { "suspended 2nd",       "sus2",                               { { 0, 0 }, { 1, 2 }, { 4, 7 } },            makeSpec (false, false, AddedNote::none, Suspension::sus2) },
+            { "suspended 4th",       "sus4",                               { { 0, 0 }, { 3, 5 }, { 4, 7 } },            makeSpec (false, false, AddedNote::none, Suspension::sus4) },
+            { "dominant 7th, suspended 4th", "7sus4",                      { { 0, 0 }, { 3, 5 }, { 4, 7 }, { 6, 10 } }, makeSpec (false, false, AddedNote::dominant7th, Suspension::sus4) },
+            { "dominant 7th, suspended 2nd", "7sus2",                      { { 0, 0 }, { 1, 2 }, { 4, 7 }, { 6, 10 } }, makeSpec (false, false, AddedNote::dominant7th, Suspension::sus2) },
+            { "major 7th, suspended 4th",    "maj7sus4",                   { { 0, 0 }, { 3, 5 }, { 4, 7 }, { 6, 11 } }, makeSpec (false, false, AddedNote::major7th, Suspension::sus4) },
+            { "major 7th, suspended 2nd",    "maj7sus2",                   { { 0, 0 }, { 1, 2 }, { 4, 7 }, { 6, 11 } }, makeSpec (false, false, AddedNote::major7th, Suspension::sus2) },
+            { "dominant 9th, suspended 4th", "9sus4",                      { { 0, 0 }, { 3, 5 }, { 4, 7 }, { 6, 10 }, { 8, 14 } }, makeSpec (false, false, AddedNote::dominant9th, Suspension::sus4) },
         };
 
         return shapes;
@@ -393,6 +399,25 @@ std::vector<AddedNote> getAddedNoteChoices (bool minor)
     return { AddedNote::dominant7th, AddedNote::major7th, AddedNote::dominant9th, AddedNote::major9th };
 }
 
+juce::String getSuspensionText (Suspension suspension)
+{
+    return suspension == Suspension::sus2 ? "sus2" : suspension == Suspension::sus4 ? "sus4" : "";
+}
+
+void tidySuspension (ChordSpec& spec)
+{
+    if (spec.suspension == Suspension::none)
+        return;
+
+    spec.minor = false;
+    spec.altered = false;
+
+    if (spec.addedNote == AddedNote::minor7th)
+        spec.addedNote = AddedNote::dominant7th;
+    else if (spec.addedNote == AddedNote::minor9th)
+        spec.addedNote = AddedNote::dominant9th;
+}
+
 juce::String getPositionName (int inversion)
 {
     const char* const names[] { "Root position", "1st inversion", "2nd inversion", "3rd inversion" };
@@ -413,8 +438,11 @@ Chord createChord (Key key, const ChordSpec& spec, Staff staff)
 {
     jassert (! spec.isEmpty());
 
-    const auto augmented = spec.altered && ! spec.minor;
-    const auto diminished = spec.altered && spec.minor;
+    // A suspended chord, with a 2nd or 4th in place of its 3rd, is neither major nor minor, nor + or °.
+    const auto suspended = spec.suspension != Suspension::none;
+    const auto minor = spec.minor && ! suspended;
+    const auto augmented = spec.altered && ! spec.minor && ! suspended;
+    const auto diminished = spec.altered && spec.minor && ! suspended;
     const auto hasSeventh = spec.addedNote != AddedNote::none;
     const auto& added = getInfo (spec.addedNote);
 
@@ -427,7 +455,10 @@ Chord createChord (Key key, const ChordSpec& spec, Staff staff)
                                      : scaleRoot;
     const auto keyAlterations = getKeyAlterations (key);
 
-    std::vector<Member> members { { 0, 0 }, { 2, spec.minor ? 3 : 4 }, { 4, augmented ? 8 : diminished ? 6 : 7 } };
+    const auto third = spec.suspension == Suspension::sus2 ? Member { 1, 2 }
+                     : spec.suspension == Suspension::sus4 ? Member { 3, 5 }
+                                                           : Member { 2, minor ? 3 : 4 };
+    std::vector<Member> members { { 0, 0 }, third, { 4, augmented ? 8 : diminished ? 6 : 7 } };
 
     if (hasSeventh)
         members.push_back ({ 6, added.seventhSemitones });
@@ -460,7 +491,7 @@ Chord createChord (Key key, const ChordSpec& spec, Staff staff)
 
     const auto roman = juce::String (degreeNumerals[(size_t) spec.degree]);
 
-    chord.numeral = (spec.flat ? getSymbol (flat) : spec.sharp ? getSymbol (sharp) : juce::String()) + (spec.minor ? roman.toLowerCase() : roman);
+    chord.numeral = (spec.flat ? getSymbol (flat) : spec.sharp ? getSymbol (sharp) : juce::String()) + (minor ? roman.toLowerCase() : roman);
     chord.sign = augmented ? "+" : diminished ? getSymbol (degreeSign) : juce::String();
     chord.seventhMark = spec.addedNote == AddedNote::major7th || spec.addedNote == AddedNote::major9th ? "M" : "";
 
@@ -469,18 +500,24 @@ Chord createChord (Key key, const ChordSpec& spec, Staff staff)
                   : hasSeventh ? seventhFigures[(size_t) inversion]
                                : triadFigures[(size_t) inversion];
 
-    chord.label = chord.numeral + chord.sign + added.numeral;
+    // A suspended chord's sus2 or sus4 goes after the rest: V7sus4, G7sus4.
+    chord.suspension = getSuspensionText (spec.suspension);
+    chord.label = chord.numeral + chord.sign + added.numeral + chord.suspension;
     chord.root = root;
     chord.inversion = inversion;
 
     const auto symbol = root.getName() + (hasSeventh ? juce::String (added.symbol)
                                                      : chord.sign.isNotEmpty() ? chord.sign
-                                                     : spec.minor ? juce::String ("m") : juce::String());
+                                                     : minor ? juce::String ("m") : juce::String())
+                      + chord.suspension;
 
     chord.symbol = spec.inversion != 0 ? symbol + "/" + chord.tones.front().getName() : symbol;
 
-    const auto quality = hasSeventh ? juce::String (added.name).toLowerCase()
-                       : augmented ? "augmented" : diminished ? "diminished" : spec.minor ? "minor" : "major";
+    const auto suspensionName = spec.suspension == Suspension::sus2 ? juce::String ("suspended 2nd")
+                              : spec.suspension == Suspension::sus4 ? juce::String ("suspended 4th") : juce::String();
+    const auto quality = hasSeventh ? juce::String (added.name).toLowerCase() + (suspended ? ", " + suspensionName : juce::String())
+                       : suspended ? suspensionName
+                       : augmented ? "augmented" : diminished ? "diminished" : minor ? "minor" : "major";
 
     chord.name = root.getName() + " " + quality;
     return chord;

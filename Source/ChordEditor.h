@@ -80,6 +80,7 @@ private:
     juce::ComboBox numeralBox, addedNoteBox;
     std::array<juce::TextButton, 4> positionButtons;
     std::array<juce::TextButton, 3> octaveButtons;
+    std::array<juce::TextButton, 3> susButtons;     // no sus, sus2 and sus4, under the quality
     juce::TextButton trebleButton { "Treble clef" }, bassButton { "Bass clef" };
     controls::ReselectableComboBox chordTypeBox;     // beside the title
     juce::Label noteLengthLabel;

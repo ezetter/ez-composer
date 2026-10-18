@@ -65,7 +65,9 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
         {
             edit ([button, this] (MeasureChord& c)
             {
+                // Major or minor, it has its 3rd again.
                 c.spec.minor = button == &minorButton;
+                c.spec.suspension = music::Suspension::none;
                 c.spec.altered = false;
                 c.keyboardNotes.reset();
                 clearAddedNote (c.spec);
@@ -87,6 +89,28 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
                 clearAddedNote (c.spec);
         });
     };
+
+    // A suspended chord has its 2nd or 4th in place of its 3rd, so it's neither major nor minor.
+    const std::array<const char*, 3> susNames { "No sus", "sus2", "sus4" };
+    const std::array<const char*, 3> susTips { "The chord with its 3rd, major or minor",
+                                               "Suspended 2nd: the chord with its 2nd in place of its 3rd, e.g. C D G",
+                                               "Suspended 4th: the chord with its 4th in place of its 3rd, e.g. C F G" };
+    controls::makeSegmented ({ &susButtons[0], &susButtons[1], &susButtons[2] }, 1006);
+
+    for (size_t i = 0; i < susButtons.size(); ++i)
+    {
+        susButtons[i].setButtonText (susNames[i]);
+        susButtons[i].setTooltip (susTips[i]);
+        susButtons[i].onClick = [this, i]
+        {
+            edit ([i] (MeasureChord& c)
+            {
+                c.spec.suspension = (music::Suspension) i;
+                music::tidySuspension (c.spec);
+                c.keyboardNotes.reset();
+            });
+        };
+    }
 
     numeralBox.setTooltip (controls::fromUTF8 ("The chord, by the note of the scale it's built on: I on the tonic, V on the 5th, and so on, "
                                                "or \xe2\x80\x94 for none"));
@@ -198,7 +222,8 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
         button->setWantsKeyboardFocus (false);
 
     for (auto* component : std::initializer_list<juce::Component*> {
-             &title, &flatButton, &sharpButton, &majorButton, &minorButton, &alterButton, &numeralBox, &addedNoteBox,
+             &title, &flatButton, &sharpButton, &majorButton, &minorButton, &alterButton, &susButtons[0], &susButtons[1], &susButtons[2],
+             &numeralBox, &addedNoteBox,
              &positionButtons[0], &positionButtons[1], &positionButtons[2], &positionButtons[3],
              &octaveButtons[0], &octaveButtons[1], &octaveButtons[2], &trebleButton, &bassButton,
              &chordTypeBox, &noteLengthLabel, &noteLengthBox, &rhythmLabel, &rhythmBox,
@@ -302,13 +327,23 @@ void ChordEditor::update()
 
     flatButton.setToggleState (spec.flat, juce::dontSendNotification);
     sharpButton.setToggleState (spec.sharp, juce::dontSendNotification);
-    majorButton.setToggleState (! spec.minor, juce::dontSendNotification);
-    minorButton.setToggleState (spec.minor, juce::dontSendNotification);
+    // A suspended chord is neither major nor minor, and isn't made + or °.
+    const auto suspended = spec.suspension != music::Suspension::none;
+    majorButton.setToggleState (! spec.minor && ! suspended, juce::dontSendNotification);
+    minorButton.setToggleState (spec.minor && ! suspended, juce::dontSendNotification);
+
+    for (size_t i = 0; i < susButtons.size(); ++i)
+    {
+        susButtons[i].setToggleState (spec.suspension == (music::Suspension) i, juce::dontSendNotification);
+        susButtons[i].setEnabled (! spec.isEmpty());
+    }
 
     // The + / ° button makes a major chord augmented or a minor chord diminished.
     alterButton.setButtonText (spec.minor ? controls::fromUTF8 ("\xc2\xb0") : juce::String ("+"));
-    alterButton.setTooltip (spec.minor ? "Diminished: the minor chord with its 5th a half step lower" : "Augmented: the major chord with its 5th a half step higher");
-    alterButton.setToggleState (spec.altered, juce::dontSendNotification);
+    alterButton.setTooltip (suspended ? "A suspended chord has no 3rd to make it augmented or diminished. Choose No Sus first."
+                            : spec.minor ? "Diminished: the minor chord with its 5th a half step lower" : "Augmented: the major chord with its 5th a half step higher");
+    alterButton.setToggleState (spec.altered && ! suspended, juce::dontSendNotification);
+    alterButton.setEnabled (! suspended);
 
     // Each numeral names its chord in the current key, e.g. "vi (Am)".
     numeralBox.clear (juce::dontSendNotification);
@@ -462,7 +497,7 @@ int ChordEditor::getIdealHeight() const
 {
     // Enough for the keyboard notes too, which only show some of the time.
     return padding + rowHeight + gap
-         + 3 * (rowHeight + gap) + 3 * (segmentHeight + gap)
+         + 3 * (rowHeight + gap) + 4 * (segmentHeight + gap)
          + sectionGap - gap + rowHeight + gap + rowHeight
          + sectionGap + 3 * infoLineHeight + 34
          + sectionGap + buttonHeight + padding;
@@ -490,6 +525,13 @@ void ChordEditor::resized()
     qualityRow.removeFromRight (gap);
     majorButton.setBounds (qualityRow.removeFromLeft (qualityRow.getWidth() / 2));
     minorButton.setBounds (qualityRow);
+    bounds.removeFromTop (gap);
+
+    auto susRow = bounds.removeFromTop (segmentHeight);
+    const auto susWidth = susRow.getWidth() / 3;
+    susButtons[0].setBounds (susRow.removeFromLeft (susWidth));
+    susButtons[1].setBounds (susRow.removeFromLeft (susWidth));
+    susButtons[2].setBounds (susRow);
     bounds.removeFromTop (gap);
 
     numeralBox.setBounds (bounds.removeFromTop (rowHeight));

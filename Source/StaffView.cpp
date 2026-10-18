@@ -2419,8 +2419,17 @@ void StaffView::drawLabels (juce::Graphics& g, int measure) const
         figureX += juce::GlyphArrangement::getStringWidth (figureFont, mark) + 1.0f;
     }
 
+    auto figuresWidth = 0.0f;
+
     for (int i = 0; i < chord.figures.size(); ++i)
+    {
         g.drawSingleLineText (chord.figures[i], juce::roundToInt (figureX), juce::roundToInt (baseline - 9.0f + 11.0f * (float) i));
+        figuresWidth = juce::jmax (figuresWidth, juce::GlyphArrangement::getStringWidth (figureFont, chord.figures[i]));
+    }
+
+    // A suspended chord's sus2 or sus4 after them, on the numeral's line
+    if (chord.suspension.isNotEmpty())
+        g.drawSingleLineText (chord.suspension, juce::roundToInt (figureX + figuresWidth + (figuresWidth > 0.0f ? 1.0f : 0.0f)), juce::roundToInt (baseline));
 }
 
 std::optional<music::Tone> StaffView::findNoteUnder (const Note& note) const
