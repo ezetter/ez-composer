@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 
-project(AnthropoceneMusic VERSION 0.1.0)
+project(EZComposer VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,14 +14,14 @@ FetchContent_Declare(JUCE
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_gui_app(AnthropoceneMusic
-    PRODUCT_NAME "Anthropocene Music"
-    COMPANY_NAME "Anthropocene Music"
+juce_add_gui_app(EZComposer
+    PRODUCT_NAME "EZ Composer"
+    COMPANY_NAME "EZ Composer"
     ICON_BIG Resources/Icon.png         # a staff with two quarter notes
     ICON_SMALL Resources/Icon.png
-    BUNDLE_ID "com.anthropocene-music.app")
+    BUNDLE_ID "com.ez-composer.app")
 
-target_sources(AnthropoceneMusic
+target_sources(EZComposer
     PRIVATE
         Source/ChordEditor.cpp
         Source/DynamicPicker.cpp
@@ -54,23 +54,23 @@ target_sources(AnthropoceneMusic
         Source/ScorePanel.cpp
         Source/StaffView.cpp)
 
-juce_add_binary_data(AnthropoceneMusicResources
+juce_add_binary_data(EZComposerResources
     SOURCES
         Resources/Fonts/Bravura.otf)
 
-target_compile_definitions(AnthropoceneMusic
+target_compile_definitions(EZComposer
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
-        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:AnthropoceneMusic,JUCE_PRODUCT_NAME>"
-        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:AnthropoceneMusic,JUCE_VERSION>"
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:EZComposer,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:EZComposer,JUCE_VERSION>"
         # Instruments are loaded from VST3 plugins. AU hosting is compiled in too, though nothing uses it yet.
         JUCE_PLUGINHOST_VST3=1
         JUCE_PLUGINHOST_AU=1)
 
-target_link_libraries(AnthropoceneMusic
+target_link_libraries(EZComposer
     PRIVATE
-        AnthropoceneMusicResources
+        EZComposerResources
         juce::juce_audio_utils
     PUBLIC
         juce::juce_recommended_config_flags

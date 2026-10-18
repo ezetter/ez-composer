@@ -1578,7 +1578,8 @@ void Score::tidyChord (Measure& measure, bool reshuffleRandomOrder)
 //==============================================================================
 namespace
 {
-    constexpr auto formatName = "Anthropocene Music score";
+    constexpr auto formatName = "EZ Composer score";
+    constexpr auto oldFormatName = "Anthropocene Music score";     // as scores were saved when the app had its old name
     // 2: the alternate staff is the score's, not each chord's
     // 3: two parts, each with its own measures and alternate staff
     // 4: notes by eighth note, rather than by beat, with their lengths in eighths
@@ -2030,8 +2031,8 @@ juce::var Score::toJSON (bool withPartIds) const
 
 juce::Result Score::loadJSON (const juce::var& json)
 {
-    if (json.getProperty ("format", {}).toString() != formatName)
-        return juce::Result::fail ("This isn't an Anthropocene Music score.");
+    if (const auto format = json.getProperty ("format", {}).toString(); format != formatName && format != oldFormatName)
+        return juce::Result::fail ("This isn't an EZ Composer score.");
 
     // Scores from before version 3 have one part, with its measures and alternate staff at the top.
     juce::Array<juce::var> partList;

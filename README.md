@@ -1,6 +1,6 @@
-# Anthropocene Music
+# EZ Composer
 
-A native macOS music app written in C++ with [JUCE](https://juce.com).
+A native macOS music app written in C++ with [JUCE](https://juce.com). It used to be called Anthropocene Music.
 
 It has as many instruments as you like, two to start with, each on its own grand staff and played by its own VST3 plugin, that you can write notes and chords for, and an 88-key piano. Chords are defined the way the Chord Progression Builder defines them, one measure at a time. A score can have several pages, each with its own key, time signature and music, played one after another or one at a time. Sound goes to the Mac's default audio output.
 
@@ -11,7 +11,7 @@ You need macOS 12 or later, the Xcode Command Line Tools, and CMake 3.22 or late
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
-open "build/AnthropoceneMusic_artefacts/Debug/Anthropocene Music.app"
+open "build/EZComposer_artefacts/Debug/EZ Composer.app"
 ```
 
 The first configure downloads JUCE 9.0.2 into `build/`.
@@ -50,7 +50,7 @@ Each instrument has a **volume dial** to the left of its staves, setting how lou
 - The instrument menu (**Instrument 1**, **Instrument 2** and so on) chooses the active instrument.
 - **Load Instrument…** loads a VST3 instrument plugin for the active instrument, such as one from `/Library/Audio/Plug-Ins/VST3`. **Edit [plugin]**, named for the loaded plugin (e.g. **Edit Pigments**), opens the plugin's own window, where you can choose its sounds. The instruments can use different plugins, or the same one with different sounds.
 - **Effects**, at the right of the toolbar, opens the effects page, for playing the instruments through VST3 effect plugins (see [Effects](#effects)).
-- Each instrument's plugin is saved with the score (see [Saving and opening](#saving-and-opening)). It's also loaded again the next time the app starts, with the sound it had. It's saved when you load it, when you close its editor, and when you quit, in `~/Library/Application Support/Anthropocene Music`. If it can't be loaded, say because it's been uninstalled, the app tells you and forgets it.
+- Each instrument's plugin is saved with the score (see [Saving and opening](#saving-and-opening)). It's also loaded again the next time the app starts, with the sound it had. It's saved when you load it, when you close its editor, and when you quit, in `~/Library/Application Support/EZ Composer`. If it can't be loaded, say because it's been uninstalled, the app tells you and forgets it.
 
 ### Pages
 
@@ -91,7 +91,7 @@ The **File** menu saves and opens scores:
 | **Save** | ⌘S | Saves the score to its file, asking for a name the first time. |
 | **Save As…** | ⇧⌘S | Saves the score to a new file, which it then keeps using. |
 
-- Scores are saved as `.amscore` files, which are JSON. A file keeps everything about the score, and the plugins it's played on and their volumes: the key, time signature, tempo, and for each instrument its alternate staff, its measures and their notes, and each measure's chord with all its settings. That includes notes you've added to or taken out of a chord, a chord's notes moved with Edit, and the order a Random chord plays in. Notes on beats hidden by a shorter time signature are kept too.
+- Scores are saved as `.amscore` files, which are JSON, and ones saved when the app was called Anthropocene Music open just the same. A file keeps everything about the score, and the plugins it's played on and their volumes: the key, time signature, tempo, and for each instrument its alternate staff, its measures and their notes, and each measure's chord with all its settings. That includes notes you've added to or taken out of a chord, a chord's notes moved with Edit, and the order a Random chord plays in. Notes on beats hidden by a shorter time signature are kept too.
 - A score with several pages saves them all: the first page as a score on its own is saved, with the other pages after it, so an app from before there were pages opens just the first page. Opening a score goes to its first page.
 - The effects are saved with the score too, with their settings, the buses they're in, and where each instrument and bus goes (see [Effects](#effects)). Opening a score saved with effects puts them in place of the ones you had; one saved without them leaves yours as they are.
 - Each instrument's plugin is saved with the score, with its sound: whatever you've chosen in its editor. Opening the score loads the plugins again, or just gives it the saved sound if it's the one already loaded. A plugin's sound can be large, so a score can be too; Pigments adds about half a megabyte.
@@ -106,8 +106,10 @@ The **File** menu saves and opens scores:
 Progressions saved with **Save Progression…** and rhythms saved with **Save Rhythm…** aren't kept in scores. They're kept in the app's settings file, so every score can use them:
 
 ```
-~/Library/Application Support/Anthropocene Music/Anthropocene Music.settings
+~/Library/Application Support/EZ Composer/EZ Composer.settings
 ```
+
+The first time EZ Composer starts, if that file isn't there yet, it starts with a copy of the settings it had when it was called Anthropocene Music, from `~/Library/Application Support/Anthropocene Music/Anthropocene Music.settings`, with the instrument, effects, recent scores, and saved progressions and rhythms. The old file stays where it was.
 
 It's the file that also keeps the instrument, the effects, the recent scores, and the toolbar's Loop, metronome and Piece or Page. It's XML, with a value for each setting, and these hold the saved progressions and rhythms, each as JSON:
 

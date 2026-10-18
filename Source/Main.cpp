@@ -1,6 +1,7 @@
 #include "MainComponent.h"
+#include "SettingsFile.h"
 
-class AnthropoceneMusicApplication final : public juce::JUCEApplication
+class EZComposerApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override    { return JUCE_APPLICATION_NAME_STRING; }
@@ -14,12 +15,17 @@ public:
         lookAndFeel.setDefaultSansSerifTypefaceName ("Helvetica Neue");
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
 
-        // Kept in ~/Library/Application Support/Anthropocene Music
+        // Kept in ~/Library/Application Support/EZ Composer, starting with the ones it had under
+        // its old name, the first time
         juce::PropertiesFile::Options options;
         options.applicationName = getApplicationName();
         options.folderName = getApplicationName();
         options.osxLibrarySubFolder = "Application Support";
         options.filenameSuffix = "settings";
+        auto oldOptions = options;
+        oldOptions.applicationName = "Anthropocene Music";
+        oldOptions.folderName = "Anthropocene Music";
+        copyOldSettings (oldOptions.getDefaultFile(), options.getDefaultFile());
         properties.setStorageParameters (options);
 
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *properties.getUserSettings());
@@ -79,4 +85,4 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
 };
 
-START_JUCE_APPLICATION (AnthropoceneMusicApplication)
+START_JUCE_APPLICATION (EZComposerApplication)

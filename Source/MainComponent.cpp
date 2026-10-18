@@ -2199,7 +2199,7 @@ void MainComponent::startSoundFileIfWanted()
     if (! isMakingMP3() || ! instrumentHost.getPlaybackPosition().has_value() || instrumentHost.isWritingSoundFile())
         return;
 
-    const auto wav = juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("Anthropocene Music playback", ".wav");
+    const auto wav = juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("EZ Composer playback", ".wav");
 
     if (! instrumentHost.startSoundFile (wav))
         wav.deleteFile();

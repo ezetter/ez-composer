@@ -81,7 +81,7 @@ juce::Result ScoreDocument::loadDocument (const juce::File& file)
     const auto json = juce::JSON::parse (file.loadFileAsString());
 
     if (! json.isObject())
-        return juce::Result::fail (file.getFileName() + " isn't an Anthropocene Music score.");
+        return juce::Result::fail (file.getFileName() + " isn't an EZ Composer score.");
 
     replacingScore = true;
     const auto result = piece.loadJSON (json);
