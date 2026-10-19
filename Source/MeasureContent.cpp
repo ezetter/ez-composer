@@ -442,6 +442,47 @@ Duration getFullMeasureDuration (int beatsPerMeasure)
 
 namespace
 {
+    /** Whether a chord's alternate staff notes are held for its measure, rather than going as the
+        other staff's notes of a rhythm with notes on both
+    */
+    bool holdsAlternate (const MeasureChord& chord)
+    {
+        return ! (chord.style.rhythm.has_value() && chord.style.rhythm->hasNotes (Staff::treble) && chord.style.rhythm->hasNotes (Staff::bass));
+    }
+
+    std::vector<int> getMidiNotes (const std::vector<music::Tone>& tones)
+    {
+        std::vector<int> midiNotes;
+
+        for (const auto& tone : tones)
+            midiNotes.push_back (tone.midi);
+
+        return midiNotes;
+    }
+
+    /** Whether a measure's root or octave on the alternate staff is held on into the next: the next
+        has the same chord, the same numeral, however it's written, or the same notes set on the
+        piano, for one without a numeral, with the same notes on the alternate staff, both held
+        for the measure
+    */
+    bool isAlternateTiedOver (const Score& score, int part, int measure, const MeasureChord& chord)
+    {
+        const auto alternate = score.getAlternateStaff (part);
+
+        if ((alternate != music::AlternateStaff::root && alternate != music::AlternateStaff::octave) || measure + 1 >= score.getNumMeasures())
+            return false;
+
+        const auto* next = score.getChord (part, measure + 1);
+
+        if (next == nullptr || ! next->hasNotes() || ! holdsAlternate (chord) || ! holdsAlternate (*next))
+            return false;
+
+        const auto sameChord = ! chord.spec.isEmpty() ? next->spec == chord.spec : next->keyboardNotes == chord.keyboardNotes;
+        const auto tones = getMidiNotes (score.getAlternateTones (part, measure));
+
+        return sameChord && ! tones.empty() && tones == getMidiNotes (score.getAlternateTones (part, measure + 1));
+    }
+
     /** Ties the notes of a staff's last note or chord, if it lasts to the end of the measure */
     void tieOver (StaffContent& content, int beatsPerMeasure)
     {
@@ -497,11 +538,19 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
                 filled[(size_t) otherStaff] = true;
             }
 
-            // Held on into the next measure, the alternate staff's notes with it
+            // Held on into the next measure, the alternate staff's notes with it. A root or octave is
+            // held on into the next measure too when it has the same chord, even if the chord's
+            // played again.
             if (score.isChordTiedOver (part, measure))
+            {
                 for (auto staff : { style.staff, otherStaff })
                     if (filled[(size_t) staff])
                         tieOver (content.staves[(size_t) staff], score.getBeatsPerMeasure());
+            }
+            else if (filled[(size_t) otherStaff] && isAlternateTiedOver (score, part, measure, *measureChord))
+            {
+                tieOver (content.staves[(size_t) otherStaff], score.getBeatsPerMeasure());
+            }
 
             // Held on from the measure before, a rolled chord isn't rolled again.
             if (measure > 0 && score.isChordTiedOver (part, measure - 1))
