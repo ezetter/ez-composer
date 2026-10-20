@@ -30,6 +30,7 @@ target_sources(EZComposer
         Source/EraserButton.cpp
         Source/InstrumentHost.cpp
         Source/InstrumentPanel.cpp
+        Source/LoadInstrumentPanel.cpp
         Source/Main.cpp
         Source/MainComponent.cpp
         Source/MeasureContent.cpp

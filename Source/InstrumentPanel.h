@@ -72,7 +72,9 @@ private:
     /** Where an instrument being loaded comes from. */
     enum class Source { user, settings, score };
 
+    /** Shows the instruments loaded lately, to load one again, with Browse… to find another. */
     void chooseInstrument();
+    void browseForInstrument();
     void loadInstrumentFrom (const juce::File& pluginFile);
     void createInstrument (const juce::PluginDescription&, const juce::MemoryBlock& state = {}, Source = Source::user);
     juce::MemoryBlock getState() const;

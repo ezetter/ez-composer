@@ -1,5 +1,7 @@
 #include "InstrumentPanel.h"
 
+#include "LoadInstrumentPanel.h"
+
 namespace
 {
 
@@ -88,6 +90,40 @@ void InstrumentPanel::resized()
 
 void InstrumentPanel::chooseInstrument()
 {
+    // The ones loaded lately, to load again, or Browse for another
+    auto* instrument = host.getInstrument (part);
+    auto panel = std::make_unique<LoadInstrumentPanel> (part, recentInstruments::get (settings),
+                                                        instrument != nullptr ? instrument->getName() : juce::String());
+    auto* panelPointer = panel.get();
+    const auto close = [panelPointer]
+    {
+        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    };
+
+    panel->onCancel = close;
+    panel->onRemove = [this, panelPointer] (const juce::PluginDescription& description)
+    {
+        recentInstruments::forget (settings, description);
+        panelPointer->setInstruments (recentInstruments::get (settings));
+    };
+    panel->onBrowse = [this, close]
+    {
+        close();
+        browseForInstrument();
+    };
+    panel->onLoad = [this, close] (const juce::PluginDescription& description)
+    {
+        close();
+        createInstrument (description);
+    };
+
+    auto* parent = getTopLevelComponent();
+    juce::CallOutBox::launchAsynchronously (std::move (panel), parent->getLocalArea (&loadButton, loadButton.getLocalBounds()), parent);
+}
+
+void InstrumentPanel::browseForInstrument()
+{
     fileChooser = std::make_unique<juce::FileChooser> ("Choose a VST3 instrument", pluginFolder, "*.vst3");
 
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -158,7 +194,7 @@ void InstrumentPanel::createInstrument (const juce::PluginDescription& descripti
     const auto request = ++instrumentsRequested;
 
     formatManager.createPluginInstanceAsync (description, host.getSampleRate(), host.getBlockSize(),
-        [safeThis = juce::Component::SafePointer (this), name = description.name, state, source, request]
+        [safeThis = juce::Component::SafePointer (this), description, name = description.name, state, source, request]
         (std::unique_ptr<juce::AudioPluginInstance> instrument, const juce::String& error)
         {
             if (safeThis == nullptr || request != safeThis->instrumentsRequested)
@@ -176,6 +212,9 @@ void InstrumentPanel::createInstrument (const juce::PluginDescription& descripti
                 safeThis->listenTo (instrument.get());
                 safeThis->host.setInstrument (safeThis->part, std::move (instrument));
                 safeThis->saveInstrument();
+
+                // One reloaded when the app starts is only there to start with, after the ones chosen.
+                recentInstruments::remember (safeThis->settings, description, source != Source::settings);
 
                 // A new instrument chosen by hand is a change to the score. One reloaded from the
                 // settings when the app starts isn't, since a new score doesn't have one yet.
@@ -380,7 +419,8 @@ void InstrumentPanel::updateControls()
 
     loadButton.setEnabled (! isLoading);
     loadButton.setTooltip (isLoading ? withEllipsis ("Loading " + nameBeingLoaded)
-                                     : "Choose a VST3 instrument plugin for instrument " + juce::String (part + 1) + " to play");
+                                     : "Choose a VST3 instrument plugin for instrument " + juce::String (part + 1)
+                                                   + " to play, from those loaded lately, or browse for another");
     editorButton.setEnabled (instrument != nullptr && ! isLoading);
     editorButton.setButtonText (instrument != nullptr ? "Edit " + instrument->getName() : juce::String ("Edit Instrument"));
     editorButton.setTooltip (instrument != nullptr ? "Open " + instrument->getName() + "'s own window, to choose its sounds"
