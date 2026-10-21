@@ -218,3 +218,121 @@ SavedProgression getProgression (const Score& score, int part)
     progression.name = progression.getNumerals();
     return progression;
 }
+
+//==============================================================================
+namespace
+{
+    juce::String utf8 (const char* text) { return juce::String (juce::CharPointer_UTF8 (text)); }
+}
+
+bool ChordCriteria::isEmpty() const noexcept
+{
+    return ! (minor.has_value() || degree.has_value() || accidental.has_value() || addedNote.has_value()
+              || suspension.has_value() || alteration.has_value());
+}
+
+bool ChordCriteria::matches (const music::ChordSpec& spec) const
+{
+    if (isEmpty())
+        return true;
+
+    if (spec.isEmpty())
+        return false;
+
+    const auto chordAccidental = spec.flat ? -1 : spec.sharp ? 1 : 0;
+    const auto chordAlteration = ! spec.altered ? 0 : spec.minor ? -1 : 1;
+
+    return (! minor.has_value() || *minor == spec.minor)
+        && (! degree.has_value() || *degree == spec.degree)
+        && (! accidental.has_value() || *accidental == chordAccidental)
+        && (! addedNote.has_value() || *addedNote == spec.addedNote)
+        && (! suspension.has_value() || *suspension == spec.suspension)
+        && (! alteration.has_value() || *alteration == chordAlteration);
+}
+
+juce::String ChordCriteria::describe() const
+{
+    static const juce::StringArray numerals { "I", "II", "III", "IV", "V", "VI", "VII" };
+    juce::StringArray parts;
+
+    if (minor.has_value())
+        parts.add (*minor ? "minor" : "major");
+
+    if (degree.has_value() || accidental.has_value())
+    {
+        const auto sign = ! accidental.has_value() ? juce::String()
+                        : *accidental < 0 ? utf8 ("\xe2\x99\xad")
+                        : *accidental > 0 ? utf8 ("\xe2\x99\xaf")
+                                          : juce::String();
+        const auto numeral = degree.has_value() ? numerals[juce::jlimit (0, 6, *degree)] : juce::String();
+
+        if (accidental.has_value() && *accidental == 0)
+            parts.add (numeral.isNotEmpty() ? "natural " + numeral : juce::String ("natural"));
+        else if (numeral.isNotEmpty())
+            parts.add (sign + numeral);
+        else
+            parts.add (*accidental < 0 ? "flat" : "sharp");
+    }
+
+    if (addedNote.has_value())
+        parts.add (*addedNote == music::AddedNote::none ? juce::String ("no added note")
+                                                        : juce::String (music::getInfo (*addedNote).name).toLowerCase());
+
+    if (suspension.has_value())
+        parts.add (*suspension == music::Suspension::none ? juce::String ("not sus") : music::getSuspensionText (*suspension));
+
+    if (alteration.has_value())
+        parts.add (*alteration > 0 ? "augmented" : *alteration < 0 ? "diminished" : "not augmented or diminished");
+
+    return parts.joinIntoString (", ");
+}
+
+bool ProgressionSearch::isEmpty() const noexcept
+{
+    return nameStart.trim().isEmpty() && ! numChords.has_value()
+        && std::all_of (chords.begin(), chords.end(), [] (const ChordCriteria& c) { return c.isEmpty(); });
+}
+
+bool ProgressionSearch::matches (const SavedProgression& progression) const
+{
+    if (const auto start = nameStart.trim(); start.isNotEmpty() && ! progression.name.startsWithIgnoreCase (start))
+        return false;
+
+    if (numChords.has_value() && *numChords != (int) progression.chords.size())
+        return false;
+
+    // A chord looked for that isn't there doesn't match.
+    for (size_t i = 0; i < chords.size(); ++i)
+        if (! chords[i].isEmpty() && (i >= progression.chords.size() || ! chords[i].matches (progression.chords[i].spec)))
+            return false;
+
+    return true;
+}
+
+std::vector<SavedProgression> ProgressionSearch::filter (const std::vector<SavedProgression>& progressions) const
+{
+    std::vector<SavedProgression> found;
+
+    for (const auto& progression : progressions)
+        if (matches (progression))
+            found.push_back (progression);
+
+    return found;
+}
+
+juce::String ProgressionSearch::describe() const
+{
+    juce::StringArray parts;
+
+    if (const auto start = nameStart.trim(); start.isNotEmpty())
+        parts.add ("name starting " + utf8 ("\xe2\x80\x9c") + start + utf8 ("\xe2\x80\x9d"));
+
+    if (numChords.has_value())
+        parts.add (juce::String (*numChords) + (*numChords == 1 ? " chord" : " chords"));
+
+    for (size_t i = 0; i < chords.size(); ++i)
+        if (! chords[i].isEmpty())
+            parts.add ("chord " + juce::String ((int) i + 1) + ": " + chords[i].describe());
+
+    return parts.joinIntoString ("; ");
+}

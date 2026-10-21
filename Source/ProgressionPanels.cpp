@@ -14,6 +14,11 @@ namespace
         label.setBorderSize ({});
     }
 
+    juce::String withEllipsis (const juce::String& text)
+    {
+        return text + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6"));
+    }
+
     juce::String describeChords (const SavedProgression& progression)
     {
         const auto count = (int) progression.chords.size();
@@ -90,9 +95,241 @@ void SaveProgressionPanel::resized()
 }
 
 //==============================================================================
+namespace
+{
+    constexpr int searchRowLabelWidth = 92, searchColumnWidth = 124, anyId = 1;
+
+    juce::String utf8 (const char* text) { return juce::String (juce::CharPointer_UTF8 (text)); }
+
+    /** An optional value from a box: nothing for Any, its first item, or else the value at the
+        item chosen, with the items after Any in the order the values are in.
+    */
+    template <typename Value>
+    std::optional<Value> getChoice (const juce::ComboBox& box, const std::vector<Value>& values)
+    {
+        const auto index = box.getSelectedId() - anyId - 1;
+        return juce::isPositiveAndBelow (index, (int) values.size()) ? std::optional (values[(size_t) index]) : std::nullopt;
+    }
+
+    template <typename Value>
+    void setChoice (juce::ComboBox& box, const std::optional<Value>& value, const std::vector<Value>& values)
+    {
+        const auto found = value.has_value() ? std::find (values.begin(), values.end(), *value) : values.end();
+        box.setSelectedId (found != values.end() ? (int) std::distance (values.begin(), found) + anyId + 1 : anyId, juce::dontSendNotification);
+    }
+
+    const std::vector<bool> qualityValues { false, true };
+    const std::vector<int> degreeValues { 0, 1, 2, 3, 4, 5, 6 };
+    const std::vector<int> accidentalValues { 0, -1, 1 };
+    const std::vector<music::AddedNote> addedNoteValues { music::AddedNote::none, music::AddedNote::dominant7th, music::AddedNote::major7th,
+                                                          music::AddedNote::minor7th, music::AddedNote::dominant9th, music::AddedNote::major9th,
+                                                          music::AddedNote::minor9th };
+    const std::vector<music::Suspension> suspensionValues { music::Suspension::none, music::Suspension::sus2, music::Suspension::sus4 };
+    const std::vector<int> alterationValues { 1, -1, 0 };
+}
+
+SearchProgressionsPanel::SearchProgressionsPanel (const ProgressionSearch& start, int maxChords,
+                                                  std::function<juce::String (const ProgressionSearch&)> describe)
+    : describeFound (std::move (describe))
+{
+    controls::makeHeading (heading, "Search Progressions");
+    makeLabel (nameLabel, "Name starts");
+    makeLabel (countLabel, "Chords");
+    makeLabel (foundLabel, {});
+    foundLabel.setColour (juce::Label::textColourId, controls::secondaryText);
+
+    nameEditor.setInputRestrictions (SavedProgression::maxNameLength);
+    nameEditor.setTextToShowWhenEmpty ("Any name", controls::secondaryText);
+    nameEditor.setTooltip ("The first letters of the progression's name, in capitals or not. Leave it empty for any name.");
+    nameEditor.onTextChange = [this] { changed(); };
+    nameEditor.onReturnKey = [this] { if (onDone != nullptr) onDone(); };
+    nameEditor.onEscapeKey = [this] { if (onDone != nullptr) onDone(); };
+
+    countBox.addItem ("Any", anyId);
+
+    for (int count = 1; count <= juce::jmax (ProgressionSearch::numChordsSearched, maxChords); ++count)
+        countBox.addItem (juce::String (count), count + anyId);
+
+    countBox.setTooltip ("How many chords the progression has. Any leaves it out.");
+    countBox.onChange = [this] { changed(); };
+
+    const auto flat = utf8 ("\xe2\x99\xad"), sharp = utf8 ("\xe2\x99\xaf");
+    const std::array<std::pair<const char*, juce::StringArray>, numRows> rows {{
+        { "Major/minor", { "Major", "Minor" } },
+        { "Number", { "I", "II", "III", "IV", "V", "VI", "VII" } },
+        { "Flat/sharp", { "Neither", flat + " Flat", sharp + " Sharp" } },
+        { "Added note", { "None" } },
+        { "Sus", { "Not sus", "sus2", "sus4" } },
+        { "Augmented", { "Augmented +", utf8 ("Diminished \xc2\xb0"), "Neither" } },
+    }};
+    const std::array<const char*, numRows> tips {
+        "Whether the chord is major or minor",
+        "The chord's number: the scale step it's on, from I for the key's own chord to VII",
+        "Whether the chord's root is lowered a half step, flat, or raised, sharp, or neither",
+        "The 7th or 9th added to the chord, or none",
+        "Whether the chord is suspended, with its 2nd or 4th in place of its 3rd",
+        "Whether the chord is augmented, a major chord with its 5th raised, or diminished, a minor one with its 5th lowered",
+    };
+
+    for (size_t row = 0; row < (size_t) numRows; ++row)
+    {
+        makeLabel (rowLabels[row], rows[row].first);
+        addAndMakeVisible (rowLabels[row]);
+
+        for (size_t column = 0; column < boxes[row].size(); ++column)
+        {
+            auto& box = boxes[row][column];
+            box.addItem ("Any", anyId);
+            box.addItemList (rows[row].second, anyId + 1);
+
+            if (row == (size_t) addedNote)
+                for (size_t i = 1; i < addedNoteValues.size(); ++i)
+                    box.addItem (music::getInfo (addedNoteValues[i]).name, anyId + 1 + (int) i);
+
+            box.setTooltip (juce::String (tips[row]) + " (chord " + juce::String ((int) column + 1) + "). Any leaves it out.");
+            box.onChange = [this] { changed(); };
+            addAndMakeVisible (box);
+        }
+    }
+
+    for (size_t column = 0; column < columnLabels.size(); ++column)
+    {
+        makeLabel (columnLabels[column], "Chord " + juce::String ((int) column + 1));
+        columnLabels[column].setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        addAndMakeVisible (columnLabels[column]);
+    }
+
+    clearButton.setTooltip ("Set everything back to Any, to show all the progressions");
+    doneButton.setTooltip ("Close, with the list showing the progressions found");
+    clearButton.onClick = [this]
+    {
+        setSearch ({});
+        changed();
+    };
+    doneButton.onClick = [this] { if (onDone != nullptr) onDone(); };
+
+    for (auto* component : std::initializer_list<juce::Component*> { &heading, &nameLabel, &nameEditor, &countLabel, &countBox,
+                                                                     &foundLabel, &clearButton, &doneButton })
+        addAndMakeVisible (component);
+
+    for (auto* button : { &clearButton, &doneButton })
+        button->setWantsKeyboardFocus (false);
+
+    setSearch (start);
+    foundLabel.setText (describeFound != nullptr ? describeFound (getSearch()) : juce::String(), juce::dontSendNotification);
+    setSize (padding * 2 + searchRowLabelWidth + ProgressionSearch::numChordsSearched * (searchColumnWidth + gap) - gap,
+             padding * 2 + 16 + gap + rowHeight + gap * 2 + 18 + gap + numRows * (rowHeight + gap) + gap + rowHeight);
+}
+
+ProgressionSearch SearchProgressionsPanel::getSearch() const
+{
+    ProgressionSearch search;
+    search.nameStart = nameEditor.getText().trim();
+
+    if (countBox.getSelectedId() > anyId)
+        search.numChords = countBox.getSelectedId() - anyId;
+
+    for (size_t i = 0; i < search.chords.size(); ++i)
+    {
+        auto& chord = search.chords[i];
+        chord.minor = getChoice (boxes[quality][i], qualityValues);
+        chord.degree = getChoice (boxes[number][i], degreeValues);
+        chord.accidental = getChoice (boxes[accidental][i], accidentalValues);
+        chord.addedNote = getChoice (boxes[addedNote][i], addedNoteValues);
+        chord.suspension = getChoice (boxes[suspension][i], suspensionValues);
+        chord.alteration = getChoice (boxes[alteration][i], alterationValues);
+    }
+
+    return search;
+}
+
+void SearchProgressionsPanel::setSearch (const ProgressionSearch& search)
+{
+    nameEditor.setText (search.nameStart, false);
+    countBox.setSelectedId (search.numChords.has_value() && countBox.indexOfItemId (*search.numChords + anyId) >= 0 ? *search.numChords + anyId : anyId,
+                            juce::dontSendNotification);
+
+    for (size_t i = 0; i < search.chords.size(); ++i)
+    {
+        const auto& chord = search.chords[i];
+        setChoice (boxes[quality][i], chord.minor, qualityValues);
+        setChoice (boxes[number][i], chord.degree, degreeValues);
+        setChoice (boxes[accidental][i], chord.accidental, accidentalValues);
+        setChoice (boxes[addedNote][i], chord.addedNote, addedNoteValues);
+        setChoice (boxes[suspension][i], chord.suspension, suspensionValues);
+        setChoice (boxes[alteration][i], chord.alteration, alterationValues);
+    }
+}
+
+void SearchProgressionsPanel::changed()
+{
+    const auto search = getSearch();
+    foundLabel.setText (describeFound != nullptr ? describeFound (search) : juce::String(), juce::dontSendNotification);
+
+    if (onChange != nullptr)
+        onChange (search);
+}
+
+void SearchProgressionsPanel::parentHierarchyChanged()
+{
+    // Ready to type the name, once it's on screen
+    if (nameEditor.isShowing())
+        nameEditor.grabKeyboardFocus();
+}
+
+void SearchProgressionsPanel::resized()
+{
+    auto bounds = getLocalBounds().reduced (padding);
+    heading.setBounds (bounds.removeFromTop (16));
+    bounds.removeFromTop (gap);
+
+    auto nameRow = bounds.removeFromTop (rowHeight);
+    nameLabel.setBounds (nameRow.removeFromLeft (searchRowLabelWidth));
+    nameEditor.setBounds (nameRow.removeFromLeft (2 * searchColumnWidth + gap));
+    nameRow.removeFromLeft (gap * 3);
+    countLabel.setBounds (nameRow.removeFromLeft (56));
+    countBox.setBounds (nameRow.removeFromLeft (90));
+    bounds.removeFromTop (gap * 2);
+
+    auto headings = bounds.removeFromTop (18);
+    headings.removeFromLeft (searchRowLabelWidth);
+
+    for (auto& label : columnLabels)
+    {
+        label.setBounds (headings.removeFromLeft (searchColumnWidth));
+        headings.removeFromLeft (gap);
+    }
+
+    bounds.removeFromTop (gap);
+
+    for (size_t row = 0; row < (size_t) numRows; ++row)
+    {
+        auto line = bounds.removeFromTop (rowHeight);
+        rowLabels[row].setBounds (line.removeFromLeft (searchRowLabelWidth));
+
+        for (auto& box : boxes[row])
+        {
+            box.setBounds (line.removeFromLeft (searchColumnWidth));
+            line.removeFromLeft (gap);
+        }
+
+        bounds.removeFromTop (gap);
+    }
+
+    bounds.removeFromTop (gap);
+    auto buttons = bounds.removeFromTop (rowHeight);
+    doneButton.setBounds (buttons.removeFromRight (buttonWidth));
+    buttons.removeFromRight (gap);
+    clearButton.setBounds (buttons.removeFromRight (buttonWidth));
+    buttons.removeFromRight (gap);
+    foundLabel.setBounds (buttons);
+}
+
+//==============================================================================
 ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression>& saved, const ChordStyle& style, int part, int measure,
                                               int beatsPerMeasure, const juce::String& chosenName, std::vector<Rhythm> savedRhythms)
-    : rhythms (std::move (savedRhythms))
+    : rhythms (std::move (savedRhythms)),
+      searchButton (withEllipsis ("Search"))
 {
     controls::makeHeading (heading, "Apply Saved Progression");
     makeLabel (targetLabel, "Into instrument " + juce::String (part + 1) + ", from measure " + juce::String (measure + 1)
@@ -164,6 +401,14 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     rhythmBox.onChange = [this] { updateLength(); };
     updateLength();
 
+    makeLabel (searchLabel, {});
+    searchLabel.setColour (juce::Label::textColourId, controls::secondaryText);
+    searchLabel.setMinimumHorizontalScale (1.0f);
+    searchButton.setTooltip ("Look for progressions by name, number of chords, and what their first four chords are like");
+    clearSearchButton.setTooltip ("Show all the progressions again");
+    searchButton.onClick = [this] { showSearch(); };
+    clearSearchButton.onClick = [this] { setSearch ({}); };
+
     deleteButton.setTooltip ("Delete the chosen progression from the ones saved");
     cancelButton.setTooltip ("Close without applying a progression");
     applyButton.setTooltip ("Write the chosen progression's chords in, adding measures at the end if they don't all fit");
@@ -178,29 +423,36 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     cancelButton.onClick = [this] { if (onCancel != nullptr) onCancel(); };
     applyButton.onClick = [this] { apply(); };
 
-    for (auto* component : std::initializer_list<juce::Component*> { &heading, &targetLabel, &list, &typeLabel, &typeBox, &clefLabel, &trebleButton, &bassButton,
+    for (auto* component : std::initializer_list<juce::Component*> { &heading, &targetLabel, &list, &searchButton, &searchLabel, &clearSearchButton, &typeLabel, &typeBox, &clefLabel, &trebleButton, &bassButton,
                                                                      &lengthLabel, &lengthBox, &rhythmLabel, &rhythmBox, &measuresLabel, &measuresSlider,
                                                                      &deleteButton, &cancelButton, &applyButton })
         addAndMakeVisible (component);
 
-    for (auto* button : { &deleteButton, &cancelButton, &applyButton })
+    for (auto* button : { &searchButton, &clearSearchButton, &deleteButton, &cancelButton, &applyButton })
         button->setWantsKeyboardFocus (false);
 
-    progressions = saved;
-    list.updateContent();
+    allProgressions = saved;
+    showProgressions (saved, chosenName, 0);
 
-    const auto chosen = std::find_if (progressions.begin(), progressions.end(), [&] (const SavedProgression& p) { return p.name == chosenName; });
-    list.selectRow (chosen != progressions.end() ? (int) std::distance (progressions.begin(), chosen) : 0);
-    updateButtons();
-
-    setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap * 2 + 5 * (rowHeight + gap) + gap + rowHeight);
+    setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap + rowHeight + gap * 2
+                             + 5 * (rowHeight + gap) + gap + rowHeight);
 }
 
 void ApplyProgressionPanel::setProgressions (const std::vector<SavedProgression>& saved)
 {
-    const auto chosenName = getChosen() != nullptr ? getChosen()->name : juce::String();
-    const auto chosenRow = list.getSelectedRow();
-    progressions = saved;
+    allProgressions = saved;
+    showProgressions (search.filter (saved), getChosen() != nullptr ? getChosen()->name : juce::String(), list.getSelectedRow());
+}
+
+void ApplyProgressionPanel::setSearch (const ProgressionSearch& newSearch)
+{
+    search = newSearch;
+    showProgressions (search.filter (allProgressions), getChosen() != nullptr ? getChosen()->name : juce::String(), 0);
+}
+
+void ApplyProgressionPanel::showProgressions (const std::vector<SavedProgression>& shown, const juce::String& chosenName, int chosenRow)
+{
+    progressions = shown;
     list.updateContent();
 
     // The same one, or else the one in its place, or the last, if there are any
@@ -212,8 +464,53 @@ void ApplyProgressionPanel::setProgressions (const std::vector<SavedProgression>
         list.selectRow (chosen != progressions.end() ? (int) std::distance (progressions.begin(), chosen)
                                                      : juce::jlimit (0, (int) progressions.size() - 1, chosenRow));
 
+    // What the search finds, or that it's showing them all
+    const auto total = (int) allProgressions.size();
+    const auto description = search.describe();
+
+    if (search.isEmpty())
+        searchLabel.setText ("All " + juce::String (total) + (total == 1 ? " progression" : " progressions"), juce::dontSendNotification);
+    else
+        searchLabel.setText (juce::String ((int) progressions.size()) + " of " + juce::String (total) + " found: " + description, juce::dontSendNotification);
+
+    searchLabel.setTooltip (search.isEmpty() ? juce::String() : "Searching for " + description);
+    searchLabel.setColour (juce::Label::textColourId, ! search.isEmpty() ? controls::accent : controls::secondaryText);
+    clearSearchButton.setVisible (! search.isEmpty());
     updateButtons();
     list.repaint();
+    resized();
+}
+
+void ApplyProgressionPanel::showSearch()
+{
+    auto maxChords = 0;
+
+    for (const auto& progression : allProgressions)
+        maxChords = juce::jmax (maxChords, (int) progression.chords.size());
+
+    auto panel = std::make_unique<SearchProgressionsPanel> (search, maxChords, [safeThis = juce::Component::SafePointer (this)] (const ProgressionSearch& s)
+    {
+        if (safeThis == nullptr)
+            return juce::String();
+
+        const auto& all = safeThis->allProgressions;
+        return juce::String ((int) s.filter (all).size()) + " of " + juce::String ((int) all.size()) + " found";
+    });
+
+    auto* panelPointer = panel.get();
+    panel->onChange = [safeThis = juce::Component::SafePointer (this)] (const ProgressionSearch& s)
+    {
+        if (safeThis != nullptr)
+            safeThis->setSearch (s);
+    };
+    panel->onDone = [panelPointer]
+    {
+        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    };
+
+    auto* parent = getTopLevelComponent();
+    juce::CallOutBox::launchAsynchronously (std::move (panel), parent->getLocalArea (&searchButton, searchButton.getLocalBounds()), parent);
 }
 
 const SavedProgression* ApplyProgressionPanel::getChosen() const
@@ -327,6 +624,19 @@ void ApplyProgressionPanel::resized()
     targetLabel.setBounds (bounds.removeFromTop (34));
     bounds.removeFromTop (gap);
     list.setBounds (bounds.removeFromTop (listRows * listRowHeight + 2));
+    bounds.removeFromTop (gap);
+
+    auto searchRow = bounds.removeFromTop (rowHeight);
+    searchButton.setBounds (searchRow.removeFromLeft (buttonWidth));
+    searchRow.removeFromLeft (gap * 2);
+
+    if (clearSearchButton.isVisible())
+    {
+        clearSearchButton.setBounds (searchRow.removeFromRight (60));
+        searchRow.removeFromRight (gap);
+    }
+
+    searchLabel.setBounds (searchRow);
     bounds.removeFromTop (gap * 2);
 
     auto typeRow = bounds.removeFromTop (rowHeight);

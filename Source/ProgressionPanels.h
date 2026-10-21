@@ -5,6 +5,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <functional>
 
 /** What Save Progression shows: the chords to be saved, and a name for them, which starts as
@@ -33,9 +34,50 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SaveProgressionPanel)
 };
 
+/** What Search, in Apply Saved Progression, shows: the first letters of a name, a number of
+    chords, and for each of the first four chords whether it's major or minor, its number, flat or
+    sharp, its added note, sus, and augmented or diminished, each Any to start with, which leaves
+    it out. It says how many progressions match, as it changes, with Clear and Done.
+*/
+class SearchProgressionsPanel final : public juce::Component
+{
+public:
+    /** Starting with a search, with up to so many chords to choose from, and what to say of the
+        progressions a search finds, e.g. "3 of 10 match".
+    */
+    SearchProgressionsPanel (const ProgressionSearch&, int maxChords, std::function<juce::String (const ProgressionSearch&)> describeFound);
+
+    ProgressionSearch getSearch() const;
+
+    /** Called whenever any of it changes, with the search as it is now. */
+    std::function<void (const ProgressionSearch&)> onChange;
+    std::function<void()> onDone;
+
+    void resized() override;
+
+private:
+    enum Row { quality, number, accidental, addedNote, suspension, alteration, numRows };
+
+    void parentHierarchyChanged() override;
+    void setSearch (const ProgressionSearch&);
+    void changed();
+
+    std::function<juce::String (const ProgressionSearch&)> describeFound;
+    juce::Label heading, nameLabel, countLabel, foundLabel;
+    juce::TextEditor nameEditor;
+    juce::ComboBox countBox;
+    std::array<juce::Label, ProgressionSearch::numChordsSearched> columnLabels;
+    std::array<juce::Label, numRows> rowLabels;
+    std::array<std::array<juce::ComboBox, ProgressionSearch::numChordsSearched>, numRows> boxes;
+    juce::TextButton clearButton { "Clear" }, doneButton { "Done" };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SearchProgressionsPanel)
+};
+
 /** What Apply Saved Progression shows: the progressions saved, to choose one, and the chord
     type, clef and note length to write its chords in, as the chord window has them, with Apply,
-    Cancel, and Delete for the one chosen.
+    Cancel, and Delete for the one chosen. Search… narrows the list down to the progressions
+    that match a search, until it's cleared.
 */
 class ApplyProgressionPanel final : public juce::Component,
                                     private juce::ListBoxModel
@@ -50,6 +92,10 @@ public:
 
     /** Shows the progressions again, e.g. once one's been deleted, keeping the one chosen if it's still there. */
     void setProgressions (const std::vector<SavedProgression>&);
+
+    /** Shows only the progressions that match, keeping the one chosen if it's among them. */
+    void setSearch (const ProgressionSearch&);
+    const ProgressionSearch& getSearch() const noexcept { return search; }
 
     /** The progression chosen, if any */
     const SavedProgression* getChosen() const;
@@ -81,16 +127,20 @@ private:
 
     void apply();
     void updateButtons();
-
-    std::vector<SavedProgression> progressions;
+    void showSearch();
+    void showProgressions (const std::vector<SavedProgression>& shown, const juce::String& chosenName, int chosenRow);
     void updateLength();
 
-    juce::Label heading, targetLabel, typeLabel, clefLabel, lengthLabel, rhythmLabel, measuresLabel;
+    std::vector<SavedProgression> allProgressions, progressions;     // all of them, and those the search finds, which are shown
+    ProgressionSearch search;
+
+    juce::Label heading, targetLabel, searchLabel, typeLabel, clefLabel, lengthLabel, rhythmLabel, measuresLabel;
     juce::Slider measuresSlider;
     juce::ListBox list { "Saved progressions", this };
     juce::ComboBox typeBox, lengthBox, rhythmBox;
     std::vector<Rhythm> rhythms;
     juce::TextButton trebleButton { "Treble clef" }, bassButton { "Bass clef" };
+    juce::TextButton searchButton, clearSearchButton { "Clear" };
     juce::TextButton deleteButton { "Delete" }, cancelButton { "Cancel" }, applyButton { "Apply" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ApplyProgressionPanel)
