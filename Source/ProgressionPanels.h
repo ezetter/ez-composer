@@ -85,11 +85,7 @@ private:
     std::vector<SavedProgression> progressions;
     void updateLength();
 
-    /** sus2 or sus4, for every chord, if one's on */
-    music::Suspension getSuspension() const;
-
-    juce::Label heading, targetLabel, typeLabel, clefLabel, susLabel, lengthLabel, rhythmLabel, measuresLabel;
-    std::array<juce::TextButton, 2> susButtons;     // sus2 and sus4, toggled on or off
+    juce::Label heading, targetLabel, typeLabel, clefLabel, lengthLabel, rhythmLabel, measuresLabel;
     juce::Slider measuresSlider;
     juce::ListBox list { "Saved progressions", this };
     juce::ComboBox typeBox, lengthBox, rhythmBox;

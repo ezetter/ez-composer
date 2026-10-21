@@ -101,28 +101,6 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     targetLabel.setJustificationType (juce::Justification::topLeft);
     makeLabel (typeLabel, "Chord type");
     makeLabel (clefLabel, "Clef");
-    makeLabel (susLabel, "Suspend");
-
-    // Each turns on, in place of the other, or off again, neither on to start with.
-    controls::makeSegmented ({ &susButtons[0], &susButtons[1] }, 0);
-    susButtons[0].setButtonText ("sus2");
-    susButtons[1].setButtonText ("sus4");
-    susButtons[0].setTooltip ("Write every chord with its 2nd in place of its 3rd, e.g. C D G");
-    susButtons[1].setTooltip ("Write every chord with its 4th in place of its 3rd, e.g. C F G");
-
-    for (size_t i = 0; i < susButtons.size(); ++i)
-    {
-        susButtons[i].setClickingTogglesState (false);
-        susButtons[i].onClick = [this, i]
-        {
-            const auto turnOn = ! susButtons[i].getToggleState();
-
-            for (auto& button : susButtons)
-                button.setToggleState (false, juce::dontSendNotification);
-
-            susButtons[i].setToggleState (turnOn, juce::dontSendNotification);
-        };
-    }
     makeLabel (lengthLabel, "Note length");
     makeLabel (rhythmLabel, "Rhythm");
     makeLabel (measuresLabel, "Measures per chord");
@@ -201,7 +179,6 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     applyButton.onClick = [this] { apply(); };
 
     for (auto* component : std::initializer_list<juce::Component*> { &heading, &targetLabel, &list, &typeLabel, &typeBox, &clefLabel, &trebleButton, &bassButton,
-                                                                     &susLabel, &susButtons[0], &susButtons[1],
                                                                      &lengthLabel, &lengthBox, &rhythmLabel, &rhythmBox, &measuresLabel, &measuresSlider,
                                                                      &deleteButton, &cancelButton, &applyButton })
         addAndMakeVisible (component);
@@ -216,7 +193,7 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     list.selectRow (chosen != progressions.end() ? (int) std::distance (progressions.begin(), chosen) : 0);
     updateButtons();
 
-    setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap * 2 + 6 * (rowHeight + gap) + gap + rowHeight);
+    setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap * 2 + 5 * (rowHeight + gap) + gap + rowHeight);
 }
 
 void ApplyProgressionPanel::setProgressions (const std::vector<SavedProgression>& saved)
@@ -262,13 +239,6 @@ ChordStyle ApplyProgressionPanel::getStyle() const
     return style;
 }
 
-music::Suspension ApplyProgressionPanel::getSuspension() const
-{
-    return susButtons[0].getToggleState() ? music::Suspension::sus2
-         : susButtons[1].getToggleState() ? music::Suspension::sus4
-                                          : music::Suspension::none;
-}
-
 int ApplyProgressionPanel::getMeasuresPerChord() const
 {
     return juce::jlimit (1, maxMeasuresPerChord, juce::roundToInt (measuresSlider.getValue()));
@@ -292,7 +262,7 @@ void ApplyProgressionPanel::apply()
     // Copies, as the panel may close
     if (const auto* chosen = getChosen(); chosen != nullptr && onApply != nullptr)
     {
-        const auto progression = chosen->suspended (getSuspension());
+        const auto progression = *chosen;
         const auto style = getStyle();
         onApply (progression, style, getMeasuresPerChord());
     }
@@ -368,12 +338,6 @@ void ApplyProgressionPanel::resized()
     clefLabel.setBounds (clefRow.removeFromLeft (labelWidth));
     trebleButton.setBounds (clefRow.removeFromLeft (clefRow.getWidth() / 2));
     bassButton.setBounds (clefRow);
-    bounds.removeFromTop (gap);
-
-    auto susRow = bounds.removeFromTop (rowHeight);
-    susLabel.setBounds (susRow.removeFromLeft (labelWidth));
-    susButtons[0].setBounds (susRow.removeFromLeft (susRow.getWidth() / 2));
-    susButtons[1].setBounds (susRow);
     bounds.removeFromTop (gap);
 
     auto lengthRow = bounds.removeFromTop (rowHeight);
