@@ -1,4 +1,4 @@
-#include "LoadInstrumentPanel.h"
+#include "LoadPluginPanel.h"
 
 #include <optional>
 
@@ -6,7 +6,6 @@ namespace
 {
     constexpr int padding = 12, rowHeight = 26, gap = 6, buttonWidth = 80;
     constexpr int panelWidth = 380, listRowHeight = 38, listRows = 6;
-    const juce::String settingsKey = "recentInstruments";
 
     juce::String withEllipsis (const juce::String& text)
     {
@@ -14,11 +13,11 @@ namespace
     }
 
     /** All that are kept, whether or not their files are still there */
-    std::vector<juce::PluginDescription> getKept (juce::PropertiesFile& settings)
+    std::vector<juce::PluginDescription> getKept (juce::PropertiesFile& settings, PluginKind kind)
     {
         std::vector<juce::PluginDescription> kept;
 
-        if (const auto xml = settings.getXmlValue (settingsKey))
+        if (const auto xml = settings.getXmlValue (recentPlugins::getSettingsKey (kind)))
         {
             for (const auto* child : xml->getChildIterator())
             {
@@ -33,14 +32,14 @@ namespace
         return kept;
     }
 
-    void keep (juce::PropertiesFile& settings, const std::vector<juce::PluginDescription>& kept)
+    void keep (juce::PropertiesFile& settings, PluginKind kind, const std::vector<juce::PluginDescription>& kept)
     {
-        juce::XmlElement xml ("RECENTINSTRUMENTS");
+        juce::XmlElement xml (kind == PluginKind::instrument ? "RECENTINSTRUMENTS" : "RECENTEFFECTS");
 
-        for (size_t i = 0; i < kept.size() && i < (size_t) recentInstruments::maxCount; ++i)
+        for (size_t i = 0; i < kept.size() && i < (size_t) recentPlugins::maxCount; ++i)
             xml.addChildElement (kept[i].createXml().release());
 
-        settings.setValue (settingsKey, &xml);
+        settings.setValue (recentPlugins::getSettingsKey (kind), &xml);
         settings.saveIfNeeded();
     }
 
@@ -58,9 +57,14 @@ namespace
 }
 
 //==============================================================================
-std::vector<juce::PluginDescription> recentInstruments::get (juce::PropertiesFile& settings)
+juce::String recentPlugins::getSettingsKey (PluginKind kind)
 {
-    auto kept = getKept (settings);
+    return kind == PluginKind::instrument ? "recentInstruments" : "recentEffects";
+}
+
+std::vector<juce::PluginDescription> recentPlugins::get (juce::PropertiesFile& settings, PluginKind kind)
+{
+    auto kept = getKept (settings, kind);
 
     std::erase_if (kept, [] (const juce::PluginDescription& description)
     {
@@ -70,9 +74,9 @@ std::vector<juce::PluginDescription> recentInstruments::get (juce::PropertiesFil
     return kept;
 }
 
-void recentInstruments::remember (juce::PropertiesFile& settings, const juce::PluginDescription& description, bool latest)
+void recentPlugins::remember (juce::PropertiesFile& settings, PluginKind kind, const juce::PluginDescription& description, bool latest)
 {
-    auto kept = getKept (settings);
+    auto kept = getKept (settings, kind);
     const auto isIt = [&] (const juce::PluginDescription& d) { return d.isDuplicateOf (description); };
 
     if (latest)
@@ -93,41 +97,43 @@ void recentInstruments::remember (juce::PropertiesFile& settings, const juce::Pl
         return;
     }
 
-    keep (settings, kept);
+    keep (settings, kind, kept);
 }
 
-void recentInstruments::forget (juce::PropertiesFile& settings, const juce::PluginDescription& description)
+void recentPlugins::forget (juce::PropertiesFile& settings, PluginKind kind, const juce::PluginDescription& description)
 {
-    auto kept = getKept (settings);
+    auto kept = getKept (settings, kind);
 
     if (std::erase_if (kept, [&] (const juce::PluginDescription& d) { return d.isDuplicateOf (description); }) > 0)
-        keep (settings, kept);
+        keep (settings, kind, kept);
 }
 
 //==============================================================================
-LoadInstrumentPanel::LoadInstrumentPanel (int part, const std::vector<juce::PluginDescription>& recent, const juce::String& loadedName)
+LoadPluginPanel::LoadPluginPanel (PluginKind kind, const juce::String& headingText, const juce::String& situation,
+                                  const std::vector<juce::PluginDescription>& recent)
     : browseButton (withEllipsis ("Browse"))
 {
-    controls::makeHeading (heading, "Load Instrument " + juce::String (part + 1));
+    const juce::String noun = kind == PluginKind::instrument ? "instrument" : "effect";
+    controls::makeHeading (heading, headingText);
 
     noteLabel.setFont (juce::FontOptions (13.0f));
     noteLabel.setBorderSize ({});
     noteLabel.setColour (juce::Label::textColourId, controls::secondaryText);
     noteLabel.setJustificationType (juce::Justification::topLeft);
-    noteLabel.setText ((loadedName.isNotEmpty() ? "It plays " + loadedName + " now. " : juce::String ("It has no instrument now. "))
-                           + (recent.empty() ? "No instruments have been loaded yet: Browse to find one."
-                                             : "Choose one loaded lately, or Browse to find another."),
+    noteLabel.setText (situation + " " + (recent.empty() ? "No " + noun + "s have been loaded yet: Browse to find one."
+                                                         : juce::String ("Choose one loaded lately, or Browse to find another.")),
                        juce::dontSendNotification);
 
     list.setRowHeight (listRowHeight);
     list.setColour (juce::ListBox::outlineColourId, juce::Colours::black.withAlpha (0.15f));
     list.setOutlineThickness (1);
-    list.setTooltip ("The instruments loaded lately, the latest first. Double-click one to load it.");
+    list.setTooltip ("The " + noun + "s loaded lately, the latest first. Double-click one to load it.");
 
-    removeButton.setTooltip ("Take the chosen instrument off the list. It stays installed.");
-    browseButton.setTooltip ("Find a VST3 instrument plugin to load, in the plugin folders or anywhere else");
-    cancelButton.setTooltip ("Close, keeping the instrument as it is");
-    loadButton.setTooltip ("Load the chosen instrument, with its own sound to start with");
+    removeButton.setTooltip ("Take the chosen " + noun + " off the list. It stays installed.");
+    browseButton.setTooltip ("Find a VST3 " + noun + " plugin to load, in the plugin folders or anywhere else");
+    cancelButton.setTooltip (kind == PluginKind::instrument ? "Close, keeping the instrument as it is" : "Close without adding an effect");
+    loadButton.setTooltip (kind == PluginKind::instrument ? "Load the chosen instrument, with its own sound to start with"
+                                                          : "Add the chosen effect at the end of the chain, with its own settings to start with");
 
     removeButton.onClick = [this]
     {
@@ -148,44 +154,44 @@ LoadInstrumentPanel::LoadInstrumentPanel (int part, const std::vector<juce::Plug
     for (auto* button : { &removeButton, &browseButton, &cancelButton, &loadButton })
         button->setWantsKeyboardFocus (false);
 
-    instruments = recent;
+    plugins = recent;
     list.updateContent();
 
-    if (! instruments.empty())
+    if (! plugins.empty())
         list.selectRow (0);
 
     updateButtons();
     setSize (panelWidth, padding * 2 + 16 + gap + 34 + gap + listRows * listRowHeight + 2 + gap * 2 + rowHeight);
 }
 
-void LoadInstrumentPanel::setInstruments (const std::vector<juce::PluginDescription>& recent)
+void LoadPluginPanel::setPlugins (const std::vector<juce::PluginDescription>& recent)
 {
     const auto chosen = getChosen() != nullptr ? std::optional (*getChosen()) : std::nullopt;
     const auto chosenRow = list.getSelectedRow();
-    instruments = recent;
+    plugins = recent;
     list.updateContent();
 
     // The same one, or else the one in its place, or the last, if there are any
-    const auto same = std::find_if (instruments.begin(), instruments.end(),
+    const auto same = std::find_if (plugins.begin(), plugins.end(),
                                     [&] (const juce::PluginDescription& d) { return chosen.has_value() && d.isDuplicateOf (*chosen); });
 
-    if (instruments.empty())
+    if (plugins.empty())
         list.deselectAllRows();
     else
-        list.selectRow (same != instruments.end() ? (int) std::distance (instruments.begin(), same)
-                                                  : juce::jlimit (0, (int) instruments.size() - 1, chosenRow));
+        list.selectRow (same != plugins.end() ? (int) std::distance (plugins.begin(), same)
+                                                  : juce::jlimit (0, (int) plugins.size() - 1, chosenRow));
 
     updateButtons();
     list.repaint();
 }
 
-const juce::PluginDescription* LoadInstrumentPanel::getChosen() const
+const juce::PluginDescription* LoadPluginPanel::getChosen() const
 {
     const auto row = list.getSelectedRow();
-    return juce::isPositiveAndBelow (row, (int) instruments.size()) ? &instruments[(size_t) row] : nullptr;
+    return juce::isPositiveAndBelow (row, (int) plugins.size()) ? &plugins[(size_t) row] : nullptr;
 }
 
-void LoadInstrumentPanel::load()
+void LoadPluginPanel::load()
 {
     // A copy, as the panel may close
     if (const auto* chosen = getChosen(); chosen != nullptr && onLoad != nullptr)
@@ -195,13 +201,13 @@ void LoadInstrumentPanel::load()
     }
 }
 
-void LoadInstrumentPanel::updateButtons()
+void LoadPluginPanel::updateButtons()
 {
     loadButton.setEnabled (getChosen() != nullptr);
     removeButton.setEnabled (getChosen() != nullptr);
 }
 
-bool LoadInstrumentPanel::keyPressed (const juce::KeyPress& key)
+bool LoadPluginPanel::keyPressed (const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::returnKey)
     {
@@ -220,25 +226,25 @@ bool LoadInstrumentPanel::keyPressed (const juce::KeyPress& key)
     return false;
 }
 
-void LoadInstrumentPanel::parentHierarchyChanged()
+void LoadPluginPanel::parentHierarchyChanged()
 {
     // Ready for the arrow keys and Return, once it's on screen
     if (list.isShowing())
         list.grabKeyboardFocus();
 }
 
-int LoadInstrumentPanel::getNumRows()
+int LoadPluginPanel::getNumRows()
 {
-    return (int) instruments.size();
+    return (int) plugins.size();
 }
 
-void LoadInstrumentPanel::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected)
+void LoadPluginPanel::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected)
 {
-    if (! juce::isPositiveAndBelow (row, (int) instruments.size()))
+    if (! juce::isPositiveAndBelow (row, (int) plugins.size()))
         return;
 
     // Its name, and under it, who makes it and where its plugin is
-    const auto& description = instruments[(size_t) row];
+    const auto& description = plugins[(size_t) row];
 
     if (selected)
         g.fillAll (controls::accentLight);
@@ -255,28 +261,28 @@ void LoadInstrumentPanel::paintListBoxItem (int row, juce::Graphics& g, int widt
                 area.withTrimmedTop (area.getHeight() / 2), juce::Justification::centredLeft, true);
 }
 
-void LoadInstrumentPanel::selectedRowsChanged (int)
+void LoadPluginPanel::selectedRowsChanged (int)
 {
     updateButtons();
 }
 
-void LoadInstrumentPanel::listBoxItemDoubleClicked (int row, const juce::MouseEvent&)
+void LoadPluginPanel::listBoxItemDoubleClicked (int row, const juce::MouseEvent&)
 {
-    if (juce::isPositiveAndBelow (row, (int) instruments.size()))
+    if (juce::isPositiveAndBelow (row, (int) plugins.size()))
         load();
 }
 
-void LoadInstrumentPanel::returnKeyPressed (int)
+void LoadPluginPanel::returnKeyPressed (int)
 {
     load();
 }
 
-juce::String LoadInstrumentPanel::getTooltipForRow (int row)
+juce::String LoadPluginPanel::getTooltipForRow (int row)
 {
-    return juce::isPositiveAndBelow (row, (int) instruments.size()) ? getPlace (instruments[(size_t) row]) : juce::String();
+    return juce::isPositiveAndBelow (row, (int) plugins.size()) ? getPlace (plugins[(size_t) row]) : juce::String();
 }
 
-void LoadInstrumentPanel::resized()
+void LoadPluginPanel::resized()
 {
     auto bounds = getLocalBounds().reduced (padding);
     heading.setBounds (bounds.removeFromTop (16));

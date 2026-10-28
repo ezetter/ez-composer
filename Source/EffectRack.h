@@ -16,7 +16,8 @@
 class EffectRack final
 {
 public:
-    explicit EffectRack (InstrumentHost&);
+    /** Keeping the effects loaded lately in the settings */
+    EffectRack (InstrumentHost&, juce::PropertiesFile& settings);
     ~EffectRack();
 
     InstrumentHost& getHost() noexcept { return host; }
@@ -31,13 +32,19 @@ public:
     int addBus();
     void removeBus (int busId);
 
-    /** Lets the user choose a VST3 effect to add to the end of a bus's chain, from a file, and if
-        the file has several, from a menu by a component.
+    /** Lets the user choose a VST3 effect to add to the end of a bus's chain: one of those loaded
+        lately, from a box by a component, or with Browse…, from a file, and if the file has several,
+        from a menu by the component. The bus is named in the box.
     */
-    void chooseEffect (int busId, juce::Component& besideThis);
+    void chooseEffect (int busId, juce::Component& besideThis, const juce::String& busName);
 
-    /** Adds an effect to the end of a bus's chain, with the settings given. Returns an error, or
-        nothing if it loaded.
+    /** Lets the user choose a VST3 effect's file, to add to the end of a bus's chain, and if the
+        file has several, from a menu by a component.
+    */
+    void browseForEffect (int busId, juce::Component& besideThis);
+
+    /** Adds an effect to the end of a bus's chain, with the settings given, and puts it first in
+        the effects loaded lately. Returns an error, or nothing if it loaded.
     */
     juce::String addEffect (int busId, const juce::PluginDescription&, const juce::MemoryBlock& state = {}, bool bypassed = false);
 
@@ -67,6 +74,7 @@ private:
     void changed (bool byUser);
 
     InstrumentHost& host;
+    juce::PropertiesFile& settings;
     juce::AudioPluginFormatManager formatManager;
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File pluginFolder { "/Library/Audio/Plug-Ins/VST3" };

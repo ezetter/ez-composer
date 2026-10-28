@@ -140,9 +140,9 @@ EffectsPanel::BusCard::BusCard (EffectRack& rackToUse, int busIdToShow, int plac
         addAndMakeVisible (effects.add (std::make_unique<EffectBox> (rackToUse, busId, i)));
 
     addEffectButton.setButtonText (withEllipsis ("Add Effect"));
-    addEffectButton.setTooltip ("Load a VST3 effect at the end of this bus's chain");
+    addEffectButton.setTooltip ("Load a VST3 effect at the end of this bus's chain, from those loaded lately, or browse for another");
     addEffectButton.setWantsKeyboardFocus (false);
-    addEffectButton.onClick = [&rackToUse, id = busId, this] { rackToUse.chooseEffect (id, addEffectButton); };
+    addEffectButton.onClick = [&rackToUse, id = busId, this] { rackToUse.chooseEffect (id, addEffectButton, title.getText()); };
     addAndMakeVisible (addEffectButton);
 }
 

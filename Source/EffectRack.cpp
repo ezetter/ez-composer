@@ -1,5 +1,7 @@
 #include "EffectRack.h"
 
+#include "LoadPluginPanel.h"
+
 namespace
 {
     juce::MemoryBlock getState (juce::AudioPluginInstance& plugin)
@@ -10,8 +12,9 @@ namespace
     }
 }
 
-EffectRack::EffectRack (InstrumentHost& hostToUse)
-    : host (hostToUse)
+EffectRack::EffectRack (InstrumentHost& hostToUse, juce::PropertiesFile& settingsToUse)
+    : host (hostToUse),
+      settings (settingsToUse)
 {
     juce::addDefaultFormatsToManager (formatManager);
 }
@@ -45,7 +48,45 @@ void EffectRack::removeBus (int busId)
     changed (true);
 }
 
-void EffectRack::chooseEffect (int busId, juce::Component& besideThis)
+void EffectRack::chooseEffect (int busId, juce::Component& besideThis, const juce::String& busName)
+{
+    // The ones loaded lately, to add again, or Browse for another
+    auto panel = std::make_unique<LoadPluginPanel> (PluginKind::effect, "Add Effect to " + busName,
+                                                    "It goes at the end of " + busName + "'s chain.",
+                                                    recentPlugins::get (settings, PluginKind::effect));
+    auto* panelPointer = panel.get();
+    const auto close = [panelPointer]
+    {
+        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+    };
+
+    panel->onCancel = close;
+    panel->onRemove = [this, panelPointer] (const juce::PluginDescription& description)
+    {
+        recentPlugins::forget (settings, PluginKind::effect, description);
+        panelPointer->setPlugins (recentPlugins::get (settings, PluginKind::effect));
+    };
+    panel->onBrowse = [this, close, busId, safeButton = juce::Component::SafePointer (&besideThis)]
+    {
+        close();
+
+        if (safeButton != nullptr)
+            browseForEffect (busId, *safeButton);
+    };
+    panel->onLoad = [this, close, busId] (const juce::PluginDescription& description)
+    {
+        close();
+
+        if (const auto error = addEffect (busId, description); error.isNotEmpty())
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Couldn't load " + description.name, error);
+    };
+
+    auto* parent = besideThis.getTopLevelComponent();
+    juce::CallOutBox::launchAsynchronously (std::move (panel), parent->getLocalArea (&besideThis, besideThis.getLocalBounds()), parent);
+}
+
+void EffectRack::browseForEffect (int busId, juce::Component& besideThis)
 {
     fileChooser = std::make_unique<juce::FileChooser> ("Choose a VST3 effect", pluginFolder, "*.vst3");
 
@@ -123,6 +164,7 @@ juce::String EffectRack::addEffect (int busId, const juce::PluginDescription& de
     const auto index = host.getNumEffects (busId);
     host.insertEffect (busId, index, std::move (effect));
     host.setEffectBypassed (busId, index, bypassed);
+    recentPlugins::remember (settings, PluginKind::effect, description);
     changed (true);
     return {};
 }
@@ -305,6 +347,9 @@ juce::StringArray EffectRack::loadJSON (const juce::var& json)
                         const auto index = host.getNumEffects (busId);
                         host.insertEffect (busId, index, std::move (effect));
                         host.setEffectBypassed (busId, index, (bool) effectJSON.getProperty ("bypassed", false));
+
+                        // On the list to start with, after the ones chosen
+                        recentPlugins::remember (settings, PluginKind::effect, description, false);
                     }
                     else
                     {

@@ -544,7 +544,7 @@ private:
     MidiInputs midiInputs { audioDeviceManager, instrumentHost, settings };
     ProgressionLibrary savedProgressions { settings };
     RhythmLibrary savedRhythms { settings };
-    EffectRack effectRack { instrumentHost };
+    EffectRack effectRack { instrumentHost, settings };
 
     /** The MIDI inputs the MIDI menu showed, the last time it was opened */
     std::vector<MidiInputs::Device> midiMenuDevices;
