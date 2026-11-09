@@ -785,10 +785,13 @@ std::vector<Tone> getAlternateTones (Key key, const Chord& chord, Staff chordSta
         return tones;
     }
 
-    // The root placed inside the other staff (F4-E5 treble, A2-G3 bass), or the root and the
-    // octave above in that staff's low register (C4 and C5 up to B4 and B5 treble).
+    // The root in the lower half of the other staff (D4-C5 treble, F2-E3 bass), or its upper half
+    // (A4-G5 treble, C3-B3 bass), the seven notes around the middle line's either side, or the
+    // root and the octave above in that staff's low register (C4 and C5 up to B4 and B5 treble).
     const auto root = chord.root;
-    const auto low = alternate == AlternateStaff::root ? getBottomLineLetter (staff) + 1 : lowest;
+    const auto low = alternate == AlternateStaff::rootLow  ? getBottomLineLetter (staff) - 1
+                   : alternate == AlternateStaff::rootHigh ? getBottomLineLetter (staff) + 3
+                                                           : lowest;
     const auto index = low + mod (root.letter - low, 7);
 
     const auto toneAt = [&] (int step)

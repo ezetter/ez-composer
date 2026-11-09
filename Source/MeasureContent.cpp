@@ -469,7 +469,7 @@ namespace
     {
         const auto alternate = score.getAlternateStaff (part);
 
-        if ((alternate != music::AlternateStaff::root && alternate != music::AlternateStaff::octave) || measure + 1 >= score.getNumMeasures())
+        if ((! music::isRootAlone (alternate) && alternate != music::AlternateStaff::octave) || measure + 1 >= score.getNumMeasures())
             return false;
 
         const auto* next = score.getChord (part, measure + 1);

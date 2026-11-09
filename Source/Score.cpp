@@ -1609,7 +1609,8 @@ namespace
     // 19: block chords tied over to the same chord in the next measure
     // 20: suspended chords, sus2 and sus4
     // 21: block and rolled chords lasting two measures
-    constexpr int formatVersion = 21;
+    // 22: the alternate staff's Root split into Root low, with Root's value, and Root high
+    constexpr int formatVersion = 22;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -2217,7 +2218,7 @@ juce::Result Score::loadJSON (const juce::var& json)
 
         if (partJSON.hasProperty ("alternateStaff"))
         {
-            part.alternateStaff = (music::AlternateStaff) readInt (partJSON.getProperty ("alternateStaff", {}), 0, 4, 0);
+            part.alternateStaff = (music::AlternateStaff) readInt (partJSON.getProperty ("alternateStaff", {}), 0, (int) music::AlternateStaff::rootHigh, 0);
         }
         else
         {

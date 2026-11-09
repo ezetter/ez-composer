@@ -54,7 +54,13 @@ ScorePanel::ScorePanel (Score& scoreToEdit)
     timeSignatureBox.setTooltip ("How many beats each measure has. Notes past a shorter measure's end are kept, and come back if it grows.");
     timeSignatureBox.onChange = [this] { score.setBeatsPerMeasure (timeSignatureBox.getSelectedId()); };
 
-    alternateBox.addItemList ({ "None", "Root", "Octave", "Block chord", "Rolled chord" }, 1);
+    // In this order, by each one's value, plus 1
+    for (const auto& [name, alternate] : std::initializer_list<std::pair<const char*, music::AlternateStaff>> {
+             { "None", music::AlternateStaff::none }, { "Root low", music::AlternateStaff::rootLow }, { "Root high", music::AlternateStaff::rootHigh },
+             { "Octave", music::AlternateStaff::octave }, { "Block chord", music::AlternateStaff::blockChord },
+             { "Rolled chord", music::AlternateStaff::rolledChord } })
+        alternateBox.addItem (name, (int) alternate + 1);
+
     alternateBox.onChange = [this] { score.setAlternateStaff (part, (music::AlternateStaff) (alternateBox.getSelectedId() - 1)); };
 
     copyChordsButton.setWantsKeyboardFocus (false);
