@@ -219,14 +219,8 @@ namespace music
     std::vector<int> transposeNotes (const std::vector<KeyboardNote>&, Key from, Staff fromStaff, Key to, Staff toStaff);
 
     //==============================================================================
-    /** What the other staff of the grand staff shows under or over a chord. Root low and Root high
-        put the root in the lower or the upper half of the staff. The values are saved in scores:
-        Root low has Root's, from before it was split in two, and Root high comes after the others.
-    */
-    enum class AlternateStaff { none, rootLow, octave, blockChord, rolledChord, rootHigh };
-
-    /** Whether it's the root alone, low or high */
-    inline bool isRootAlone (AlternateStaff alternate) { return alternate == AlternateStaff::rootLow || alternate == AlternateStaff::rootHigh; }
+    /** What the other staff of the grand staff shows under or over a chord. */
+    enum class AlternateStaff { none, root, octave, blockChord, rolledChord };
 
     std::vector<Tone> getAlternateTones (Key, const Chord&, Staff chordStaff, AlternateStaff);
 

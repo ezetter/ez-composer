@@ -1609,8 +1609,9 @@ namespace
     // 19: block chords tied over to the same chord in the next measure
     // 20: suspended chords, sus2 and sus4
     // 21: block and rolled chords lasting two measures
-    // 22: the alternate staff's Root split into Root low, with Root's value, and Root high
-    constexpr int formatVersion = 22;
+    // 22: the alternate staff's Root split into Root low and Root high, 5, which now opens as Root
+    // 23: Root back on its own, placed by the chord's lowest note
+    constexpr int formatVersion = 23;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -2218,7 +2219,9 @@ juce::Result Score::loadJSON (const juce::var& json)
 
         if (partJSON.hasProperty ("alternateStaff"))
         {
-            part.alternateStaff = (music::AlternateStaff) readInt (partJSON.getProperty ("alternateStaff", {}), 0, (int) music::AlternateStaff::rootHigh, 0);
+            // 5 was Root high, in scores saved while Root was split into Root low and Root high.
+            const auto alternate = readInt (partJSON.getProperty ("alternateStaff", {}), 0, 5, 0);
+            part.alternateStaff = alternate == 5 ? music::AlternateStaff::root : (music::AlternateStaff) alternate;
         }
         else
         {

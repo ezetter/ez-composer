@@ -40,7 +40,6 @@ namespace
     // The bottom of each clef's range for chords, and the note on each staff's bottom line, as
     // letter indexes.
     int getLowestChordLetter (Staff staff) { return staff == Staff::treble ? 28 : 16; }
-    int getBottomLineLetter (Staff staff)  { return staff == Staff::treble ? 30 : 18; }
 
     /** A chord member: how many letters and semitones it is above the root. */
     struct Member
@@ -785,15 +784,33 @@ std::vector<Tone> getAlternateTones (Key key, const Chord& chord, Staff chordSta
         return tones;
     }
 
-    // The root in the lower half of the other staff, up to its middle line (C4-B4 treble, E2-D3
-    // bass), or its upper half, from the middle line up (B4-A5 treble, D3-C4 bass), or the root
-    // and the octave above in that staff's low register (C4 and C5 up to B4 and B5 treble).
     const auto root = chord.root;
-    const auto middleLine = getBottomLineLetter (staff) + 4;
-    const auto low = alternate == AlternateStaff::rootLow  ? middleLine - 6
-                   : alternate == AlternateStaff::rootHigh ? middleLine
-                                                           : lowest;
-    const auto index = low + mod (root.letter - low, 7);
+    const auto rootMidi = [&] (int octave) { return 12 * (octave + 1) + naturalPitchClasses[(size_t) root.letter] + root.alter; };
+
+    if (alternate == AlternateStaff::root)
+    {
+        // The root just past the chord's lowest note, toward the other staff: the nearest one below
+        // it on the bass staff, or above it on the treble staff, never the same note.
+        const auto lowestNote = chord.tones.front().midi;
+        auto octave = floorDivide (lowestNote, 12) - 1;
+
+        if (staff == Staff::bass)
+        {
+            while (rootMidi (octave) >= lowestNote) --octave;
+            while (rootMidi (octave + 1) < lowestNote) ++octave;
+        }
+        else
+        {
+            while (rootMidi (octave) <= lowestNote) ++octave;
+            while (rootMidi (octave - 1) > lowestNote) --octave;
+        }
+
+        tones.push_back (makeTone ({ rootMidi (octave), root }, keyAlterations));
+        return tones;
+    }
+
+    // The root and the octave above in the other staff's low register (C4 and C5 up to B4 and B5 treble)
+    const auto index = lowest + mod (root.letter - lowest, 7);
 
     const auto toneAt = [&] (int step)
     {
@@ -801,10 +818,7 @@ std::vector<Tone> getAlternateTones (Key key, const Chord& chord, Staff chordSta
     };
 
     tones.push_back (toneAt (index));
-
-    if (alternate == AlternateStaff::octave)
-        tones.push_back (toneAt (index + 7));
-
+    tones.push_back (toneAt (index + 7));
     return tones;
 }
 
