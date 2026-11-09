@@ -787,39 +787,32 @@ std::vector<Tone> getAlternateTones (Key key, const Chord& chord, Staff chordSta
     const auto root = chord.root;
     const auto rootMidi = [&] (int octave) { return 12 * (octave + 1) + naturalPitchClasses[(size_t) root.letter] + root.alter; };
 
-    if (alternate == AlternateStaff::root)
+    // The root just past the chord, toward the other staff: on the bass staff, the nearest one
+    // below the chord's lowest note, or on the treble staff, the nearest one above its highest,
+    // never the same note. An octave has the root an octave further from the chord too, below it
+    // on the bass staff, or above it on the treble staff.
+    const auto lowestNote = chord.tones.front().midi, highestNote = chord.tones.back().midi;
+    auto octave = floorDivide (lowestNote, 12) - 1;
+
+    if (staff == Staff::bass)
     {
-        // The root just past the chord, toward the other staff: on the bass staff, the nearest one
-        // below the chord's lowest note, or on the treble staff, the nearest one above its highest,
-        // never the same note.
-        const auto lowestNote = chord.tones.front().midi, highestNote = chord.tones.back().midi;
-        auto octave = floorDivide (lowestNote, 12) - 1;
-
-        if (staff == Staff::bass)
-        {
-            while (rootMidi (octave) >= lowestNote) --octave;
-            while (rootMidi (octave + 1) < lowestNote) ++octave;
-        }
-        else
-        {
-            while (rootMidi (octave) <= highestNote) ++octave;
-            while (rootMidi (octave - 1) > highestNote) --octave;
-        }
-
-        tones.push_back (makeTone ({ rootMidi (octave), root }, keyAlterations));
-        return tones;
+        while (rootMidi (octave) >= lowestNote) --octave;
+        while (rootMidi (octave + 1) < lowestNote) ++octave;
+    }
+    else
+    {
+        while (rootMidi (octave) <= highestNote) ++octave;
+        while (rootMidi (octave - 1) > highestNote) --octave;
     }
 
-    // The root and the octave above in the other staff's low register (C4 and C5 up to B4 and B5 treble)
-    const auto index = lowest + mod (root.letter - lowest, 7);
+    if (alternate == AlternateStaff::octave && staff == Staff::bass)
+        tones.push_back (makeTone ({ rootMidi (octave - 1), root }, keyAlterations));
 
-    const auto toneAt = [&] (int step)
-    {
-        return makeTone ({ 12 * (floorDivide (step, 7) + 1) + naturalPitchClasses[(size_t) root.letter] + root.alter, root }, keyAlterations);
-    };
+    tones.push_back (makeTone ({ rootMidi (octave), root }, keyAlterations));
 
-    tones.push_back (toneAt (index));
-    tones.push_back (toneAt (index + 7));
+    if (alternate == AlternateStaff::octave && staff == Staff::treble)
+        tones.push_back (makeTone ({ rootMidi (octave + 1), root }, keyAlterations));
+
     return tones;
 }
 
