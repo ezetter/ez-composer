@@ -1610,7 +1610,7 @@ namespace
     // 20: suspended chords, sus2 and sus4
     // 21: block and rolled chords lasting two measures
     // 22: the alternate staff's Root split into Root low and Root high, 5, which now opens as Root
-    // 23: Root back on its own, and Octave, placed just past the chord
+    // 23: Root back on its own, and Octave, Block chord and Rolled chord, placed just past the chord
     constexpr int formatVersion = 23;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)

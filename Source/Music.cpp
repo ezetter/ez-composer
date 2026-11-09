@@ -768,15 +768,22 @@ std::vector<Tone> getAlternateTones (Key key, const Chord& chord, Staff chordSta
         return {};
 
     const auto staff = getOtherStaff (chordStaff);
-    const auto lowest = getLowestChordLetter (staff);
     const auto keyAlterations = getKeyAlterations (key);
     std::vector<Tone> tones;
 
+    const auto lowestNote = chord.tones.front().midi, highestNote = chord.tones.back().midi;
+
     if (alternate == AlternateStaff::blockChord || alternate == AlternateStaff::rolledChord)
     {
-        // The whole chord, moved by octaves so its lowest note sits in the other staff's range.
-        const auto& bass = chord.tones.front();
-        const auto octaves = (lowest + mod (bass.pitch.step - lowest, 7) - bass.pitch.step) / 7;
+        // The whole chord, moved by octaves to just past itself, toward the other staff: on the
+        // bass staff, as high as it goes with its highest note below the chord's lowest, or on the
+        // treble staff, as low as it goes with its lowest note above the chord's highest.
+        auto octaves = 0;
+
+        if (staff == Staff::bass)
+            while (highestNote + 12 * octaves >= lowestNote) --octaves;
+        else
+            while (lowestNote + 12 * octaves <= highestNote) ++octaves;
 
         for (const auto& tone : chord.tones)
             tones.push_back (makeTone ({ tone.midi + 12 * octaves, tone.pitch.getSpelling() }, keyAlterations));
@@ -791,7 +798,6 @@ std::vector<Tone> getAlternateTones (Key key, const Chord& chord, Staff chordSta
     // below the chord's lowest note, or on the treble staff, the nearest one above its highest,
     // never the same note. An octave has the root an octave further from the chord too, below it
     // on the bass staff, or above it on the treble staff.
-    const auto lowestNote = chord.tones.front().midi, highestNote = chord.tones.back().midi;
     auto octave = floorDivide (lowestNote, 12) - 1;
 
     if (staff == Staff::bass)
