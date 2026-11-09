@@ -789,9 +789,10 @@ std::vector<Tone> getAlternateTones (Key key, const Chord& chord, Staff chordSta
 
     if (alternate == AlternateStaff::root)
     {
-        // The root just past the chord's lowest note, toward the other staff: the nearest one below
-        // it on the bass staff, or above it on the treble staff, never the same note.
-        const auto lowestNote = chord.tones.front().midi;
+        // The root just past the chord, toward the other staff: on the bass staff, the nearest one
+        // below the chord's lowest note, or on the treble staff, the nearest one above its highest,
+        // never the same note.
+        const auto lowestNote = chord.tones.front().midi, highestNote = chord.tones.back().midi;
         auto octave = floorDivide (lowestNote, 12) - 1;
 
         if (staff == Staff::bass)
@@ -801,8 +802,8 @@ std::vector<Tone> getAlternateTones (Key key, const Chord& chord, Staff chordSta
         }
         else
         {
-            while (rootMidi (octave) <= lowestNote) ++octave;
-            while (rootMidi (octave - 1) > lowestNote) --octave;
+            while (rootMidi (octave) <= highestNote) ++octave;
+            while (rootMidi (octave - 1) > highestNote) --octave;
         }
 
         tones.push_back (makeTone ({ rootMidi (octave), root }, keyAlterations));
