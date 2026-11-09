@@ -764,6 +764,11 @@ private:
     */
     int putChord (int part, int firstMeasure, const MeasureChord&, int numMeasures = 1);
 
+    /** How many measures setChords() puts a chord in, as the index'th of them: so many per chord,
+        or its rhythm's measures if that's more, for each of the measures it was tied over.
+    */
+    int getChordMeasures (const MeasureChord&, int measuresPerChord, const std::vector<int>& chordMeasures, size_t index) const;
+
     /** How many measures a chord takes in its rhythm, or one without one */
     int getRhythmMeasureCount (const MeasureChord&) const;
     void tidyChord (Measure&, bool reshuffleRandomOrder = false);

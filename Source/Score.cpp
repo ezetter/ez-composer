@@ -1109,15 +1109,6 @@ void Score::setChord (int part, int measure, std::optional<MeasureChord> chord)
     sendSynchronousChangeMessage();
 }
 
-namespace
-{
-    /** How many measures a chord goes in, before its rhythm: so many for each it was tied over */
-    int getChordMeasures (int measuresPerChord, const std::vector<int>& chordMeasures, size_t index)
-    {
-        return measuresPerChord * (index < chordMeasures.size() ? juce::jmax (1, chordMeasures[index]) : 1);
-    }
-}
-
 void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChord>& chords, int measuresPerChord,
                        const std::vector<int>& chordMeasures)
 {
@@ -1127,7 +1118,7 @@ void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChor
     auto measure = firstMeasure;
 
     for (size_t i = 0; i < chords.size(); ++i)
-        measure += putChord (part, measure, chords[i], getChordMeasures (measuresPerChord, chordMeasures, i));
+        measure += putChord (part, measure, chords[i], getChordMeasures (chords[i], measuresPerChord, chordMeasures, i));
 
     pruneTies();
     sendSynchronousChangeMessage();
@@ -1138,9 +1129,17 @@ int Score::getChordsLength (const std::vector<MeasureChord>& chords, int measure
     auto length = 0;
 
     for (size_t i = 0; i < chords.size(); ++i)
-        length += juce::jmax (getChordMeasures (measuresPerChord, chordMeasures, i), getRhythmMeasureCount (chords[i]), chords[i].style.measures);
+        length += juce::jmax (getChordMeasures (chords[i], measuresPerChord, chordMeasures, i), chords[i].style.measures);
 
     return length;
+}
+
+int Score::getChordMeasures (const MeasureChord& chord, int measuresPerChord, const std::vector<int>& chordMeasures, size_t index) const
+{
+    // So many for each measure it was tied over, and with a rhythm, at least the rhythm, so the
+    // rhythm goes again for each of them.
+    const auto tiedOver = index < chordMeasures.size() ? juce::jmax (1, chordMeasures[index]) : 1;
+    return tiedOver * juce::jmax (measuresPerChord, getRhythmMeasureCount (chord));
 }
 
 int Score::getRhythmMeasureCount (const MeasureChord& chord) const
