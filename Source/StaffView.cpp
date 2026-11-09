@@ -908,7 +908,8 @@ void StaffView::moveChordNote (const ChordNote& chordNote, int midiNote)
 
 std::optional<Note> StaffView::getMoveTarget (const Note& note, juce::Point<float> point) const
 {
-    auto target = getNoteAt (point, note.length);
+    // Dragged, a note stays on the key's notes.
+    auto target = getNoteAt (point, note.length, false);
 
     if (! target.has_value() || score.chordUsesStaff (part, target->measure, target->staff))
         return {};
@@ -1477,8 +1478,10 @@ int StaffView::getFinalBarlineX() const
 
 std::optional<Note> StaffView::getNoteAt (juce::Point<float> point) const
 {
-    // Adding from the scale, the notes going on are the ones of its length.
-    auto note = getNoteAt (point, scalePlacement.has_value() ? (double) scalePlacement->length / Score::slotsPerBeat : noteLength);
+    // Adding from the scale, the notes going on are the ones of its length, starting on one of
+    // the key's.
+    auto note = scalePlacement.has_value() ? getNoteAt (point, (double) scalePlacement->length / Score::slotsPerBeat, false)
+                                           : getNoteAt (point, noteLength);
 
     if (note.has_value())
     {
@@ -1489,7 +1492,7 @@ std::optional<Note> StaffView::getNoteAt (juce::Point<float> point) const
     return note;
 }
 
-std::optional<Note> StaffView::getNoteAt (juce::Point<float> point, double length) const
+std::optional<Note> StaffView::getNoteAt (juce::Point<float> point, double length, bool chromatic) const
 {
     const auto measure = findMeasure (point.x);
 
@@ -1527,7 +1530,7 @@ std::optional<Note> StaffView::getNoteAt (juce::Point<float> point, double lengt
     const music::Pitch upper { lowerStep + 1, getAlterAt (staff, measure, beat, lowerStep + 1) };
 
     // A whole tone apart, the middle half of the way is the semitone between.
-    if (upper.getMidiNoteNumber() - lower.getMidiNoteNumber() != 2 || fraction < 0.25f || fraction >= 0.75f)
+    if (! chromatic || upper.getMidiNoteNumber() - lower.getMidiNoteNumber() != 2 || fraction < 0.25f || fraction >= 0.75f)
         return Note { staff, measure, beat, fraction < 0.5f ? lower : upper, part, length };
 
     const music::Pitch raised { lower.step, lower.alter + 1 }, lowered { upper.step, upper.alter - 1 };

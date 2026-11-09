@@ -574,9 +574,10 @@ private:
         already. Between two lines or spaces a whole tone apart, it's the semitone between them,
         for the middle half of the way from one to the other: a natural, if one of them has a
         sharp or flat, or else a sharp in a sharp key, a flat in a flat key, and in a key with
-        neither, C♯, E♭, F♯, G♯ or B♭.
+        neither, C♯, E♭, F♯, G♯ or B♭. Unless chromatic, e.g. dragging a note or starting the
+        scale, it's only ever the nearer line or space's note.
     */
-    std::optional<Note> getNoteAt (juce::Point<float>, double gridLength) const;
+    std::optional<Note> getNoteAt (juce::Point<float>, double gridLength, bool chromatic = true) const;
 
     /** The sharp or flat a line or space's note has at a point, as getNoteAt() gives it: a
         note's written there already, or else the key's.
