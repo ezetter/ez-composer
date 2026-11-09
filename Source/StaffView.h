@@ -569,8 +569,24 @@ private:
 
     /** The note clicking at this point would add, on a grid of the nearest step of a length
         without its dot, though notes already there can be clicked wherever they start.
+
+        Its pitch is the line or space's, with the key's sharp or flat, or a note's written there
+        already. Between two lines or spaces a whole tone apart, it's the semitone between them,
+        for the middle half of the way from one to the other: a natural, if one of them has a
+        sharp or flat, or else a sharp in a sharp key, a flat in a flat key, and in a key with
+        neither, C♯, E♭, F♯, G♯ or B♭.
     */
     std::optional<Note> getNoteAt (juce::Point<float>, double gridLength) const;
+
+    /** The sharp or flat a line or space's note has at a point, as getNoteAt() gives it: a
+        note's written there already, or else the key's.
+    */
+    int getAlterAt (Staff, int measure, double beat, int step) const;
+
+    /** The sharp or flat in force at a point on a line or space, which a note there needn't
+        show: the last one before it in the measure, or else the key's.
+    */
+    int getAlterInForce (Staff, int measure, double beat, int step) const;
     void drawCentred (juce::Graphics&, juce::juce_wchar glyph, float centreX, float y) const;
 
     /** The note already written where this note would go, if any. */

@@ -1499,10 +1499,12 @@ std::optional<Note> StaffView::getNoteAt (juce::Point<float> point, double lengt
     const auto staffDivide = getStaffTop (Staff::treble) + (staffHeight + staffGap / 2.0f) * staffSpace;
     const auto staff = point.y < staffDivide ? Staff::treble : Staff::bass;
 
-    const auto position = juce::roundToInt ((getY (staff, 0) - point.y) / (staffSpace / 2.0f));
-    const auto clampedPosition = staff == Staff::treble
-                                     ? juce::jlimit (lowestTreblePosition, highestTreblePosition, position)
-                                     : juce::jlimit (lowestBassPosition, highestBassPosition, position);
+    // How far up the staff, in lines and spaces from its bottom line, and the line or space below
+    const auto height = (getY (staff, 0) - point.y) / (staffSpace / 2.0f);
+    const auto lowestPosition = staff == Staff::treble ? lowestTreblePosition : lowestBassPosition;
+    const auto highestPosition = staff == Staff::treble ? highestTreblePosition : highestBassPosition;
+    const auto below = juce::jlimit (lowestPosition, highestPosition, (int) std::floor (height));
+    const auto fraction = juce::jlimit (0.0f, 1.0f, height - (float) below);
 
     // The nearest beat, or for a shorter note, the nearest step of its length without its dot: an
     // eighth, 16th or 32nd. Notes already there can be clicked wherever they start.
@@ -1515,11 +1517,61 @@ std::optional<Note> StaffView::getNoteAt (juce::Point<float> point, double lengt
         return ! score.getNotes (part, staff, measure, beat).empty();
     });
 
-    // The note takes its sharp or flat from the key signature.
-    const auto step = getBottomLineStep (staff) + clampedPosition;
-    const auto alter = music::getKeyAlterations (score.getKey())[(size_t) music::mod (step, 7)];
+    const auto beat = (double) slot / Score::slotsPerBeat;
+    const auto lowerStep = getBottomLineStep (staff) + below;
+    const music::Pitch lower { lowerStep, getAlterAt (staff, measure, beat, lowerStep) };
 
-    return Note { staff, measure, (double) slot / Score::slotsPerBeat, { step, alter }, part, length };
+    if (below >= highestPosition)
+        return Note { staff, measure, beat, lower, part, length };
+
+    const music::Pitch upper { lowerStep + 1, getAlterAt (staff, measure, beat, lowerStep + 1) };
+
+    // A whole tone apart, the middle half of the way is the semitone between.
+    if (upper.getMidiNoteNumber() - lower.getMidiNoteNumber() != 2 || fraction < 0.25f || fraction >= 0.75f)
+        return Note { staff, measure, beat, fraction < 0.5f ? lower : upper, part, length };
+
+    const music::Pitch raised { lower.step, lower.alter + 1 }, lowered { upper.step, upper.alter - 1 };
+    const auto keyAlterations = music::getKeyAlterations (score.getKey());
+    const auto sharps = std::count_if (keyAlterations.begin(), keyAlterations.end(), [] (int a) { return a > 0; });
+    const auto flats = std::count_if (keyAlterations.begin(), keyAlterations.end(), [] (int a) { return a < 0; });
+    const auto pitchClass = music::mod (raised.getMidiNoteNumber(), 12);
+
+    // A natural, if there's one; never a double sharp or flat; then as the key goes
+    const auto between = raised.alter == 0                                      ? raised
+                       : lowered.alter == 0                                     ? lowered
+                       : std::abs (raised.alter) > 1                            ? lowered
+                       : std::abs (lowered.alter) > 1                           ? raised
+                       : sharps > 0                                             ? raised
+                       : flats > 0                                              ? lowered
+                       : pitchClass == 3 || pitchClass == 10                    ? lowered
+                                                                                : raised;
+
+    return Note { staff, measure, beat, between, part, length };
+}
+
+int StaffView::getAlterAt (Staff staff, int measure, double beat, int step) const
+{
+    if (const auto written = findNoteUnder (Note { staff, measure, beat, { step, 0 }, part, 1.0 }))
+        return written->pitch.alter;
+
+    return music::getKeyAlterations (score.getKey())[(size_t) music::mod (step, 7)];
+}
+
+int StaffView::getAlterInForce (Staff staff, int measure, double beat, int step) const
+{
+    auto alter = music::getKeyAlterations (score.getKey())[(size_t) music::mod (step, 7)];
+
+    if (! juce::isPositiveAndBelow (measure, (int) measureLayouts.size()))
+        return alter;
+
+    // The events are in order, so the last before the point is what's in force.
+    for (const auto& event : measureLayouts[(size_t) measure].content.staves[(size_t) staff].events)
+        if (event.onset < beat)
+            for (const auto& tone : event.tones)
+                if (tone.pitch.step == step)
+                    alter = tone.pitch.alter;
+
+    return alter;
 }
 
 std::optional<std::pair<int, double>> StaffView::getDynamicPointAt (juce::Point<float> point) const
@@ -2123,8 +2175,10 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
     {
         std::optional<int> highlightedPosition;
 
+        // Only a note a click would take out: one with another sharp or flat would be changed to the hovered one's.
         if (hoverNote.has_value() && ! hoverHintHidden && hoverNote->staff == staff && hoverNote->measure == measure)
-            highlightedPosition = hoverNote->pitch.step - getBottomLineStep (staff);
+            if (const auto under = findNoteUnder (*hoverNote); ! under.has_value() || under->pitch.alter == hoverNote->pitch.alter)
+                highlightedPosition = hoverNote->pitch.step - getBottomLineStep (staff);
 
         for (size_t i = 0; i < notes.size(); ++i)
         {
@@ -2518,8 +2572,8 @@ void StaffView::drawHoverNote (juce::Graphics& g) const
         || hoverNote->measure >= score.getNumMeasures() || hoverNote->beat >= score.getBeatsPerMeasure())
         return;
 
-    // Over a note, the note itself is highlighted instead.
-    if (findNoteUnder (*hoverNote).has_value())
+    // Over a note, the note itself is highlighted instead, unless the click would change its sharp or flat.
+    if (const auto under = findNoteUnder (*hoverNote); under.has_value() && under->pitch.alter == hoverNote->pitch.alter)
         return;
 
     drawGhostNote (g, *hoverNote);
@@ -2540,6 +2594,14 @@ void StaffView::drawGhostNote (juce::Graphics& g, const Note& note) const
     g.setColour (hoverColour);
     drawLedgerLines (g, note.staff, { position }, { left }, width);
     glyphs.draw (g, notehead, { left, getY (note.staff, position) });
+
+    // Its sharp, flat or natural, if it's not the one in force there
+    if (note.pitch.alter != getAlterInForce (note.staff, note.measure, note.beat, note.pitch.step))
+    {
+        const auto glyph = getAccidentalGlyph (note.pitch.alter);
+        const auto bounds = glyphs.getPath (glyph).getBounds();
+        glyphs.draw (g, glyph, { left - 0.2f * staffSpace - bounds.getRight(), getY (note.staff, position) });
+    }
 
     // A dotted note has its dot in a space.
     if (isDotted (duration))
@@ -3590,10 +3652,34 @@ void StaffView::clickNote (const Note& note)
             score.toggleChordNote (part, note.measure, existing ? getChordToneOf (note.measure, clicked.midi) : clicked.midi, chord->style);
         else
             score.toggleAlternateNote (part, note.measure, clicked);
+
+        // Clicked with another sharp or flat, the note's changed to it: taken out, and the new one put in.
+        if (existing.has_value() && existing->pitch.alter != note.pitch.alter)
+        {
+            const music::KeyboardNote changed { note.pitch.getMidiNoteNumber(), note.pitch.getSpelling() };
+
+            if (note.staff == chord->style.staff)
+                score.toggleChordNote (part, note.measure, changed.midi, chord->style);
+            else
+                score.toggleAlternateNote (part, note.measure, changed);
+        }
     }
-    // Clicking a note takes it out, whatever its sharp or flat; clicking anywhere else adds one.
+    // Clicking a note takes it out, or with another sharp or flat, changes it to that one, keeping
+    // its length; clicking anywhere else adds one.
     else if (score.hasNoteAt (part, note.staff, note.measure, note.beat, note.pitch.step))
+    {
+        const auto& written = score.getNotes (part, note.staff, note.measure, note.beat);
+        const auto sameStep = std::find_if (written.begin(), written.end(), [&] (const music::Pitch& p) { return p.step == note.pitch.step; });
+        const auto changed = sameStep != written.end() && sameStep->alter != note.pitch.alter;
+        auto replacement = note;
+        replacement.length = score.getNoteLength (part, note.staff, note.measure, note.beat);
+        replacement.staccato = score.isStaccato (part, note.staff, note.measure, note.beat);
+
         score.removeNotesAt (part, note.staff, note.measure, note.beat, note.pitch.step);
+
+        if (changed)
+            score.addNote (replacement);
+    }
     else
         score.addNote (note);
 
