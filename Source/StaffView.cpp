@@ -1478,10 +1478,10 @@ int StaffView::getFinalBarlineX() const
 
 std::optional<Note> StaffView::getNoteAt (juce::Point<float> point) const
 {
-    // Adding from the scale, the notes going on are the ones of its length, starting on one of
-    // the key's.
-    auto note = scalePlacement.has_value() ? getNoteAt (point, (double) scalePlacement->length / Score::slotsPerBeat, false)
-                                           : getNoteAt (point, noteLength);
+    // Adding from the scale, the notes going on are the ones of its length. Placing the scale or
+    // a rhythm, they start on one of the key's notes.
+    auto note = getNoteAt (point, scalePlacement.has_value() ? (double) scalePlacement->length / Score::slotsPerBeat : noteLength,
+                           ! isPlacingNotes());
 
     if (note.has_value())
     {
