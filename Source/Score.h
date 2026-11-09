@@ -572,12 +572,14 @@ public:
     /** Sets a part's chords one after another, from one measure on, as setChord() does, each in
         so many measures, or as many as its rhythm takes, if that's more, the rhythm starting again
         in the measures after it takes, adding measures at the end, in every part, for any that
-        don't fit.
+        don't fit. A chord's number in chordMeasures, if there is one, multiplies its so many, as
+        for a chord saved tied over that many measures, which is tied over all of them if it can be.
     */
-    void setChords (int part, int firstMeasure, const std::vector<MeasureChord>&, int measuresPerChord = 1);
+    void setChords (int part, int firstMeasure, const std::vector<MeasureChord>&, int measuresPerChord = 1,
+                    const std::vector<int>& chordMeasures = {});
 
     /** How many measures chords take, one after another, as setChords() writes them */
-    int getChordsLength (const std::vector<MeasureChord>&, int measuresPerChord = 1) const;
+    int getChordsLength (const std::vector<MeasureChord>&, int measuresPerChord = 1, const std::vector<int>& chordMeasures = {}) const;
 
     /** Sets the chord that starts in a measure, as the chord window does: with a rhythm that
         takes more than one measure, in as many, one after another, adding measures at the end,

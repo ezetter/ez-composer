@@ -1287,19 +1287,20 @@ void MainComponent::applyProgression (const SavedProgression& progression, const
     const auto part = activePart;
     const auto first = getPlaybackMeasure();
     const auto chords = progression.createChords (score.getKey(), style);
-    const auto count = score.getChordsLength (chords, measuresPerChord);       // in measures
+    const auto chordMeasures = progression.getChordMeasures();                  // those each was tied over
+    const auto count = score.getChordsLength (chords, measuresPerChord, chordMeasures);       // in measures
 
     if (chords.empty())
         return;
 
-    const auto write = [safeThis = juce::Component::SafePointer (this), part, first, chords, measuresPerChord]
+    const auto write = [safeThis = juce::Component::SafePointer (this), part, first, chords, measuresPerChord, chordMeasures]
     {
         if (safeThis == nullptr || ! juce::isPositiveAndBelow (part, safeThis->score.getNumParts()))
             return;
 
         // The chord window's measure may be among them.
         safeThis->closeChordEditor();
-        safeThis->score.setChords (part, juce::jmin (first, safeThis->score.getNumMeasures()), chords, measuresPerChord);
+        safeThis->score.setChords (part, juce::jmin (first, safeThis->score.getNumMeasures()), chords, measuresPerChord, chordMeasures);
         safeThis->scrollToMeasure (first);
     };
 

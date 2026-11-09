@@ -1109,26 +1109,36 @@ void Score::setChord (int part, int measure, std::optional<MeasureChord> chord)
     sendSynchronousChangeMessage();
 }
 
-void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChord>& chords, int measuresPerChord)
+namespace
+{
+    /** How many measures a chord goes in, before its rhythm: so many for each it was tied over */
+    int getChordMeasures (int measuresPerChord, const std::vector<int>& chordMeasures, size_t index)
+    {
+        return measuresPerChord * (index < chordMeasures.size() ? juce::jmax (1, chordMeasures[index]) : 1);
+    }
+}
+
+void Score::setChords (int part, int firstMeasure, const std::vector<MeasureChord>& chords, int measuresPerChord,
+                       const std::vector<int>& chordMeasures)
 {
     if (firstMeasure < 0 || chords.empty())
         return;
 
     auto measure = firstMeasure;
 
-    for (const auto& chord : chords)
-        measure += putChord (part, measure, chord, measuresPerChord);
+    for (size_t i = 0; i < chords.size(); ++i)
+        measure += putChord (part, measure, chords[i], getChordMeasures (measuresPerChord, chordMeasures, i));
 
     pruneTies();
     sendSynchronousChangeMessage();
 }
 
-int Score::getChordsLength (const std::vector<MeasureChord>& chords, int measuresPerChord) const
+int Score::getChordsLength (const std::vector<MeasureChord>& chords, int measuresPerChord, const std::vector<int>& chordMeasures) const
 {
     auto length = 0;
 
-    for (const auto& chord : chords)
-        length += juce::jmax (measuresPerChord, getRhythmMeasureCount (chord));
+    for (size_t i = 0; i < chords.size(); ++i)
+        length += juce::jmax (getChordMeasures (measuresPerChord, chordMeasures, i), getRhythmMeasureCount (chords[i]), chords[i].style.measures);
 
     return length;
 }

@@ -78,10 +78,25 @@ std::vector<MeasureChord> SavedProgression::createChords (music::Key newKey, con
             measureChord.spec = chord.spec;
         }
 
+        // A block chord left to its type is tied over its measures as it is, but a rolled one is
+        // only held over two measures with Two measures.
+        if (chord.measures == 2 && style.type == music::ChordType::rolled && ! style.noteLength.has_value() && ! style.rhythm.has_value())
+            measureChord.style.measures = 2;
+
         created.push_back (measureChord);
     }
 
     return created;
+}
+
+std::vector<int> SavedProgression::getChordMeasures() const
+{
+    std::vector<int> measures;
+
+    for (const auto& chord : chords)
+        measures.push_back (chord.measures);
+
+    return measures;
 }
 
 juce::String SavedProgression::tidyName (const juce::String& name)
@@ -113,6 +128,9 @@ juce::var SavedProgression::toJSON() const
         if (chord.spec.suspension != music::Suspension::none)
             chordObject->setProperty ("suspension", (int) chord.spec.suspension);
         chordObject->setProperty ("staff", chord.staff == Staff::treble ? "treble" : "bass");
+
+        if (chord.measures > 1)
+            chordObject->setProperty ("measures", chord.measures);
 
         if (chord.keyboardNotes.has_value())
         {
@@ -159,6 +177,7 @@ std::optional<SavedProgression> SavedProgression::fromJSON (const juce::var& jso
         chord.spec.suspension = (music::Suspension) readInt (c.getProperty ("suspension", {}), 0, 2, 0);
         music::tidySuspension (chord.spec);
         chord.staff = c.getProperty ("staff", {}).toString() == "bass" ? Staff::bass : Staff::treble;
+        chord.measures = readInt (c.getProperty ("measures", {}), 1, maxChordMeasures, 1);
 
         // The combinations the chord panel allows: an added note suits the chord's quality and
         // can't go with + / °, and only 7th chords have a 3rd inversion.
@@ -212,8 +231,19 @@ SavedProgression getProgression (const Score& score, int part)
     progression.key = score.getKey();
 
     for (int measure = 0; measure < score.getNumMeasures(); ++measure)
+    {
         if (const auto* chord = score.getChord (part, measure); chord != nullptr && chord->hasNotes())
-            progression.chords.push_back ({ chord->spec, chord->keyboardNotes, chord->style.staff });
+        {
+            // A chord tied over several measures is one chord, saved once with how many it takes.
+            auto measures = 1;
+
+            while (measures < SavedProgression::maxChordMeasures && score.isChordTiedOver (part, measure + measures - 1))
+                ++measures;
+
+            progression.chords.push_back ({ chord->spec, chord->keyboardNotes, chord->style.staff, measures });
+            measure += measures - 1;
+        }
+    }
 
     progression.name = progression.getNumerals();
     return progression;

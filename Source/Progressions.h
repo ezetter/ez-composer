@@ -23,10 +23,14 @@ struct SavedProgression
         std::optional<std::vector<music::KeyboardNote>> keyboardNotes;
         Staff staff = Staff::treble;
 
+        /** How many measures it was tied over, one after another, as one chord */
+        int measures = 1;
+
         bool operator== (const Chord&) const = default;
     };
 
     static constexpr int maxNameLength = 80;
+    static constexpr int maxChordMeasures = 64;     // the most measures a chord is saved tied over
     static constexpr const char* settingsKey = "savedProgressions";
 
     juce::String name;
@@ -40,8 +44,12 @@ struct SavedProgression
 
     /** The chords, in a key, written in a style. A spec's chord keeps its numeral; notes set on
         the piano move with the key's tonic, and go to the staff, as far into its range.
+        A rolled chord that was tied over two measures lasts Two measures.
     */
     std::vector<MeasureChord> createChords (music::Key, const ChordStyle&) const;
+
+    /** How many measures each chord was tied over, as Score::setChords() takes them */
+    std::vector<int> getChordMeasures() const;
 
     /** A name as it's kept: on one line, without spaces at either end, and no longer than the longest. */
     static juce::String tidyName (const juce::String&);
