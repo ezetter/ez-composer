@@ -1781,15 +1781,24 @@ int Rhythm::getLength() const noexcept
 
 juce::String Rhythm::describe() const
 {
-    const auto count = [] (size_t n) { return juce::String ((int) n) + (n == 1 ? " note" : " notes"); };
+    const auto count = [] (int n) { return juce::String (n) + (n == 1 ? " note" : " notes"); };
+    const auto numNotes = [] (const std::vector<Hit>& hits)
+    {
+        auto n = 0;
+
+        for (const auto& hit : hits)
+            n += hit.getNumNotes();
+
+        return n;
+    };
     const auto measures = juce::String (numMeasures) + (numMeasures == 1 ? " measure" : " measures") + " of " + juce::String (beatsPerMeasure) + "/4";
     const auto& treble = staves[(size_t) music::Staff::treble];
     const auto& bass = staves[(size_t) music::Staff::bass];
 
     if (! treble.empty() && ! bass.empty())
-        return measures + ": " + count (treble.size()) + " on the treble staff, " + juce::String ((int) bass.size()) + " on the bass";
+        return measures + ": " + count (numNotes (treble)) + " on the treble staff, " + juce::String (numNotes (bass)) + " on the bass";
 
-    return measures + ": " + count (treble.empty() ? bass.size() : treble.size()) + " on one staff";
+    return measures + ": " + count (numNotes (treble.empty() ? bass : treble)) + " on one staff";
 }
 
 juce::var Rhythm::toJSON() const
@@ -1803,8 +1812,10 @@ juce::var Rhythm::toJSON() const
     {
         juce::Array<juce::var> hits;
 
+        // A triplet has its notes' length after the rest.
         for (const auto& hit : staves[(size_t) staff])
-            hits.add (juce::Array<juce::var> { hit.onset, hit.length, hit.staccato, hit.tiedToNext });
+            hits.add (hit.isTriplet() ? juce::Array<juce::var> { hit.onset, hit.length, hit.staccato, false, hit.tripletNoteLength }
+                                      : juce::Array<juce::var> { hit.onset, hit.length, hit.staccato, hit.tiedToNext });
 
         object->setProperty (staff == music::Staff::treble ? "treble" : "bass", hits);
     }
@@ -1831,8 +1842,20 @@ std::optional<Rhythm> Rhythm::fromJSON (const juce::var& json)
         {
             for (const auto& item : *list)
             {
-                const Hit hit { readInt (listItem (item, 0), 0, rhythm.getLength() - 1, -1), readInt (listItem (item, 1), 1, Score::maxSlotsPerMeasure, -1),
-                                (bool) listItem (item, 2), (bool) listItem (item, 3) };
+                Hit hit { readInt (listItem (item, 0), 0, rhythm.getLength() - 1, -1), readInt (listItem (item, 1), 1, Score::maxSlotsPerMeasure, -1),
+                          (bool) listItem (item, 2), (bool) listItem (item, 3), readInt (listItem (item, 4), 0, Score::maxSlotsPerMeasure, 0) };
+
+                // A triplet's notes are a length a triplet's can be, half as long as it, and aren't tied.
+                if (hit.isTriplet())
+                {
+                    const auto allowed = std::any_of (Score::tripletNoteLengths.begin(), Score::tripletNoteLengths.end(),
+                                                      [&] (double beats) { return (int) std::lround (beats * Score::slotsPerBeat) == hit.tripletNoteLength; });
+
+                    if (! allowed || hit.length != 2 * hit.tripletNoteLength)
+                        continue;
+
+                    hit.tiedToNext = false;
+                }
 
                 if (hit.onset >= 0 && hit.length > 0 && hit.onset + hit.length <= rhythm.getLength()
                     && (hits.empty() || hits.back().onset + hits.back().length <= hit.onset))
@@ -1870,6 +1893,18 @@ std::vector<RhythmNote> layOutRhythm (const std::vector<Rhythm::Hit>& hits, int 
 
     for (const auto& hit : hits)
     {
+        // A triplet's three notes, each afresh, if it's all in the measure
+        if (hit.isTriplet())
+        {
+            previous = &hit;
+
+            for (int i = 0; i < Triplet::numNotes; ++i)
+                if (++attack; hit.onset >= from && hit.onset + hit.length <= to)
+                    notes.push_back ({ hit.onset - from, hit.length, hit.staccato, false, attack, hit.tripletNoteLength, i });
+
+            continue;
+        }
+
         if (startsAfresh (previous, hit))
             ++attack;
 
@@ -1900,7 +1935,7 @@ int countRhythmAttacks (const std::vector<Rhythm::Hit>& hits)
 
     for (const auto& hit : hits)
     {
-        attacks += startsAfresh (previous, hit) ? 1 : 0;
+        attacks += hit.isTriplet() ? Triplet::numNotes : startsAfresh (previous, hit) ? 1 : 0;
         previous = &hit;
     }
 

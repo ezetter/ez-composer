@@ -110,13 +110,21 @@ struct PedalSpan
 */
 struct Rhythm
 {
-    /** A note, or notes starting together, in 32nds from the rhythm's start */
+    /** A note, or notes starting together, in 32nds from the rhythm's start, or a triplet: three
+        notes, each a third of its length, never tied.
+    */
     struct Hit
     {
         int onset = 0;
         int length = 8;
         bool staccato = false;
         bool tiedToNext = false;
+        int tripletNoteLength = 0;      // for a triplet, its notes' written length, in 32nds: half its length
+
+        bool isTriplet() const noexcept { return tripletNoteLength > 0; }
+
+        /** How many notes it is: three for a triplet */
+        int getNumNotes() const noexcept { return isTriplet() ? Triplet::numNotes : 1; }
 
         bool operator== (const Hit&) const = default;
     };
@@ -160,6 +168,10 @@ struct RhythmNote
     bool staccato = false;
     bool tiedToNext = false;
     int attack = 0;         // which of the notes that start afresh it is, from the rhythm's first: notes tied on from it are the same one
+    int tripletNoteLength = 0;  // for one of a triplet's notes, their written length in 32nds; its onset and length are the triplet's
+    int tripletIndex = 0;       // and which of its three it is
+
+    bool isTriplet() const noexcept { return tripletNoteLength > 0; }
 
     bool operator== (const RhythmNote&) const = default;
 };

@@ -557,6 +557,9 @@ void StaffView::placeRhythm (const Note& start)
     const auto plan = planRhythm (rhythmPlacement->rhythm, rhythmPlacement->times, start, score.getBeatsPerMeasure());
     score.placeNotes (part, plan.spans, plan.notes);
 
+    for (const auto& triplet : plan.triplets)
+        score.addTriplet (triplet);
+
     if (onRhythmPlaced != nullptr)
         onRhythmPlaced();
 }
@@ -568,8 +571,15 @@ void StaffView::drawRhythmHint (juce::Graphics& g) const
 
     // Faint notes where they'd go, with faint ties, in the measures there are, but those a chord
     // has the staff in
-    const auto notes = planRhythm (rhythmPlacement->rhythm, rhythmPlacement->times, *scaleHover, score.getBeatsPerMeasure()).notes;
+    const auto plan = planRhythm (rhythmPlacement->rhythm, rhythmPlacement->times, *scaleHover, score.getBeatsPerMeasure());
+    const auto& notes = plan.notes;
     const auto shown = [&] (const Note& note) { return note.measure < score.getNumMeasures() && ! score.chordUsesStaff (part, note.measure, note.staff); };
+
+    for (const auto& triplet : plan.triplets)
+        for (int i = 0; i < Triplet::numNotes; ++i)
+            if (const Note note { triplet.staff, triplet.measure, triplet.getNoteOnset (i), triplet.pitches[(size_t) i], part, triplet.noteLength, triplet.staccato };
+                shown (note))
+                drawGhostNote (g, note);
 
     for (size_t i = 0; i < notes.size(); ++i)
     {
@@ -2760,7 +2770,8 @@ void StaffView::drawGhostNote (juce::Graphics& g, const Note& note) const
     // filled for a dotted quarter or shorter, open for a half or longer
     // A triplet's note is as long as its notes are written, which always fit.
     const auto noteSlots = (int) std::lround (note.length * Score::slotsPerBeat);
-    const auto room = isPlacingTriplets() ? noteSlots : (int) std::lround ((score.getBeatsPerMeasure() - note.beat) * Score::slotsPerBeat);
+    const auto offGrid = std::abs (note.beat * Score::slotsPerBeat - std::round (note.beat * Score::slotsPerBeat)) > 1.0e-6;
+    const auto room = isPlacingTriplets() || offGrid ? noteSlots : (int) std::lround ((score.getBeatsPerMeasure() - note.beat) * Score::slotsPerBeat);
     const auto slots = Score::fitNoteLength (noteSlots, room);
     const auto duration = getDurationForBeats ((double) slots / Score::slotsPerBeat);
     const auto notehead = getNoteheadGlyph (duration);

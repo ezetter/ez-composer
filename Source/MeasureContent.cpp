@@ -203,6 +203,23 @@ namespace
 
         for (const auto& note : notes)
         {
+            // A triplet's note, a third of the way on from the one before
+            if (note.isTriplet())
+            {
+                if (note.tripletIndex == 0)
+                    addRests (content.events, slot, note.onset, beats);
+
+                const auto start = (double) note.onset / Score::slotsPerBeat;
+                StaffEvent event { start + (double) note.tripletIndex * note.length / Triplet::numNotes / Score::slotsPerBeat,
+                                   getDurationForBeats ((double) note.tripletNoteLength / Score::slotsPerBeat), tonesFor (note.attack),
+                                   rolled, false, note.staccato };
+                event.tripletStart = start;
+                content.events.push_back (event);
+                lastAttack = note.attack;
+                slot = note.onset + note.length;
+                continue;
+            }
+
             addRests (content.events, slot, note.onset, beats);
 
             // Rolled as it starts, not as it's held on

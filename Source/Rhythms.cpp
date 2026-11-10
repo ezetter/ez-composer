@@ -42,9 +42,18 @@ SavedRhythm getRhythm (const Score& score, int part, int firstMeasure, int numMe
 
             for (const auto& event : written.events)
             {
-                // A rhythm's notes start on 32nds, which a triplet's don't.
-                if (event.isRest() || event.tripletStart.has_value())
+                if (event.isRest())
                     continue;
+
+                // A triplet, once, as it starts
+                if (const auto start = event.tripletStart)
+                {
+                    if (juce::exactlyEqual (event.onset, *start))
+                        rhythm.staves[(size_t) staff].push_back ({ i * slotsPerMeasure + toSlots (*start), 2 * toSlots (getBeats (event.duration)),
+                                                                  event.staccato, false, toSlots (getBeats (event.duration)) });
+
+                    continue;
+                }
 
                 // Tied on, if any of its notes is
                 const auto tied = std::any_of (written.tiedNotes.begin(), written.tiedNotes.end(),
@@ -104,6 +113,19 @@ RhythmPlan planRhythm (const SavedRhythm& rhythm, int times, const Note& start, 
         {
             for (const auto& hit : hits)
             {
+                // A triplet, at the note's pitch, if it's all in one measure; across a barline,
+                // it's left out.
+                if (hit.isTriplet())
+                {
+                    const auto at = origin + time * length + hit.onset;
+
+                    if (const auto slot = at % slotsPerMeasure; slot + hit.length <= slotsPerMeasure)
+                        plan.triplets.push_back ({ staff, at / slotsPerMeasure, (double) slot / Score::slotsPerBeat, start.part,
+                                                   (double) hit.tripletNoteLength / Score::slotsPerBeat, { pitch, pitch, pitch }, hit.staccato });
+
+                    continue;
+                }
+
                 // In notes that fit, as long as they can be, tied together
                 auto at = origin + time * length + hit.onset;
                 auto left = hit.length;
