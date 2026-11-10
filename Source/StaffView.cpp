@@ -82,7 +82,7 @@ namespace
 
     float getBeatWidth (int notesPerBeat)
     {
-        return notesPerBeat >= 8 ? 17.0f : notesPerBeat >= 4 ? 10.0f : notesPerBeat == 2 ? 6.4f : 5.0f;
+        return notesPerBeat >= 8 ? 17.0f : notesPerBeat >= 6 ? 13.0f : notesPerBeat >= 4 ? 10.0f : notesPerBeat == 3 ? 8.0f : notesPerBeat == 2 ? 6.4f : 5.0f;
     }
 
     /** How wide a measure is, but for room for an end repeat: as wide as its beats need, with room
@@ -418,11 +418,29 @@ void StaffView::setNoteLength (double beats)
 void StaffView::setStaccato (bool shouldBeStaccato)
 {
     staccato = shouldBeStaccato;
+    endTriplet();
     setHoverNote ({});
+}
+
+void StaffView::setTripletLength (std::optional<double> noteBeats)
+{
+    tripletNoteLength = noteBeats;
+    endTriplet();
+    setHoverNote ({});
+}
+
+void StaffView::endTriplet()
+{
+    if (tripletProgress.has_value())
+    {
+        tripletProgress.reset();
+        repaint();
+    }
 }
 
 void StaffView::setMarking (std::optional<music::Marking> newMarking)
 {
+    endTriplet();
     marking = newMarking;
     erasing = false;
     hoverErasable = {};
@@ -436,6 +454,7 @@ void StaffView::setMarking (std::optional<music::Marking> newMarking)
 
 void StaffView::setScalePlacement (std::optional<ScaleSettings> settings)
 {
+    endTriplet();
     scalePlacement = settings;
     scaleHover.reset();
     setHoverNote ({});
@@ -520,6 +539,7 @@ void StaffView::placeScale (const Note& start)
 
 void StaffView::setRhythmPlacement (std::optional<RhythmPlacement> placement)
 {
+    endTriplet();
     rhythmPlacement = std::move (placement);
     scaleHover.reset();
     setHoverNote ({});
@@ -620,6 +640,7 @@ void StaffView::setErasing (bool shouldErase)
 
 void StaffView::setSelecting (bool shouldSelect)
 {
+    endTriplet();
     selecting = shouldSelect;
     selectionAnchor.reset();
     finishDraggingSelection();
@@ -727,6 +748,7 @@ std::optional<int> StaffView::getMoveTargetAt (float x) const
 
 void StaffView::setEditing (bool shouldEdit)
 {
+    endTriplet();
     editing = shouldEdit;
     editedNote.reset();
     editedChain.clear();
@@ -767,7 +789,8 @@ std::optional<Note> StaffView::findEditableNoteAt (juce::Point<float> point) con
     {
         const auto distance = std::abs (point.x - getEventX (spot->measure, event));
 
-        if (distance > nearestDistance)
+        // A triplet's notes go together, so they're not edited one at a time.
+        if (distance > nearestDistance || event.tripletStart.has_value())
             continue;
 
         for (const auto& pitch : score.getNotes (part, spot->staff, spot->measure, event.onset))
@@ -1211,6 +1234,11 @@ void StaffView::setActive (bool shouldBeActive)
         return;
 
     active = shouldBeActive;
+
+    // Clicking another part's staves leaves a triplet here as it is.
+    if (! active)
+        endTriplet();
+
     repaint();
 }
 
@@ -1328,10 +1356,11 @@ void StaffView::updateLayout()
                     lowest = juce::jmin (lowest, dot);
                 }
 
-                if (melodic)
+                // A triplet's notes may have their stems either way, with its 3 past them.
+                if (melodic || event.tripletStart.has_value())
                 {
-                    highest += 7;
-                    lowest -= 7;
+                    highest += event.tripletStart.has_value() ? 12 : 7;
+                    lowest -= event.tripletStart.has_value() ? 12 : 7;
                 }
                 else if (hasStem (event.duration))
                 {
@@ -1369,6 +1398,10 @@ void StaffView::changeListenerCallback (juce::ChangeBroadcaster*)
 
     if (selectedMeasure.has_value() && *selectedMeasure >= score.getNumMeasures())
         selectedMeasure.reset();
+
+    // The triplet being placed may have gone, e.g. undone, or been changed.
+    if (tripletProgress.has_value() && ! getTripletInProgress().has_value())
+        tripletProgress.reset();
 
     // The notes tied to the one under the pointer while editing may have changed.
     if (editHover.has_value())
@@ -1997,8 +2030,22 @@ std::vector<std::vector<size_t>> StaffView::groupBeams (const std::vector<const 
         auto end = first + 1;
 
         while (end < notes.size() && beamable (end)
-               && juce::exactlyEqual (notes[end]->onset, notes[end - 1]->onset + getBeats (notes[end - 1]->duration)))
+               && notes[end]->tripletStart == notes[end - 1]->tripletStart
+               && std::abs (notes[end]->onset - (notes[end - 1]->onset + notes[end - 1]->getPlayedBeats())) < 1.0e-9)
             ++end;
+
+        // A triplet's notes are beamed together, and with nothing else.
+        if (notes[first]->tripletStart.has_value())
+        {
+            std::vector<size_t> group;
+
+            for (auto i = first; i < end; ++i)
+                group.push_back (i);
+
+            groups.push_back (group);
+            first = end;
+            continue;
+        }
 
         // Every four eighths in a row share a beam, counting from the first of them; the rest of
         // the run is beamed a beat at a time.
@@ -2151,6 +2198,42 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
         beams.push_back (beamed);
     }
 
+    // Each triplet's notes, together. Ones that aren't beamed have their stems the same way too,
+    // away from the note furthest from the middle line, for the bracket on that side.
+    std::vector<std::vector<NoteLayout*>> triplets;
+
+    for (size_t i = 0; i < notes.size(); ++i)
+    {
+        if (! noteEvents[i]->tripletStart.has_value())
+            continue;
+
+        if (i > 0 && noteEvents[i - 1]->tripletStart == noteEvents[i]->tripletStart)
+            triplets.back().push_back (&notes[i]);
+        else
+            triplets.push_back ({ &notes[i] });
+    }
+
+    for (auto& triplet : triplets)
+    {
+        if (triplet.front()->beamed)
+            continue;
+
+        auto lowest = std::numeric_limits<int>::max();
+        auto highest = std::numeric_limits<int>::min();
+
+        for (const auto* note : triplet)
+        {
+            lowest = juce::jmin (lowest, note->positions.front());
+            highest = juce::jmax (highest, note->positions.back());
+        }
+
+        for (auto* note : triplet)
+        {
+            note->stemUp = middleLine - lowest > highest - middleLine;
+            note->placeNoteheads();
+        }
+    }
+
     // The note under the pointer is red, to show a click will take it out. A chord's
     // notes are taken out wherever they are in the measure; a quarter note only on its own beat.
     // While editing, the note under the pointer, or being moved, is blue instead.
@@ -2183,8 +2266,36 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
             if (const auto under = findNoteUnder (*hoverNote); ! under.has_value() || under->pitch.alter == hoverNote->pitch.alter)
                 highlightedPosition = hoverNote->pitch.step - getBottomLineStep (staff);
 
+        // A triplet's taken out all together, so all its notes are red when a click would take
+        // one out. Placing triplets, a click doesn't take anything out.
+        if (isPlacingTriplets())
+            highlightedPosition.reset();
+
+        std::optional<double> hoveredTriplet;
+
+        for (size_t i = 0; i < notes.size() && highlightedPosition.has_value(); ++i)
+            if (noteEvents[i]->tripletStart.has_value() && std::abs (notes[i].onset - hoverNote->beat) < 1.0e-9
+                && std::find (notes[i].positions.begin(), notes[i].positions.end(), *highlightedPosition) != notes[i].positions.end())
+                hoveredTriplet = noteEvents[i]->tripletStart;
+
+        // The notes of the triplet being placed that haven't been yet are faint.
+        const auto inProgress = getTripletInProgress();
+
         for (size_t i = 0; i < notes.size(); ++i)
         {
+            if (const auto start = noteEvents[i]->tripletStart)
+            {
+                const auto pending = inProgress.has_value() && inProgress->staff == staff && inProgress->measure == measure
+                                  && juce::exactlyEqual (inProgress->beat, *start)
+                                  && notes[i].onset > inProgress->getNoteOnset (tripletProgress->placed) - 1.0e-9;
+
+                g.setColour (pending ? hoverColour : inkColour);
+                drawNote (g, staff, notes[i], rolled[i], hoveredTriplet == start ? std::optional (notes[i].positions.front()) : std::nullopt,
+                          removalColour);
+                g.setColour (inkColour);
+                continue;
+            }
+
             // A Random chord's notes are taken out one at a time, so only the one under the pointer is red.
             const auto onItsOwn = content.source == StaffContent::Source::notes || hasRandomChord (measure);
             const auto isHovered = highlightedPosition.has_value()
@@ -2198,6 +2309,65 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
 
     for (auto& beamed : beams)
         drawBeams (g, staff, beamed);
+
+    for (const auto& triplet : triplets)
+        drawTripletMark (g, staff, triplet);
+}
+
+void StaffView::drawTripletMark (juce::Graphics& g, Staff staff, const std::vector<NoteLayout*>& triplet) const
+{
+    if (triplet.empty())
+        return;
+
+    const auto stemUp = triplet.front()->stemUp;
+    const auto direction = stemUp ? -1.0f : 1.0f;
+
+    // How far its stems reach, as drawStem() draws them, or its noteheads, for notes without them
+    auto reach = stemUp ? std::numeric_limits<float>::max() : std::numeric_limits<float>::lowest();
+
+    for (const auto* note : triplet)
+    {
+        auto end = getY (staff, stemUp ? note->positions.back() : note->positions.front());
+
+        if (note->beamed)
+            end = note->stemEnd;
+        else if (hasStem (note->duration))
+        {
+            const auto flags = getFlagCount (note->duration);
+            const auto length = (stemLength + (flags == 3 ? 1.25f : flags == 2 ? 0.5f : 0.0f)) * staffSpace;
+            const auto middleY = getY (staff, middleLine);
+            end = stemUp ? juce::jmin (end - length, middleY) : juce::jmax (end + length, middleY);
+        }
+
+        reach = stemUp ? juce::jmin (reach, end) : juce::jmax (reach, end);
+    }
+
+    // The 3, a little past them, between the first note and the last
+    const auto left = triplet.front()->getHeadsLeft();
+    const auto right = triplet.back()->getHeadsLeft() + triplet.back()->headWidth;
+    const auto centreX = (left + right) / 2.0f;
+    const auto& numeral = glyphs.getPath (Smufl::tuplet3);
+    const auto numeralBounds = numeral.getBounds();
+    const auto centreY = reach + direction * (triplet.front()->beamed ? 1.0f : 1.2f) * staffSpace;
+
+    glyphs.draw (g, Smufl::tuplet3, { centreX - numeralBounds.getCentreX(), centreY - numeralBounds.getCentreY() });
+
+    // Notes that aren't beamed have a bracket from the first to the last, with the 3 in a gap in
+    // the middle, and hooks at its ends towards the notes.
+    if (triplet.front()->beamed)
+        return;
+
+    const auto thickness = 0.12f * staffSpace;
+    const auto gap = numeralBounds.getWidth() / 2.0f + 0.35f * staffSpace;
+    const auto hook = 0.7f * staffSpace;
+    juce::Path bracket;
+    bracket.startNewSubPath (left, centreY - direction * hook);
+    bracket.lineTo (left, centreY);
+    bracket.lineTo (centreX - gap, centreY);
+    bracket.startNewSubPath (centreX + gap, centreY);
+    bracket.lineTo (right, centreY);
+    bracket.lineTo (right, centreY - direction * hook);
+    g.strokePath (bracket, juce::PathStrokeType (thickness));
 }
 
 void StaffView::drawNote (juce::Graphics& g, Staff staff, const NoteLayout& note, bool rolled,
@@ -2575,8 +2745,10 @@ void StaffView::drawHoverNote (juce::Graphics& g) const
         || hoverNote->measure >= score.getNumMeasures() || hoverNote->beat >= score.getBeatsPerMeasure())
         return;
 
-    // Over a note, the note itself is highlighted instead, unless the click would change its sharp or flat.
-    if (const auto under = findNoteUnder (*hoverNote); under.has_value() && under->pitch.alter == hoverNote->pitch.alter)
+    // Over a note, the note itself is highlighted instead, unless the click would change its sharp
+    // or flat. Placing triplets, a click doesn't take anything out, so the note always shows.
+    if (const auto under = findNoteUnder (*hoverNote);
+        ! isPlacingTriplets() && under.has_value() && under->pitch.alter == hoverNote->pitch.alter)
         return;
 
     drawGhostNote (g, *hoverNote);
@@ -2586,8 +2758,10 @@ void StaffView::drawGhostNote (juce::Graphics& g, const Note& note) const
 {
     // The notehead of the note's length, once it's fitted into what's left of the measure:
     // filled for a dotted quarter or shorter, open for a half or longer
-    const auto room = (int) std::lround ((score.getBeatsPerMeasure() - note.beat) * Score::slotsPerBeat);
-    const auto slots = Score::fitNoteLength ((int) std::lround (note.length * Score::slotsPerBeat), room);
+    // A triplet's note is as long as its notes are written, which always fit.
+    const auto noteSlots = (int) std::lround (note.length * Score::slotsPerBeat);
+    const auto room = isPlacingTriplets() ? noteSlots : (int) std::lround ((score.getBeatsPerMeasure() - note.beat) * Score::slotsPerBeat);
+    const auto slots = Score::fitNoteLength (noteSlots, room);
     const auto duration = getDurationForBeats ((double) slots / Score::slotsPerBeat);
     const auto notehead = getNoteheadGlyph (duration);
     const auto width = getNoteheadWidth (duration) * staffSpace;
@@ -3034,7 +3208,7 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
 
     if (! marking.has_value())
     {
-        setHoverNote (getNoteToClickAt (e.position));
+        setHoverNote (isPlacingTriplets() ? getTripletNoteAt (e.position) : getNoteToClickAt (e.position));
         return;
     }
 
@@ -3241,6 +3415,13 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
         if (const auto point = getDynamicPointAt (e.position))
             hairpinDrag = HairpinDrag { { point->first, point->second, *chosen, 1.0 }, toScoreBeats (point->first, point->second) + 1.0, std::nullopt };
 
+        return;
+    }
+
+    // Placing triplets, a click places the next of a triplet's notes, when the mouse is let go.
+    if (isPlacingTriplets())
+    {
+        pressedNote = getTripletNoteAt (e.position);
         return;
     }
 
@@ -3528,6 +3709,16 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
 
     if (! e.mouseWasDraggedSinceMouseDown())
     {
+        if (isPlacingTriplets())
+        {
+            placeTripletNote (*pressed);
+
+            // The next note shows where it'll go straight away.
+            hoverHintHidden = false;
+            setHoverNote (getTripletNoteAt (e.position));
+            return;
+        }
+
         clickNote (*pressed);
         return;
     }
@@ -3561,6 +3752,106 @@ std::optional<double> StaffView::findWrittenNoteOnset (const Note& spot, float x
     return nearest;
 }
 
+std::optional<double> StaffView::findTripletNoteOnset (const Note& spot, float x) const
+{
+    std::optional<double> nearest;
+    auto nearestDistance = 1.4f * staffSpace;
+
+    for (const auto& event : measureLayouts[(size_t) spot.measure].content.staves[(size_t) spot.staff].events)
+        if (event.tripletStart.has_value())
+            for (const auto& tone : event.tones)
+                if (const auto distance = std::abs (x - getEventX (spot.measure, event)); tone.pitch.step == spot.pitch.step && distance <= nearestDistance)
+                {
+                    nearest = event.onset;
+                    nearestDistance = distance;
+                }
+
+    return nearest;
+}
+
+bool StaffView::isPlacingTriplets() const noexcept
+{
+    return tripletNoteLength.has_value() && ! marking.has_value() && ! erasing && ! selecting && ! isPlacingNotes();
+}
+
+std::optional<Triplet> StaffView::getTripletInProgress() const
+{
+    if (! tripletProgress.has_value() || ! tripletNoteLength.has_value())
+        return {};
+
+    const auto& progress = *tripletProgress;
+    const auto triplet = score.getTriplet (part, progress.staff, progress.measure, progress.beat);
+
+    if (! triplet.has_value() || ! juce::exactlyEqual (triplet->beat, progress.beat) || ! juce::exactlyEqual (triplet->noteLength, *tripletNoteLength))
+        return {};
+
+    return triplet;
+}
+
+bool StaffView::isOverTriplet (const Triplet& triplet, float x) const
+{
+    const auto start = getOnsetX (triplet.measure, triplet.beat);
+    const auto end = getOnsetX (triplet.measure, triplet.beat + triplet.getLength());
+    const auto halfNote = (end - start) / (float) Triplet::numNotes / 2.0f;
+    return x >= start - halfNote && x < end - halfNote;
+}
+
+std::optional<Note> StaffView::getTripletNoteAt (juce::Point<float> point) const
+{
+    if (! tripletNoteLength.has_value())
+        return {};
+
+    const auto noteBeats = *tripletNoteLength;
+    const auto length = 2.0 * noteBeats;
+
+    // Over the triplet being placed, on its staff, the next of its notes
+    if (const auto triplet = getTripletInProgress())
+    {
+        if (const auto spot = getNoteAt (point, noteBeats);
+            spot.has_value() && spot->staff == triplet->staff && spot->measure == triplet->measure && isOverTriplet (*triplet, point.x))
+            return Note { triplet->staff, triplet->measure, triplet->getNoteOnset (tripletProgress->placed), spot->pitch, part, noteBeats, triplet->staccato };
+    }
+
+    // Or the first of a new one, at the nearest beat, or step of its length if that's shorter,
+    // as far back as it needs to fit in the measure
+    auto spot = getNoteAt (point, juce::jmin (length, 1.0));
+
+    if (! spot.has_value() || score.chordUsesStaff (part, spot->measure, spot->staff) || length > (double) score.getBeatsPerMeasure())
+        return {};
+
+    spot->beat = juce::jmin (spot->beat, (double) score.getBeatsPerMeasure() - length);
+    spot->length = noteBeats;
+    spot->staccato = staccato;
+    return spot;
+}
+
+void StaffView::placeTripletNote (const Note& note)
+{
+    // The next of the triplet being placed's notes, where it goes
+    if (const auto triplet = getTripletInProgress(); triplet.has_value() && triplet->staff == note.staff && triplet->measure == note.measure
+                                                     && juce::exactlyEqual (triplet->getNoteOnset (tripletProgress->placed), note.beat))
+    {
+        auto changed = *triplet;
+        changed.pitches[(size_t) tripletProgress->placed] = note.pitch;
+        score.addTriplet (changed);
+
+        if (++tripletProgress->placed == Triplet::numNotes)
+            tripletProgress.reset();
+
+        repaint();
+        return;
+    }
+
+    // Or a new one, all its notes the first's pitch until they're placed
+    const Triplet triplet { note.staff, note.measure, note.beat, part, note.length, { note.pitch, note.pitch, note.pitch }, note.staccato };
+    tripletProgress.reset();
+
+    if (score.addTriplet (triplet) || score.getTriplet (part, note.staff, note.measure, note.beat) == triplet)
+        tripletProgress = TripletProgress { note.staff, note.measure, note.beat, 1 };
+
+    repaint();
+}
+
 std::optional<Note> StaffView::getNoteToClickAt (juce::Point<float> point) const
 {
     auto note = getNoteAt (point);
@@ -3570,9 +3861,19 @@ std::optional<Note> StaffView::getNoteToClickAt (juce::Point<float> point) const
         if (const auto onset = findWrittenNoteOnset (*note, point.x))
             note->beat = *onset;
 
+    // Over one of a triplet's notes, it's that note, which a click takes out with its triplet.
+    if (note.has_value() && ! score.chordUsesStaff (part, note->measure, note->staff))
+    {
+        if (const auto onset = findTripletNoteOnset (*note, point.x))
+        {
+            note->beat = *onset;
+            return note;
+        }
+    }
+
     // A note doesn't go under one still sounding, which it would cut short, but where that one
     // ends, the next point a note can start: in the measure, or at the start of the next. After
-    // the last measure, there's nowhere.
+    // the last measure, there's nowhere. A triplet's sounding from where it starts.
     if (note.has_value() && ! score.chordUsesStaff (part, note->measure, note->staff))
     {
         if (const auto end = getHeldNoteEnd (note->staff, note->measure, note->beat))
@@ -3594,6 +3895,9 @@ std::optional<double> StaffView::getHeldNoteEnd (Staff staff, int measure, doubl
     // As long as they're shown, which may be shorter than they were added, in a shorter time signature
     const auto slots = score.getBeatsPerMeasure() * Score::slotsPerBeat;
     const auto slot = (int) std::lround (beat * Score::slotsPerBeat);
+
+    if (const auto triplet = score.getTriplet (part, staff, measure, beat))
+        return triplet->beat + triplet->getLength();
 
     for (int earlier = 0; earlier < slot; ++earlier)
     {
@@ -3665,6 +3969,27 @@ void StaffView::clickNote (const Note& note)
                 score.toggleChordNote (part, note.measure, changed.midi, chord->style);
             else
                 score.toggleAlternateNote (part, note.measure, changed);
+        }
+    }
+    // Clicking one of a triplet's notes takes the triplet out, or with another sharp or flat,
+    // changes that note to it.
+    else if (const auto triplet = score.getTriplet (part, note.staff, note.measure, note.beat))
+    {
+        for (int i = 0; i < Triplet::numNotes; ++i)
+        {
+            if (std::abs (triplet->getNoteOnset (i) - note.beat) > 1.0e-9 || triplet->pitches[(size_t) i].step != note.pitch.step)
+                continue;
+
+            if (triplet->pitches[(size_t) i].alter == note.pitch.alter)
+            {
+                score.removeTriplet (part, note.staff, note.measure, note.beat);
+            }
+            else
+            {
+                auto changed = *triplet;
+                changed.pitches[(size_t) i] = note.pitch;
+                score.addTriplet (changed);
+            }
         }
     }
     // Clicking a note takes it out, or with another sharp or flat, changes it to that one, keeping
@@ -3814,6 +4139,8 @@ void StaffView::eraseAt (juce::Point<float> point)
 
         if (hasRandomChord (note.measure) && score.chordUsesStaff (part, note.measure, note.staff))
             writeOutRandomChordWithout (note.measure, note.staff, note.beat, found.tone->midi);
+        else if (score.getTriplet (part, note.staff, note.measure, note.beat).has_value())
+            score.removeTriplet (part, note.staff, note.measure, note.beat);       // all together, as it's played
         else if (! score.chordUsesStaff (part, note.measure, note.staff))
             score.removeNotesAt (part, note.staff, note.measure, note.beat, note.pitch.step);
         else if (const auto* chord = score.getChord (part, note.measure); chord != nullptr && chord->style.staff == note.staff)
@@ -3952,7 +4279,7 @@ std::optional<std::pair<int, double>> StaffView::getFollowingWrittenBeat (int me
         if (event.isRest() || ! juce::exactlyEqual (event.onset, onset))
             continue;
 
-        if (const auto end = onset + getBeats (event.duration); end < (double) score.getBeatsPerMeasure() - 1.0e-9)
+        if (const auto end = onset + event.getPlayedBeats(); end < (double) score.getBeatsPerMeasure() - 1.0e-9)
             return std::pair { measure, end };
 
         if (measure + 1 < (int) measureLayouts.size())

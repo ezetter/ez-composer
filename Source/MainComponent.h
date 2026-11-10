@@ -214,6 +214,15 @@ private:
     */
     void setNoteLength (double beats);
 
+    /** Makes clicks on the staff place triplets, with their notes this long, in beats, in place of single notes. */
+    void setTriplet (double noteBeats);
+
+    /** Shows the lengths a triplet's notes can be, beside the triplet button, and places triplets meanwhile. */
+    void chooseTripletLength();
+
+    /** Goes back to adding what the note length buttons have chosen: single notes, or triplets. */
+    void resumeAddingNotes();
+
     /** Makes the notes that clicking the staff adds staccato, or not, whatever their length.
         Clicks add notes again, if they were marking something or erasing.
     */

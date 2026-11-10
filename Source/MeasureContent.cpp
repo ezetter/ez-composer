@@ -87,7 +87,7 @@ namespace
         auto shortest = 1.0;
 
         for (const auto& event : content.events)
-            shortest = juce::jmin (shortest, getBeats (event.duration));
+            shortest = juce::jmin (shortest, event.getPlayedBeats());
 
         content.notesPerBeat = juce::jlimit (1, Score::slotsPerBeat, juce::roundToInt (1.0 / shortest));
     }
@@ -340,8 +340,19 @@ namespace
         const auto beats = score.getBeatsPerMeasure();
         const auto slots = beats * Score::slotsPerBeat;
         const auto beatOf = [] (int slot) { return (double) slot / Score::slotsPerBeat; };
-        const auto isEmpty = [&] (int slot) { return score.getNotes (part, staff, measure, beatOf (slot)).empty(); };
         StaffContent content;
+        content.triplets = score.getTriplets (part, staff, measure);
+
+        // A triplet's where it starts, and nothing else starts while it plays.
+        std::array<const Triplet*, Score::maxSlotsPerMeasure> tripletAt {};
+
+        for (const auto& triplet : content.triplets)
+            tripletAt[(size_t) std::lround (triplet.beat * Score::slotsPerBeat)] = &triplet;
+
+        const auto isEmpty = [&] (int slot)
+        {
+            return score.getNotes (part, staff, measure, beatOf (slot)).empty() && tripletAt[(size_t) slot] == nullptr;
+        };
 
         bool allEmpty = true;
 
@@ -358,6 +369,21 @@ namespace
         for (int slot = 0; slot < slots;)
         {
             const auto onset = beatOf (slot);
+
+            // A triplet's three notes, each with its notes' written length, played two thirds as long
+            if (const auto* triplet = tripletAt[(size_t) slot])
+            {
+                for (int i = 0; i < Triplet::numNotes; ++i)
+                {
+                    StaffEvent event { triplet->getNoteOnset (i), getDurationForBeats (triplet->noteLength), {}, false, false, triplet->staccato };
+                    event.tones.push_back (makeTone (triplet->pitches[(size_t) i], keyAlterations));
+                    event.tripletStart = triplet->beat;
+                    content.events.push_back (event);
+                }
+
+                slot += (int) std::lround (triplet->getLength() * Score::slotsPerBeat);
+                continue;
+            }
 
             if (! isEmpty (slot))
             {
@@ -408,6 +434,11 @@ Duration getDurationForBeats (double beats)
          : beats >= 0.5 ? Duration::eighth
          : beats >= 0.25 ? Duration::sixteenth
                          : Duration::thirtySecond;
+}
+
+double StaffEvent::getPlayedBeats() const noexcept
+{
+    return tripletStart.has_value() ? getBeats (duration) * 2.0 / 3.0 : getBeats (duration);
 }
 
 double getBeats (Duration duration)
@@ -491,7 +522,7 @@ namespace
 
         const auto& last = content.events.back();
 
-        if (last.onset + getBeats (last.duration) < (double) beatsPerMeasure - 1.0e-9)
+        if (last.onset + last.getPlayedBeats() < (double) beatsPerMeasure - 1.0e-9)
             return;
 
         for (const auto& tone : last.tones)

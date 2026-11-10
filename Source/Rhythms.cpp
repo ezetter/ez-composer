@@ -42,7 +42,8 @@ SavedRhythm getRhythm (const Score& score, int part, int firstMeasure, int numMe
 
             for (const auto& event : written.events)
             {
-                if (event.isRest())
+                // A rhythm's notes start on 32nds, which a triplet's don't.
+                if (event.isRest() || event.tripletStart.has_value())
                     continue;
 
                 // Tied on, if any of its notes is

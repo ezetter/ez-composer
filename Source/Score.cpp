@@ -642,6 +642,9 @@ bool Score::putNote (const Note& note)
     if (alreadyThere && lengths[(size_t) slot] == length && staccato[(size_t) slot] == note.staccato)
         return false;
 
+    // It takes the place of triplets it plays during.
+    measure.removeTriplets (note.staff, slot, slot + length);
+
     // A longer note held over this point is cut short to end here, as long as a note can be.
     for (int earlier = 0; earlier < slot; ++earlier)
         if (! staffNotes[(size_t) earlier].empty() && earlier + lengths[(size_t) earlier] > slot)
@@ -709,12 +712,15 @@ void Score::placeNotes (int part, const std::array<std::optional<juce::Range<int
             m.ties[(size_t) staff][(size_t) slot].clear();
             m.lengths[(size_t) staff][(size_t) slot] = slotsPerBeat;
             m.staccato[(size_t) staff][(size_t) slot] = false;
+            m.triplets[(size_t) staff][(size_t) slot].reset();
         }
 
-        // A note held over into it ends where it starts, as long as a note can be.
+        // A note held over into it ends where it starts, as long as a note can be, and a triplet
+        // playing as it starts is taken out.
         if (const auto measure = span->getStart() / slotsPerMeasure, start = span->getStart() % slotsPerMeasure; ! chordUsesStaff (part, measure, staff))
         {
             auto& m = getMeasure (part, measure);
+            m.removeTriplets (staff, start, start + 1);
 
             for (int earlier = 0; earlier < start; ++earlier)
                 if (! m.notes[(size_t) staff][(size_t) earlier].empty() && earlier + m.lengths[(size_t) staff][(size_t) earlier] > start)
@@ -871,6 +877,84 @@ void Score::pruneTies()
                     auto& ties = getMeasure (part, measure).ties[(size_t) staff][(size_t) slot];
                     std::erase_if (ties, [&] (const music::Pitch& pitch) { return ! isTied (part, staff, measure, toBeats (slot), pitch); });
                 }
+}
+
+bool Score::addTriplet (const Triplet& triplet)
+{
+    const auto slot = toSlot (triplet.beat);
+    const auto noteLength = toSlot (triplet.noteLength);
+    const auto length = 2 * noteLength;
+    const auto lengthAllowed = std::any_of (tripletNoteLengths.begin(), tripletNoteLengths.end(),
+                                            [&] (double allowed) { return juce::exactlyEqual (allowed, triplet.noteLength); });
+
+    if (! juce::isPositiveAndBelow (triplet.part, getNumParts()) || ! juce::isPositiveAndBelow (triplet.measure, getNumMeasures())
+        || ! lengthAllowed || ! juce::exactlyEqual (toBeats (slot), triplet.beat) || slot < 0 || slot + length > getSlotsPerMeasure()
+        || chordUsesStaff (triplet.part, triplet.measure, triplet.staff))
+        return false;
+
+    auto& measure = getMeasure (triplet.part, triplet.measure);
+    const auto staff = (size_t) triplet.staff;
+    const Measure::TripletNotes written { noteLength, triplet.pitches, triplet.staccato };
+
+    if (measure.triplets[staff][(size_t) slot] == written)
+        return false;
+
+    // The notes starting while it plays go, and one held over into it ends where it starts.
+    for (auto covered = slot; covered < slot + length; ++covered)
+    {
+        measure.notes[staff][(size_t) covered].clear();
+        measure.ties[staff][(size_t) covered].clear();
+        measure.lengths[staff][(size_t) covered] = slotsPerBeat;
+        measure.staccato[staff][(size_t) covered] = false;
+    }
+
+    for (int earlier = 0; earlier < slot; ++earlier)
+        if (! measure.notes[staff][(size_t) earlier].empty() && earlier + measure.lengths[staff][(size_t) earlier] > slot)
+            measure.lengths[staff][(size_t) earlier] = fitNoteLength (slot - earlier, slot - earlier);
+
+    measure.removeTriplets (triplet.staff, slot, slot + length);
+    measure.triplets[staff][(size_t) slot] = written;
+
+    pruneTies();
+    sendSynchronousChangeMessage();
+    return true;
+}
+
+std::vector<Triplet> Score::getTriplets (int part, Staff staff, int measure) const
+{
+    std::vector<Triplet> found;
+    const auto& target = getMeasure (part, measure);
+
+    for (int slot = 0; slot < getSlotsPerMeasure(); ++slot)
+        if (const auto& written = target.triplets[(size_t) staff][(size_t) slot];
+            written.has_value() && slot + 2 * written->noteLength <= getSlotsPerMeasure())
+            found.push_back ({ staff, measure, toBeats (slot), part, toBeats (written->noteLength), written->pitches, written->staccato });
+
+    return found;
+}
+
+std::optional<Triplet> Score::getTriplet (int part, Staff staff, int measure, double beat) const
+{
+    if (! juce::isPositiveAndBelow (measure, getNumMeasures()))
+        return {};
+
+    for (const auto& triplet : getTriplets (part, staff, measure))
+        if (beat >= triplet.beat - 1.0e-9 && beat < triplet.beat + triplet.getLength() - 1.0e-9)
+            return triplet;
+
+    return {};
+}
+
+bool Score::removeTriplet (int part, Staff staff, int measure, double beat)
+{
+    const auto triplet = getTriplet (part, staff, measure, beat);
+
+    if (! triplet.has_value())
+        return false;
+
+    getMeasure (part, measure).triplets[(size_t) staff][(size_t) toSlot (triplet->beat)].reset();
+    sendSynchronousChangeMessage();
+    return true;
 }
 
 bool Score::hasNoteAt (int part, Staff staff, int measure, double beat, int step) const
@@ -1260,7 +1344,9 @@ bool Score::chordsWouldReplace (int part, int firstMeasure, int count, Staff sta
     const auto hasNotes = [] (const Measure& m, Staff s)
     {
         const auto& slots = m.notes[(size_t) s];
-        return std::any_of (slots.begin(), slots.end(), [] (const std::vector<music::Pitch>& pitches) { return ! pitches.empty(); });
+        const auto& triplets = m.triplets[(size_t) s];
+        return std::any_of (slots.begin(), slots.end(), [] (const std::vector<music::Pitch>& pitches) { return ! pitches.empty(); })
+            || std::any_of (triplets.begin(), triplets.end(), [] (const auto& triplet) { return triplet.has_value(); });
     };
 
     for (auto measure = juce::jmax (0, firstMeasure); measure < juce::jmin (getNumMeasures(), firstMeasure + count); ++measure)
@@ -1466,10 +1552,17 @@ void Score::reshuffle (int part, int measure)
 bool Score::hasNotes (int part) const
 {
     for (const auto& measure : parts[(size_t) part].measures)
+    {
         for (const auto& staff : measure.notes)
             for (const auto& notes : staff)
                 if (! notes.empty())
                     return true;
+
+        for (const auto& staff : measure.triplets)
+            for (const auto& triplet : staff)
+                if (triplet.has_value())
+                    return true;
+    }
 
     return hasChords (part);
 }
@@ -1487,6 +1580,10 @@ bool Score::isMeasureEmpty (int measure) const
             for (int slot = 0; slot < getSlotsPerMeasure(); ++slot)
                 if (! staff[(size_t) slot].empty())
                     return false;
+
+        for (auto staff : { Staff::treble, Staff::bass })
+            if (! getTriplets (part, staff, measure).empty())
+                return false;
     }
 
     return true;
@@ -1620,7 +1717,8 @@ namespace
     // 21: block and rolled chords lasting two measures
     // 22: the alternate staff's Root split into Root low and Root high, 5, which now opens as Root
     // 23: Root back on its own, and Octave, Block chord and Rolled chord, placed just past the chord
-    constexpr int formatVersion = 23;
+    // 24: triplets
+    constexpr int formatVersion = 24;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1923,6 +2021,34 @@ juce::var Score::toJSON (bool withPartIds) const
 
             if (! staccato.isEmpty())
                 measureObject->setProperty (staff == Staff::treble ? "trebleStaccato" : "bassStaccato", staccato);
+
+            // The triplets, if there are any: at which 32nd, their notes' length in 32nds,
+            // whether they're staccato, and the three notes' pitches
+            juce::Array<juce::var> triplets;
+
+            for (int slot = 0; slot < maxSlotsPerMeasure; ++slot)
+            {
+                if (const auto& triplet = measure.triplets[(size_t) staff][(size_t) slot])
+                {
+                    juce::Array<juce::var> pitches;
+
+                    for (const auto& pitch : triplet->pitches)
+                        pitches.add (juce::Array<juce::var> { pitch.step, pitch.alter });
+
+                    auto* tripletObject = new juce::DynamicObject();
+                    tripletObject->setProperty ("at", slot);
+                    tripletObject->setProperty ("noteLength", triplet->noteLength);
+                    tripletObject->setProperty ("pitches", pitches);
+
+                    if (triplet->staccato)
+                        tripletObject->setProperty ("staccato", true);
+
+                    triplets.add (tripletObject);
+                }
+            }
+
+            if (! triplets.isEmpty())
+                measureObject->setProperty (staff == Staff::treble ? "trebleTriplets" : "bassTriplets", triplets);
         }
 
         // The dynamic marked at each 32nd, or "" for none, if there are any
@@ -2133,6 +2259,40 @@ juce::Result Score::loadJSON (const juce::var& json)
                     for (const auto& entry : *staccato)
                         if (const auto slot = readInt (entry, 0, maxSlotsPerMeasure - 1, -1); slot >= 0 && ! measure.notes[(size_t) staff][(size_t) slot].empty())
                             measure.staccato[(size_t) staff][(size_t) slot] = true;
+
+                // Triplets, in scores from version 24, each with notes of a length it can have,
+                // in the measure, and not overlapping one before it
+                if (const auto* triplets = item.getProperty (staff == Staff::treble ? "trebleTriplets" : "bassTriplets", {}).getArray())
+                {
+                    for (const auto& t : *triplets)
+                    {
+                        const auto slot = readInt (t.getProperty ("at", {}), 0, maxSlotsPerMeasure - 1, -1);
+                        const auto noteLength = readInt (t.getProperty ("noteLength", {}), 1, maxSlotsPerMeasure, 0);
+                        const auto* pitches = t.getProperty ("pitches", {}).getArray();
+                        const auto lengthAllowed = std::any_of (tripletNoteLengths.begin(), tripletNoteLengths.end(),
+                                                                [&] (double allowed) { return toSlot (allowed) == noteLength; });
+
+                        if (slot < 0 || ! lengthAllowed || slot + 2 * noteLength > maxSlotsPerMeasure || pitches == nullptr
+                            || pitches->size() != Triplet::numNotes)
+                            continue;
+
+                        Measure::TripletNotes written { noteLength, {}, (bool) t.getProperty ("staccato", false) };
+                        auto valid = true;
+
+                        for (int i = 0; i < Triplet::numNotes; ++i)
+                        {
+                            const auto& pitch = pitches->getReference (i);
+                            written.pitches[(size_t) i] = { readInt (pitch[0], 0, 80, -1), readInt (pitch[1], -2, 2, 0) };
+                            valid = valid && written.pitches[(size_t) i].step >= 0;
+                        }
+
+                        if (! valid)
+                            continue;
+
+                        measure.removeTriplets (staff, slot, slot + 2 * noteLength);
+                        measure.triplets[(size_t) staff][(size_t) slot] = written;
+                    }
+                }
             }
 
             if (const auto* dynamics = item.getProperty ("dynamics", {}).getArray())

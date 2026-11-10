@@ -640,7 +640,7 @@ std::vector<InstrumentHost::NoteEvent> InstrumentHost::createNoteEvents (const S
                 // the measure because that's how long a whole note is in 4/4. Only a staccato note
                 // is let go sooner.
                 const auto onset = start + event.onset * beatSeconds;
-                const auto end = onset + getBeats (event.duration) * beatSeconds;
+                const auto end = onset + event.getPlayedBeats() * beatSeconds;
 
                 // As loud as the dynamics and hairpins before it make it, wherever playing started
                 const auto velocity = score.getVelocity (part, measure, event.onset);

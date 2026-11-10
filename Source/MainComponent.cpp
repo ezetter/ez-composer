@@ -359,6 +359,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     // Note lengths for clicking into the staff, quarter notes to start with, staccato or not, or dynamics and hairpins to mark
     noteLengthPicker.onChange = [this] (double beats) { setNoteLength (beats); };
     noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
+    noteLengthPicker.onTripletClicked = [this] { chooseTripletLength(); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
     eraserButton.onClick = [this] { setErasing (! eraserButton.getToggleState()); };
     editButton.setTooltip ("Edit notes: drag a note to move it, or click one to change its length, make it staccato, or delete it");
@@ -1004,6 +1005,7 @@ void MainComponent::insertTrack (int index, bool reloadFromSettings)
 
     // It does what clicks on the other parts do.
     view.setNoteLength (noteLengthPicker.getLength());
+    view.setTripletLength (noteLengthPicker.isTriplet() ? std::optional (noteLengthPicker.getTripletLength()) : std::nullopt);
     view.setStaccato (noteLengthPicker.isStaccato());
 
     if (eraserButton.getToggleState())
@@ -1401,7 +1403,7 @@ void MainComponent::showScalePanel (juce::Component& button)
 void MainComponent::startPlacingScale (const ScaleSettings& scale)
 {
     // Whatever tool was chosen, it's back to notes afterwards.
-    setNoteLength (noteLengthPicker.getLength());
+    resumeAddingNotes();
     placingScale = true;
 
     for (auto& view : staffSystems.views)
@@ -1528,7 +1530,7 @@ void MainComponent::showApplyRhythmPanel (juce::Component& button)
 void MainComponent::startPlacingRhythm (const SavedRhythm& rhythm, int times)
 {
     // Whatever tool was chosen, it's back to notes afterwards.
-    setNoteLength (noteLengthPicker.getLength());
+    resumeAddingNotes();
     lastRhythmTimes = times;
     lastRhythmPlaced = rhythm.name;
     placingRhythm = true;
@@ -1596,7 +1598,52 @@ void MainComponent::setNoteLength (double beats)
     {
         view->setNoteLength (beats);
         view->setMarking ({});
+        view->setTripletLength ({});
     }
+}
+
+void MainComponent::setTriplet (double noteBeats)
+{
+    stopPlacingNotes();
+    stopSelecting();
+
+    noteLengthPicker.setTriplet (noteBeats);
+    dynamicPicker.setChoice ({});
+    eraserButton.setToggleState (false, juce::dontSendNotification);
+
+    for (auto& view : staffSystems.views)
+    {
+        view->setMarking ({});
+        view->setTripletLength (noteBeats);
+    }
+}
+
+void MainComponent::chooseTripletLength()
+{
+    // Triplets straight away, of the length chosen last, which the box can change
+    setTriplet (noteLengthPicker.getTripletLength());
+
+    auto panel = std::make_unique<TripletLengthPanel> (noteLengthPicker.getTripletLength());
+    auto* panelPointer = panel.get();
+
+    panel->onChoose = [this, panelPointer] (double beats)
+    {
+        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+            box->dismiss();
+
+        setTriplet (beats);
+    };
+
+    auto& button = noteLengthPicker.getTripletButton();
+    juce::CallOutBox::launchAsynchronously (std::move (panel), getLocalArea (&button, button.getLocalBounds()), this);
+}
+
+void MainComponent::resumeAddingNotes()
+{
+    if (noteLengthPicker.isTriplet())
+        setTriplet (noteLengthPicker.getTripletLength());
+    else
+        setNoteLength (noteLengthPicker.getLength());
 }
 
 void MainComponent::setStaccato (bool staccato)
@@ -1607,7 +1654,7 @@ void MainComponent::setStaccato (bool staccato)
         view->setStaccato (staccato);
 
     // Back to adding notes, with the length chosen
-    setNoteLength (noteLengthPicker.getLength());
+    resumeAddingNotes();
 }
 
 void MainComponent::setMarking (std::optional<music::Marking> marking)
@@ -1616,7 +1663,7 @@ void MainComponent::setMarking (std::optional<music::Marking> marking)
 
     if (! marking.has_value())
     {
-        setNoteLength (noteLengthPicker.getLength());
+        resumeAddingNotes();
         return;
     }
 
@@ -1635,7 +1682,7 @@ void MainComponent::setErasing (bool shouldErase)
 
     if (! shouldErase)
     {
-        setNoteLength (noteLengthPicker.getLength());
+        resumeAddingNotes();
         return;
     }
 
@@ -1671,7 +1718,7 @@ void MainComponent::setSelecting (bool shouldSelect)
     if (! shouldSelect)
     {
         stopSelecting();
-        setNoteLength (noteLengthPicker.getLength());
+        resumeAddingNotes();
         return;
     }
 

@@ -24,6 +24,8 @@ NoteLengthPicker::NoteLengthPicker()
         button->onClick = [this, chosen = beats]
         {
             length = chosen;
+            triplet = false;
+            setChoiceShown (true);
 
             if (onChange != nullptr)
                 onChange (chosen);
@@ -42,6 +44,19 @@ NoteLengthPicker::NoteLengthPicker()
     };
     addAndMakeVisible (staccatoButton);
 
+    // Triplets go in place of a length.
+    tripletButton.setTooltip ("Triplets: three notes in the time of two. Click to choose their notes' length, then click the staff three times for the notes.");
+    tripletButton.setWantsKeyboardFocus (false);
+    tripletButton.onClick = [this]
+    {
+        triplet = true;
+        setChoiceShown (true);
+
+        if (onTripletClicked != nullptr)
+            onTripletClicked();
+    };
+    addAndMakeVisible (tripletButton);
+
     setLength (1.0);
     setSize (getIdealBounds().getWidth(), getIdealBounds().getHeight());
 }
@@ -54,18 +69,31 @@ void NoteLengthPicker::setStaccato (bool shouldBeStaccato)
 void NoteLengthPicker::setLength (double beats)
 {
     length = beats;
+    triplet = false;
+    setChoiceShown (true);
+}
+
+void NoteLengthPicker::setTriplet (double noteBeats)
+{
+    tripletLength = noteBeats;
+    triplet = true;
     setChoiceShown (true);
 }
 
 void NoteLengthPicker::setChoiceShown (bool shown)
 {
+    choiceShown = shown;
+
     for (auto& button : buttons)
-        button->setToggleState (shown && juce::exactlyEqual (button->beats, length), juce::dontSendNotification);
+        button->setToggleState (shown && ! triplet && juce::exactlyEqual (button->beats, length), juce::dontSendNotification);
+
+    tripletButton.setToggleState (shown && triplet, juce::dontSendNotification);
+    tripletButton.repaint();
 }
 
 juce::Rectangle<int> NoteLengthPicker::getIdealBounds() const
 {
-    return { (int) buttons.size() * buttonSize + ((int) buttons.size() - 1) * gap + groupGap + buttonSize, buttonSize };
+    return { (int) buttons.size() * buttonSize + ((int) buttons.size() - 1) * gap + 2 * (groupGap + buttonSize), buttonSize };
 }
 
 void NoteLengthPicker::resized()
@@ -74,6 +102,7 @@ void NoteLengthPicker::resized()
         buttons[i]->setBounds ((int) i * (buttonSize + gap), 0, buttonSize, buttonSize);
 
     staccatoButton.setBounds (buttons.back()->getRight() + groupGap, 0, buttonSize, buttonSize);
+    tripletButton.setBounds (staccatoButton.getRight() + groupGap, 0, buttonSize, buttonSize);
 }
 
 //==============================================================================
@@ -149,4 +178,84 @@ void NoteLengthPicker::StaccatoButton::paintButton (juce::Graphics& g, bool high
 {
     g.setColour (controls::drawSymbolButtonTile (g, *this, highlighted, down));
     drawStaccato (g, getLocalBounds().toFloat().reduced (0.5f));
+}
+
+void NoteLengthPicker::drawTriplet (juce::Graphics& g, const MusicGlyphs& glyphs, double beats, juce::Rectangle<float> bounds)
+{
+    // The note a little lower and smaller-looking, under a 3
+    drawNote (g, glyphs, beats, bounds.withTrimmedTop (bounds.getHeight() * 0.22f).withTrimmedLeft (bounds.getWidth() * 0.12f));
+    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+    g.drawText ("3", bounds.withHeight (bounds.getHeight() * 0.4f).withTrimmedRight (bounds.getWidth() * 0.45f).translated (2.0f, 1.0f),
+                juce::Justification::centred, false);
+}
+
+//==============================================================================
+NoteLengthPicker::TripletButton::TripletButton (const MusicGlyphs& glyphsToUse, const double& beatsToShow)
+    : juce::Button ("Triplets"),
+      glyphs (glyphsToUse),
+      beats (beatsToShow)
+{
+}
+
+void NoteLengthPicker::TripletButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    g.setColour (controls::drawSymbolButtonTile (g, *this, highlighted, down));
+    drawTriplet (g, glyphs, beats, getLocalBounds().toFloat().reduced (0.5f));
+}
+
+//==============================================================================
+TripletLengthPanel::TripletLengthPanel (double chosenBeats)
+    : glyphs (NoteLengthPicker::glyphStaffSpace)
+{
+    heading.setText ("Triplet notes", juce::dontSendNotification);
+    heading.setFont (juce::FontOptions (13.0f));
+    heading.setBorderSize ({});
+    heading.setJustificationType (juce::Justification::centredLeft);
+    addAndMakeVisible (heading);
+
+    for (auto [beats, name] : { std::pair { 2.0, "Half" }, { 1.0, "Quarter" }, { 0.5, "Eighth" }, { 0.25, "16th" } })
+    {
+        auto button = std::make_unique<LengthButton> (glyphs, beats);
+        button->setTooltip (juce::String (name) + "-note triplets: three " + juce::String (name).toLowerCase()
+                            + " notes in the time of two");
+        button->setClickingTogglesState (false);
+        button->setToggleState (juce::exactlyEqual (beats, chosenBeats), juce::dontSendNotification);
+        button->setWantsKeyboardFocus (false);
+        button->onClick = [this, chosen = beats]
+        {
+            if (onChoose != nullptr)
+                onChoose (chosen);
+        };
+        addAndMakeVisible (*button);
+        buttons.push_back (std::move (button));
+    }
+
+    constexpr int size = NoteLengthPicker::buttonSize + 6;
+    setSize (12 + (int) buttons.size() * (size + 4) - 4 + 12, 12 + 20 + size + 12);
+}
+
+void TripletLengthPanel::resized()
+{
+    constexpr int size = NoteLengthPicker::buttonSize + 6;
+    auto area = getLocalBounds().reduced (12);
+    heading.setBounds (area.removeFromTop (20));
+
+    for (auto& button : buttons)
+    {
+        button->setBounds (area.removeFromLeft (size).withHeight (size));
+        area.removeFromLeft (4);
+    }
+}
+
+TripletLengthPanel::LengthButton::LengthButton (const MusicGlyphs& glyphsToUse, double beatsToShow)
+    : juce::Button ({}),
+      glyphs (glyphsToUse),
+      beats (beatsToShow)
+{
+}
+
+void TripletLengthPanel::LengthButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    g.setColour (controls::drawSymbolButtonTile (g, *this, highlighted, down));
+    NoteLengthPicker::drawTriplet (g, glyphs, beats, getLocalBounds().toFloat().reduced (3.5f));
 }
