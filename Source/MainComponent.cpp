@@ -2220,6 +2220,7 @@ void MainComponent::startStepRecording()
     stepRecording = true;
     stepKeysHeld.clear();
     stepChord.reset();
+    stepTuplet.reset();
     instrumentHost.takeRecordedKeys();      // what was played before doesn't count
     instrumentHost.setStepRecording (true);
     recordButton.setToggleState (true, juce::dontSendNotification);
@@ -2261,7 +2262,17 @@ void MainComponent::takeStepKeys()
             // chosen, or as fits in the measure, with a measure added at the end if it's past it.
             if (stepKeysHeld.empty())
             {
-                const auto start = playbackStarts[(size_t) page];
+                auto start = playbackStarts[(size_t) page];
+
+                // A tuplet left unfinished, with the marker where it left off, is gone on from at its end.
+                if (stepTuplet.has_value() && ! isTupletStepContinuing (page)
+                    && stepTuplet->page == page && std::abs (start - stepTuplet->next) < 1.0e-6)
+                    start = stepTuplet->tuplet.measure * beatsPerMeasure + stepTuplet->tuplet.beat + stepTuplet->tuplet.getLength();
+
+                // Anything new starts on a 64th note.
+                if (! isTupletStepContinuing (page))
+                    start = std::ceil (start * Score::slotsPerBeat - 1.0e-6) / Score::slotsPerBeat;
+
                 const auto measure = (int) std::floor (start / beatsPerMeasure + 1.0e-9);
 
                 history.beginGesture();
@@ -2270,8 +2281,19 @@ void MainComponent::takeStepKeys()
                     score.addMeasure();
 
                 const auto beat = start - measure * beatsPerMeasure;
+                const auto pitch = music::spellMidiNote (score.getKey(), key.noteNumber);
+                const auto staff = key.noteNumber >= 60 ? Staff::treble : Staff::bass;
+
+                if (noteLengthPicker.isTuplet() && pitch.step >= 0 && startTupletStep (page, start, staff, pitch))
+                {
+                    stepKeysHeld.insert (key.noteNumber);
+                    continue;
+                }
+
+                stepTuplet.reset();
                 const auto room = (int) std::lround ((beatsPerMeasure - beat) * Score::slotsPerBeat);
-                const auto slots = Score::fitNoteLength ((int) std::lround (noteLengthPicker.getLength() * Score::slotsPerBeat), room);
+                const auto chosen = noteLengthPicker.isTuplet() ? noteLengthPicker.getTupletLength() : noteLengthPicker.getLength();
+                const auto slots = Score::fitNoteLength ((int) std::lround (chosen * Score::slotsPerBeat), room);
                 stepChord = StepChord { measure, beat, (double) slots / Score::slotsPerBeat };
             }
 
@@ -2281,7 +2303,8 @@ void MainComponent::takeStepKeys()
             const auto pitch = music::spellMidiNote (score.getKey(), key.noteNumber);
             const auto staff = key.noteNumber >= 60 ? Staff::treble : Staff::bass;
 
-            if (pitch.step >= 0 && juce::isPositiveAndBelow (part, score.getNumParts()) && ! score.chordUsesStaff (part, stepChord->measure, staff))
+            if (pitch.step >= 0 && stepChord.has_value() && ! stepChord->tupletNote
+                && juce::isPositiveAndBelow (part, score.getNumParts()) && ! score.chordUsesStaff (part, stepChord->measure, staff))
                 score.addNote ({ staff, stepChord->measure, stepChord->beat, pitch, part, stepChord->length, noteLengthPicker.isStaccato() });
         }
         else
@@ -2292,7 +2315,16 @@ void MainComponent::takeStepKeys()
             // at the end.
             if (stepKeysHeld.empty() && stepChord.has_value())
             {
-                const auto next = stepChord->measure * beatsPerMeasure + stepChord->beat + stepChord->length;
+                auto next = stepChord->measure * beatsPerMeasure + stepChord->beat + stepChord->length;
+
+                // After a tuplet's last note, on from its end exactly.
+                if (stepChord->tupletNote && stepTuplet.has_value())
+                {
+                    next = stepTuplet->next;
+
+                    if (stepTuplet->placed >= stepTuplet->tuplet.getNumNotes())
+                        stepTuplet.reset();
+                }
 
                 while (score.getNumMeasures() * beatsPerMeasure <= next + 1.0e-9)
                     score.addMeasure();
@@ -2307,6 +2339,81 @@ void MainComponent::takeStepKeys()
             }
         }
     }
+}
+
+bool MainComponent::isTupletStepContinuing (int page) const
+{
+    if (! stepTuplet.has_value() || stepTuplet->page != page || ! noteLengthPicker.isTuplet()
+        || stepTuplet->placed >= stepTuplet->tuplet.getNumNotes()
+        || stepTuplet->tuplet.part != activePart
+        || noteLengthPicker.getTupletNotes() != stepTuplet->tuplet.getNumNotes()
+        || std::abs (playbackStarts[(size_t) page] - stepTuplet->next) > 1.0e-6)
+        return false;
+
+    // As long as it's still there, with as many notes as long: a note changed or a step undone
+    // leaves it to go on with.
+    const auto& tuplet = stepTuplet->tuplet;
+    const auto written = score.getTuplet (tuplet.part, tuplet.staff, tuplet.measure, tuplet.beat);
+    return written.has_value() && juce::exactlyEqual (written->beat, tuplet.beat) && written->getNumNotes() == tuplet.getNumNotes()
+        && juce::exactlyEqual (written->noteLength, tuplet.noteLength);
+}
+
+bool MainComponent::startTupletStep (int page, double start, Staff staff, music::Pitch pitch)
+{
+    const auto beatsPerMeasure = score.getBeatsPerMeasure();
+
+    if (isTupletStepContinuing (page))
+    {
+        // Going on with the tuplet as it's written now, undone or changed as it may be
+        auto& written = stepTuplet->tuplet;
+        written = *score.getTuplet (written.part, written.staff, written.measure, written.beat);
+        written.pitches[(size_t) stepTuplet->placed] = pitch;
+        score.addTuplet (written);
+    }
+    else
+    {
+        stepTuplet.reset();
+
+        if (! juce::isPositiveAndBelow (activePart, score.getNumParts()))
+            return false;
+
+        const auto measure = (int) std::floor (start / beatsPerMeasure + 1.0e-9);
+        const auto beat = start - measure * beatsPerMeasure;
+        const auto chosen = noteLengthPicker.getTupletLength();
+
+        // Its notes as long as chosen, or shorter, to fit in what's left of the measure, all
+        // the first's pitch until they're played
+        Tuplet tuplet { staff, measure, beat, activePart, chosen,
+                        std::vector<music::Pitch> ((size_t) noteLengthPicker.getTupletNotes(), pitch), noteLengthPicker.isStaccato() };
+
+        for (auto length : Score::tupletNoteLengths)
+        {
+            if (length > chosen + 1.0e-9)
+                continue;
+
+            tuplet.noteLength = length;
+
+            if (beat + tuplet.getLength() <= beatsPerMeasure + 1.0e-9)
+                break;
+        }
+
+        if (beat + tuplet.getLength() > beatsPerMeasure + 1.0e-9
+            || (! score.addTuplet (tuplet) && score.getTuplet (tuplet.part, tuplet.staff, tuplet.measure, tuplet.beat) != tuplet))
+            return false;
+
+        stepTuplet = StepTuplet { tuplet, page, 0, start };
+    }
+
+    // The step is the note's share of the tuplet, and the marker goes on to the next one's, or
+    // after the last, to the tuplet's end.
+    auto& step = *stepTuplet;
+    const auto& tuplet = step.tuplet;
+    const auto onset = tuplet.getNoteOnset (step.placed);
+    ++step.placed;
+    const auto end = step.placed >= tuplet.getNumNotes() ? tuplet.beat + tuplet.getLength() : tuplet.getNoteOnset (step.placed);
+    step.next = tuplet.measure * beatsPerMeasure + end;
+    stepChord = StepChord { tuplet.measure, onset, end - onset, true };
+    return true;
 }
 
 void MainComponent::startPlaying()
@@ -2363,17 +2470,17 @@ void MainComponent::pausePlayback()
     showPlaybackPosition();
 }
 
-std::optional<double> MainComponent::findPausedBeat (const PausedPosition& paused) const
+std::optional<double> MainComponent::findPausedBeat (const PausedPosition& position) const
 {
     auto times = 0;
 
     for (const auto& measure : playedMeasures)
     {
-        if (measure.page != paused.page || measure.measure != paused.measure)
+        if (measure.page != position.page || measure.measure != position.measure)
             continue;
 
-        if (times++ == paused.timesBefore)
-            return measure.start + juce::jmin (paused.beatsIn, (double) measure.beatsPerMeasure);
+        if (times++ == position.timesBefore)
+            return measure.start + juce::jmin (position.beatsIn, (double) measure.beatsPerMeasure);
     }
 
     return {};
@@ -3259,6 +3366,8 @@ void MainComponent::scoreReplaced()
     {
         instrumentHost.takeRecordedKeys();
         stepKeysHeld.clear();
+
+        stepTuplet.reset();
 
         if (std::exchange (stepChord, std::nullopt).has_value())
             history.endGesture();

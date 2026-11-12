@@ -529,7 +529,29 @@ private:
     {
         int measure;
         double beat, length;
+        bool tupletNote = false;        // one of a tuplet's notes, taking the step's first key
     };
+
+    /** The tuplet being written a step at a time, a note a step: as it's written so far, how many
+        of its notes have been played, and where the marker goes on to after the last of them.
+    */
+    struct StepTuplet
+    {
+        Tuplet tuplet;
+        int page = 0, placed = 0;
+        double next = 0.0;
+    };
+
+    /** Where a step goes when the note length chosen is a tuplet: as the next note of the tuplet
+        being written, if the marker's where it left off, or the first of a new one, with the
+        others the same pitch until they're played. False if a tuplet can't go there.
+    */
+    bool startTupletStep (int page, double start, Staff, music::Pitch);
+
+    /** Whether the next step goes on with the tuplet being written: the marker's where it left
+        off, a tuplet of as many notes is still chosen, and it's there as it was written.
+    */
+    bool isTupletStepContinuing (int page) const;
 
     /** Stops recording, writing the notes of the keys still down as ending at a point, or at the
         end of the score, so it's all undone in one go.
@@ -641,6 +663,7 @@ private:
     bool stepRecording = false;                      // recording a step at a time, while paused
     std::set<int> stepKeysHeld;                      // the keys down for the step being recorded
     std::optional<StepChord> stepChord;              // and where its notes are going
+    std::optional<StepTuplet> stepTuplet;            // the tuplet whose notes the steps are writing
     juce::TimedCallback stepKeysTimer { [this] { takeStepKeys(); } };
 
     controls::DialLookAndFeel dialLookAndFeel;
