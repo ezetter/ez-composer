@@ -1080,7 +1080,7 @@ double InstrumentHost::getBeatsPlayed (int64_t samplesIntoBlock) const noexcept
 
 void InstrumentHost::recordKeys (const juce::MidiBuffer& midi)
 {
-    if (! recording || ! playing)
+    if (! (recording && playing) && ! stepRecording)
         return;
 
     for (const auto metadata : midi)

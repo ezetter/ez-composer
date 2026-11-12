@@ -1,5 +1,7 @@
 #pragma once
 
+#include <set>
+
 #include "ChordEditor.h"
 #include "Controls.h"
 #include "InstrumentHost.h"
@@ -502,6 +504,33 @@ private:
     /** Writes the keys played since last time into the score, while recording. */
     void recordPlayedKeys();
 
+    /** What Pause does: playing, it stops where it's got to and stays paused there, and
+        recording, it goes on recording a step at a time; paused, it plays on from there,
+        recording as it plays if it was; and stopped, it pauses there, so Record then records a
+        step at a time without playing.
+    */
+    void pauseClicked();
+
+    /** Plays on from where it's paused, recording as it plays if it was recording a step at a time. */
+    void resumeFromPause();
+
+    /** Starts or stops recording a step at a time, while paused: the keys played together are
+        written into the active part where the ruler's marker is, as long as the note length
+        chosen, and the marker moves on by that much once they're let go.
+    */
+    void startStepRecording();
+    void stopStepRecording();
+
+    /** Writes the keys played since last time, recording a step at a time. */
+    void takeStepKeys();
+
+    /** Where a step's notes go, on the page being edited: its measure and beat, and how long they are, in beats */
+    struct StepChord
+    {
+        int measure;
+        double beat, length;
+    };
+
     /** Stops recording, writing the notes of the keys still down as ending at a point, or at the
         end of the score, so it's all undone in one go.
     */
@@ -608,6 +637,11 @@ private:
     PositionRuler positionRuler { score };     // under them, for choosing where the page plays from
     std::vector<double> playbackStarts { 0.0 };     // where Play and Record start on each page, in beats from its start
     std::optional<PausedPosition> pausedAt;          // where it was paused, until it plays again or the marker moves
+    bool paused = false;                             // Pause is down: stopped where it was, or before playing
+    bool stepRecording = false;                      // recording a step at a time, while paused
+    std::set<int> stepKeysHeld;                      // the keys down for the step being recorded
+    std::optional<StepChord> stepChord;              // and where its notes are going
+    juce::TimedCallback stepKeysTimer { [this] { takeStepKeys(); } };
 
     controls::DialLookAndFeel dialLookAndFeel;
     NoteLengthPicker noteLengthPicker;  // at the top left of the score, over the staves: the length of the notes that clicks add

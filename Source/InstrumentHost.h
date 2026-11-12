@@ -173,6 +173,11 @@ public:
     void setRecording (bool shouldRecord) noexcept { recording = shouldRecord; }
     bool isRecording() const noexcept { return recording; }
 
+    /** Starts or stops noting the keys played while the score isn't playing, for entering notes
+        a step at a time, for takeRecordedKeys(). Their beats don't mean anything.
+    */
+    void setStepRecording (bool shouldRecord) noexcept { stepRecording = shouldRecord; }
+
     /** The keys played while recording since this was last called, in the order they were played. */
     std::vector<RecordedKey> takeRecordedKeys();
 
@@ -352,6 +357,7 @@ private:
     juce::MidiBuffer playedMidi;              // what the keyboard and MIDI controllers play in a block
 
     std::atomic<bool> recording { false };
+    std::atomic<bool> stepRecording { false };
     juce::AbstractFifo recordedKeysFifo { 1024 };
     std::array<RecordedKey, 1024> recordedKeys;     // played on the audio thread, waiting to be taken on the message thread
     std::atomic<bool> midiInputReady { false };

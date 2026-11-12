@@ -215,7 +215,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     // Pause stops where it's got to, to carry on from there, where Stop goes back to the beginning.
     pauseButton.setButtonText ("Pause");
-    pauseButton.onClick = [this] { pausePlayback(); };
+    pauseButton.onClick = [this] { pauseClicked(); };
     updateTransportButtons();
 
     // Record plays the score too, and writes what's played on the keyboard into the active part.
@@ -702,7 +702,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
     if (key == juce::KeyPress::spaceKey)
     {
         if (instrumentHost.getPlaybackPosition().has_value())
-            pausePlayback();
+            pauseClicked();
         else
             togglePlayback();
 
@@ -2150,7 +2150,8 @@ void MainComponent::togglePlayback()
         if (instrumentHost.isRecording())
             finishRecording (position);
 
-        // Stopping, it's back to the beginning.
+        // Stopping, it's back to the beginning, and not paused.
+        paused = false;
         instrumentHost.stop();
         stopTimer();
         returnToBeginning();
@@ -2158,8 +2159,153 @@ void MainComponent::togglePlayback()
     }
     else
     {
-        startPlaying();
-        showPlaybackPosition();
+        // Paused, it plays on from there, recording as it plays if it was recording a step at a time.
+        resumeFromPause();
+    }
+}
+
+void MainComponent::pauseClicked()
+{
+    if (const auto position = instrumentHost.getPlaybackPosition())
+    {
+        // Recording, the keys held end here, and it goes on recording, a step at a time.
+        const auto wasRecording = instrumentHost.isRecording();
+
+        if (wasRecording)
+            finishRecording (position);
+
+        pausePlayback();
+        paused = true;
+
+        if (wasRecording)
+            startStepRecording();
+    }
+    else if (paused)
+    {
+        resumeFromPause();
+    }
+    else
+    {
+        // Stopped, it pauses where it would play from, so Record records a step at a time.
+        paused = true;
+    }
+
+    showPlaybackPosition();
+}
+
+void MainComponent::resumeFromPause()
+{
+    paused = false;
+    const auto wasStepping = stepRecording;
+
+    if (wasStepping)
+        stopStepRecording();
+
+    startPlaying();
+
+    // Recording a step at a time, it goes on recording as it plays.
+    if (wasStepping && instrumentHost.getPlaybackPosition().has_value())
+    {
+        history.beginGesture();
+        instrumentHost.takeRecordedKeys();
+        instrumentHost.setRecording (true);
+        recordButton.setToggleState (true, juce::dontSendNotification);
+    }
+
+    showPlaybackPosition();
+}
+
+void MainComponent::startStepRecording()
+{
+    stepRecording = true;
+    stepKeysHeld.clear();
+    stepChord.reset();
+    instrumentHost.takeRecordedKeys();      // what was played before doesn't count
+    instrumentHost.setStepRecording (true);
+    recordButton.setToggleState (true, juce::dontSendNotification);
+    stepKeysTimer.startTimerHz (60);
+}
+
+void MainComponent::stopStepRecording()
+{
+    if (! stepRecording)
+        return;
+
+    // The keys still down are a step of their own.
+    takeStepKeys();
+
+    if (stepChord.has_value())
+    {
+        stepKeysHeld.clear();
+        stepChord.reset();
+        history.endGesture();
+    }
+
+    stepRecording = false;
+    instrumentHost.setStepRecording (false);
+    stepKeysTimer.stopTimer();
+    recordButton.setToggleState (false, juce::dontSendNotification);
+}
+
+void MainComponent::takeStepKeys()
+{
+    const auto page = piece.getCurrentPage();
+    const auto part = activePart;
+    const auto beatsPerMeasure = score.getBeatsPerMeasure();
+
+    for (const auto& key : instrumentHost.takeRecordedKeys())
+    {
+        if (key.isDown)
+        {
+            // The first key of a step: its notes go where the marker is, as long as the note length
+            // chosen, or as fits in the measure, with a measure added at the end if it's past it.
+            if (stepKeysHeld.empty())
+            {
+                const auto start = playbackStarts[(size_t) page];
+                const auto measure = (int) std::floor (start / beatsPerMeasure + 1.0e-9);
+
+                history.beginGesture();
+
+                while (score.getNumMeasures() <= measure)
+                    score.addMeasure();
+
+                const auto beat = start - measure * beatsPerMeasure;
+                const auto room = (int) std::lround ((beatsPerMeasure - beat) * Score::slotsPerBeat);
+                const auto slots = Score::fitNoteLength ((int) std::lround (noteLengthPicker.getLength() * Score::slotsPerBeat), room);
+                stepChord = StepChord { measure, beat, (double) slots / Score::slotsPerBeat };
+            }
+
+            stepKeysHeld.insert (key.noteNumber);
+
+            // On the treble staff from middle C up, and the bass staff below it
+            const auto pitch = music::spellMidiNote (score.getKey(), key.noteNumber);
+            const auto staff = key.noteNumber >= 60 ? Staff::treble : Staff::bass;
+
+            if (pitch.step >= 0 && juce::isPositiveAndBelow (part, score.getNumParts()) && ! score.chordUsesStaff (part, stepChord->measure, staff))
+                score.addNote ({ staff, stepChord->measure, stepChord->beat, pitch, part, stepChord->length, noteLengthPicker.isStaccato() });
+        }
+        else
+        {
+            stepKeysHeld.erase (key.noteNumber);
+
+            // Once they're all let go, the marker moves on past them, adding a measure if it's
+            // at the end.
+            if (stepKeysHeld.empty() && stepChord.has_value())
+            {
+                const auto next = stepChord->measure * beatsPerMeasure + stepChord->beat + stepChord->length;
+
+                while (score.getNumMeasures() * beatsPerMeasure <= next + 1.0e-9)
+                    score.addMeasure();
+
+                playbackStarts[(size_t) page] = next;
+                pausedAt.reset();
+                stepChord.reset();
+                history.endGesture();
+
+                scrollToMeasure ((int) std::floor (next / beatsPerMeasure + 1.0e-9));
+                showPlaybackPosition();
+            }
+        }
     }
 }
 
@@ -2240,10 +2386,12 @@ void MainComponent::updateTransportButtons()
     playButton.setSymbol (playing ? controls::TransportButton::Symbol::stop : controls::TransportButton::Symbol::play);
     playButton.setTooltip (playing ? "Stop, and go back to the beginning" : "Play from the ruler's marker (space)");
 
-    // Only what's playing can be paused, which the space bar does too.
-    pauseButton.setEnabled (playing);
-    pauseButton.setTooltip (playing ? "Pause: stop where it's got to, and carry on from there with Play (space)"
-                                    : "Pause, while it plays: it stops where it's got to, for Play to carry on from there");
+    // Pause is down while paused, before playing or where it stopped.
+    pauseButton.setToggleState (paused, juce::dontSendNotification);
+    pauseButton.setTooltip (playing ? "Pause: stop where it's got to, and carry on from there with Pause or Play (space). Recording, record a note at a time"
+                          : paused  ? (stepRecording ? "Paused, recording a step at a time: play notes to write them at the marker. Pause plays on, recording"
+                                                     : "Paused: Pause or Play plays from the marker, and Record records a step at a time, without playing")
+                                    : "Pause: stay paused at the marker, so Record records a step at a time, without playing");
 }
 
 void MainComponent::setMakingMP3 (bool shouldMake)
@@ -2687,10 +2835,26 @@ void MainComponent::stepMeasure (int direction)
 
 void MainComponent::toggleRecording()
 {
+    // Recording a step at a time, Record stops recording, still paused.
+    if (stepRecording)
+    {
+        stopStepRecording();
+        showPlaybackPosition();
+        return;
+    }
+
     // Recording again stops recording, and the score plays on.
     if (instrumentHost.isRecording())
     {
         finishRecording (instrumentHost.getPlaybackPosition());
+        return;
+    }
+
+    // Paused, it records a step at a time, without playing.
+    if (paused && ! instrumentHost.getPlaybackPosition().has_value())
+    {
+        startStepRecording();
+        showPlaybackPosition();
         return;
     }
 
@@ -2767,8 +2931,11 @@ void MainComponent::showPlaybackPosition()
 
     updateTransportButtons();
 
-    // Shown where it is in the page as it's written, if it's playing the page being edited
-    const auto position = at.has_value() && at->page == piece.getCurrentPage() ? std::optional (at->beat) : std::nullopt;
+    // Shown where it is in the page as it's written, if it's playing the page being edited, or
+    // recording a step at a time, where the next step goes
+    const auto position = at.has_value() && at->page == piece.getCurrentPage() ? std::optional (at->beat)
+                        : stepRecording ? std::optional (playbackStarts[(size_t) piece.getCurrentPage()])
+                                        : std::nullopt;
 
     for (auto& view : staffSystems.views)
         view->setPlaybackPosition (position);
@@ -3088,6 +3255,22 @@ void MainComponent::scoreReplaced()
 {
     // A new score starts from the beginning, with nothing playing, recording or selected, and
     // nothing to undo. Keys held while recording the old one aren't written into it.
+    if (stepRecording)
+    {
+        instrumentHost.takeRecordedKeys();
+        stepKeysHeld.clear();
+
+        if (std::exchange (stepChord, std::nullopt).has_value())
+            history.endGesture();
+
+        stepRecording = false;
+        instrumentHost.setStepRecording (false);
+        stepKeysTimer.stopTimer();
+        recordButton.setToggleState (false, juce::dontSendNotification);
+    }
+
+    paused = false;
+
     if (instrumentHost.isRecording())
     {
         instrumentHost.setRecording (false);
