@@ -64,7 +64,7 @@ struct Tuplet
     int measure;
     double beat;            // where it starts, from the start of the measure, on a 32nd note
     int part = 0;
-    double noteLength = 0.5;    // each note's written length, in beats: 2 for half notes, 1 for quarters, 0.5 for eighths and 0.25 for 16ths
+    double noteLength = 0.5;    // each note's written length, in beats: 2 for half notes, 1 for quarters, 0.5 for eighths, 0.25 for 16ths and 0.125 for 32nds
     std::vector<music::Pitch> pitches;  // one for each of its notes, from 2 to 10
     bool staccato = false;
 
@@ -508,8 +508,8 @@ public:
     bool toggleTie (int part, Staff, int measure, double beat, int otherMeasure, double otherBeat, music::Pitch);
 
     //==============================================================================
-    /** The lengths a tuplet's notes can be, in beats: half notes, quarters, eighths and 16ths. */
-    static constexpr std::array<double, 4> tupletNoteLengths { 2.0, 1.0, 0.5, 0.25 };
+    /** The lengths a tuplet's notes can be, in beats: half notes, quarters, eighths, 16ths and 32nds. */
+    static constexpr std::array<double, 5> tupletNoteLengths { 2.0, 1.0, 0.5, 0.25, 0.125 };
 
     /** Writes a tuplet, in place of whatever's on its staff for as long as it lasts: notes
         starting then, and other tuplets it overlaps, are taken out, and a note held over into it

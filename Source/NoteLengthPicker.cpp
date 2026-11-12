@@ -258,7 +258,7 @@ TupletLengthPanel::TupletLengthPanel (double chosenBeats, int chosenNotes)
         countButtons.push_back (std::move (button));
     }
 
-    for (auto [length, name] : { std::pair { 2.0, "Half" }, { 1.0, "Quarter" }, { 0.5, "Eighth" }, { 0.25, "16th" } })
+    for (auto [length, name] : { std::pair { 2.0, "Half" }, { 1.0, "Quarter" }, { 0.5, "Eighth" }, { 0.25, "16th" }, { 0.125, "32nd" } })
     {
         auto button = std::make_unique<LengthButton> (glyphs, length, numNotes);
         button->setTooltip (juce::String (name) + "-note tuplets");

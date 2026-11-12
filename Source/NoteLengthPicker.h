@@ -128,7 +128,7 @@ private:
 };
 
 /** How many notes tuplets have, from 2 to 10, as a row of numbered buttons, and the lengths their
-    notes can be, as buttons under them: half notes, quarters, eighths and 16ths, each with the
+    notes can be, as buttons under them: half notes, quarters, eighths, 16ths and 32nds, each with the
     number over it. One of each is chosen. Lengths whose tuplets would be longer than a 4/4
     measure can't be chosen.
 */
