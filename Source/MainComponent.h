@@ -613,12 +613,11 @@ private:
     NoteLengthPicker noteLengthPicker;  // at the top left of the score, over the staves: the length of the notes that clicks add
     DynamicPicker dynamicPicker;        // beside it: a dynamic or hairpin to mark instead
 
-    /** Which notation controls show, after the buttons choosing them: the note lengths, with
+    /** Which notation controls show, after the box choosing them: the note lengths, with
         staccato and triplets; the dynamics and hairpins; the repeat signs and endings; or the pedal.
     */
     enum class NotationGroup { notes, dynamics, flow, pedal };
-    std::array<controls::TileTextButton, 4> notationGroupButtons { controls::TileTextButton ("Notes"), controls::TileTextButton ("Dynamics"),
-                                                                    controls::TileTextButton ("Flow"), controls::TileTextButton ("Pedal") };
+    juce::ComboBox notationGroupBox;     // at the top left of the score, over the staves: which group shows
     NotationGroup notationGroup = NotationGroup::notes;
 
     /** Shows one group's controls, and hides the others. Something chosen from a group that's

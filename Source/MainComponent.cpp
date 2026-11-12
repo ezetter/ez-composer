@@ -30,7 +30,7 @@ namespace
     constexpr int eraserMargin = 10;            // from the eraser to the scroll bar
     constexpr int editButtonWidth = 44, editButtonGap = 6;     // the Edit button, to the eraser's left
     constexpr int selectButtonWidth = 56;                       // and Select, between them
-    constexpr std::array<int, 4> notationGroupButtonWidths { 58, 78, 48, 54 };     // Notes, Dynamics, Flow and Pedal
+    constexpr int notationGroupBoxWidth = 112;
     const char* const notationGroupKey = "notationGroup";
     constexpr int selectionButtonHeight = 26, deleteMeasuresWidth = 64, moveMeasuresWidth = 56;
     constexpr int cloneButtonWidth = 56, cloneButtonHeight = 26;
@@ -364,20 +364,15 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     noteLengthPicker.onTripletClicked = [this] { chooseTripletLength(); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
 
-    // Which notation controls show, as last time
-    for (size_t i = 0; i < notationGroupButtons.size(); ++i)
+    // Which notation controls show, as last time: the box's ids are the groups', from 1.
+    notationGroupBox.addItemList ({ "Notes", "Dynamics", "Flow", "Pedal" }, 1);
+    notationGroupBox.setTooltip ("Which notation controls show: note lengths, staccato and triplets; dynamics and hairpins; repeats and endings; or the pedal");
+    notationGroupBox.setWantsKeyboardFocus (false);
+    notationGroupBox.onChange = [this]
     {
-        auto& button = notationGroupButtons[i];
-        button.setRadioGroupId (2);
-        button.setClickingTogglesState (true);
-        button.onClick = [this, i] { showNotationGroup ((NotationGroup) i); };
-        addAndMakeVisible (button);
-    }
-
-    notationGroupButtons[0].setTooltip ("Show the note lengths, staccato and triplets");
-    notationGroupButtons[1].setTooltip ("Show the dynamics, crescendo and decrescendo");
-    notationGroupButtons[2].setTooltip ("Show the repeat signs and first and second endings");
-    notationGroupButtons[3].setTooltip ("Show the sustain pedal");
+        if (const auto id = notationGroupBox.getSelectedId(); id > 0)
+            showNotationGroup ((NotationGroup) (id - 1));
+    };
     eraserButton.onClick = [this] { setErasing (! eraserButton.getToggleState()); };
     editButton.setTooltip ("Edit notes: drag a note to move it, or click one to change its length, make it staccato, or delete it");
     editButton.onClick = [this] { setEditing (! editButton.getToggleState()); };
@@ -425,6 +420,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     addAndMakeVisible (staffViewport);
 
     addAndMakeVisible (volumeColumn);
+    addAndMakeVisible (notationGroupBox);
     addAndMakeVisible (noteLengthPicker);
     addAndMakeVisible (dynamicPicker);
 
@@ -653,16 +649,9 @@ void MainComponent::resized()
 
     // The note length and dynamic buttons stay in the top left corner of the score, over the
     // staves as they scroll, and the eraser in the top right corner, clear of the scroll bar.
-    // The buttons choosing which notation controls show come first, then the controls.
-    auto groupX = volumeColumn.getX() + 10;
-
-    for (size_t i = 0; i < notationGroupButtons.size(); ++i)
-    {
-        notationGroupButtons[i].setBounds (groupX, staffViewport.getY() + toolButtonsTop, notationGroupButtonWidths[i], toolButtonsHeight);
-        groupX += notationGroupButtonWidths[i] + 3;
-    }
-
-    noteLengthPicker.setTopLeftPosition (groupX + 11, staffViewport.getY() + toolButtonsTop);
+    // The box choosing which notation controls show comes first, then the controls.
+    notationGroupBox.setBounds (volumeColumn.getX() + 10, staffViewport.getY() + toolButtonsTop, notationGroupBoxWidth, toolButtonsHeight);
+    noteLengthPicker.setTopLeftPosition (notationGroupBox.getRight() + 12, staffViewport.getY() + toolButtonsTop);
     dynamicPicker.setTopLeftPosition (noteLengthPicker.getX(), noteLengthPicker.getY());
     eraserButton.setBounds (staffViewport.getRight() - staffViewport.getScrollBarThickness() - eraserMargin - EraserButton::buttonWidth,
                             noteLengthPicker.getY(), EraserButton::buttonWidth, EraserButton::buttonHeight);
@@ -3122,8 +3111,7 @@ void MainComponent::showNotationGroup (NotationGroup group)
     notationGroup = group;
     settings.setValue (notationGroupKey, (int) group);
 
-    for (size_t i = 0; i < notationGroupButtons.size(); ++i)
-        notationGroupButtons[i].setToggleState ((NotationGroup) i == group, juce::dontSendNotification);
+    notationGroupBox.setSelectedId ((int) group + 1, juce::dontSendNotification);
 
     noteLengthPicker.setVisible (group == NotationGroup::notes);
     dynamicPicker.setVisible (group != NotationGroup::notes);
