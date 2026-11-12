@@ -30,6 +30,8 @@ namespace
     constexpr int eraserMargin = 10;            // from the eraser to the scroll bar
     constexpr int editButtonWidth = 44, editButtonGap = 6;     // the Edit button, to the eraser's left
     constexpr int selectButtonWidth = 56;                       // and Select, between them
+    constexpr std::array<int, 4> notationGroupButtonWidths { 58, 78, 48, 54 };     // Notes, Dynamics, Flow and Pedal
+    const char* const notationGroupKey = "notationGroup";
     constexpr int selectionButtonHeight = 26, deleteMeasuresWidth = 64, moveMeasuresWidth = 56;
     constexpr int cloneButtonWidth = 56, cloneButtonHeight = 26;
     constexpr int rightMargin = measureButtonsGap + measureButtonsWidth + 12;      // after the final barline, for the measure buttons
@@ -361,6 +363,21 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
     noteLengthPicker.onTripletClicked = [this] { chooseTripletLength(); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
+
+    // Which notation controls show, as last time
+    for (size_t i = 0; i < notationGroupButtons.size(); ++i)
+    {
+        auto& button = notationGroupButtons[i];
+        button.setRadioGroupId (2);
+        button.setClickingTogglesState (true);
+        button.onClick = [this, i] { showNotationGroup ((NotationGroup) i); };
+        addAndMakeVisible (button);
+    }
+
+    notationGroupButtons[0].setTooltip ("Show the note lengths, staccato and triplets");
+    notationGroupButtons[1].setTooltip ("Show the dynamics, crescendo and decrescendo");
+    notationGroupButtons[2].setTooltip ("Show the repeat signs and first and second endings");
+    notationGroupButtons[3].setTooltip ("Show the sustain pedal");
     eraserButton.onClick = [this] { setErasing (! eraserButton.getToggleState()); };
     editButton.setTooltip ("Edit notes: drag a note to move it, or click one to change its length, make it staccato, or delete it");
     editButton.onClick = [this] { setEditing (! editButton.getToggleState()); };
@@ -410,6 +427,9 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     addAndMakeVisible (volumeColumn);
     addAndMakeVisible (noteLengthPicker);
     addAndMakeVisible (dynamicPicker);
+
+    // Only the notation controls shown last are visible.
+    showNotationGroup ((NotationGroup) juce::jlimit (0, 3, settings.getIntValue (notationGroupKey, 0)));
     addAndMakeVisible (eraserButton);
     addAndMakeVisible (editButton);
     addAndMakeVisible (selectButton);
@@ -633,8 +653,17 @@ void MainComponent::resized()
 
     // The note length and dynamic buttons stay in the top left corner of the score, over the
     // staves as they scroll, and the eraser in the top right corner, clear of the scroll bar.
-    noteLengthPicker.setTopLeftPosition (volumeColumn.getX() + 10, staffViewport.getY() + toolButtonsTop);
-    dynamicPicker.setTopLeftPosition (noteLengthPicker.getRight() + 14, noteLengthPicker.getY());
+    // The buttons choosing which notation controls show come first, then the controls.
+    auto groupX = volumeColumn.getX() + 10;
+
+    for (size_t i = 0; i < notationGroupButtons.size(); ++i)
+    {
+        notationGroupButtons[i].setBounds (groupX, staffViewport.getY() + toolButtonsTop, notationGroupButtonWidths[i], toolButtonsHeight);
+        groupX += notationGroupButtonWidths[i] + 3;
+    }
+
+    noteLengthPicker.setTopLeftPosition (groupX + 11, staffViewport.getY() + toolButtonsTop);
+    dynamicPicker.setTopLeftPosition (noteLengthPicker.getX(), noteLengthPicker.getY());
     eraserButton.setBounds (staffViewport.getRight() - staffViewport.getScrollBarThickness() - eraserMargin - EraserButton::buttonWidth,
                             noteLengthPicker.getY(), EraserButton::buttonWidth, EraserButton::buttonHeight);
     selectButton.setBounds (eraserButton.getBounds().withWidth (selectButtonWidth).translated (-selectButtonWidth - editButtonGap, 0));
@@ -1668,7 +1697,12 @@ void MainComponent::setMarking (std::optional<music::Marking> marking)
     }
 
     stopSelecting();
+
+    // Its group shows, if it doesn't already.
     dynamicPicker.setChoice (marking);
+    showNotationGroup (DynamicPicker::getGroup (*marking) == DynamicPicker::Group::flow    ? NotationGroup::flow
+                     : DynamicPicker::getGroup (*marking) == DynamicPicker::Group::pedal   ? NotationGroup::pedal
+                                                                                            : NotationGroup::dynamics);
     noteLengthPicker.setChoiceShown (false);
     eraserButton.setToggleState (false, juce::dontSendNotification);
 
@@ -3081,4 +3115,26 @@ void MainComponent::showDocumentTitle()
 {
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
         window->setName (document.getDocumentTitle() + (document.hasChangedSinceSaved() ? juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x94 Edited")) : juce::String()));
+}
+
+void MainComponent::showNotationGroup (NotationGroup group)
+{
+    notationGroup = group;
+    settings.setValue (notationGroupKey, (int) group);
+
+    for (size_t i = 0; i < notationGroupButtons.size(); ++i)
+        notationGroupButtons[i].setToggleState ((NotationGroup) i == group, juce::dontSendNotification);
+
+    noteLengthPicker.setVisible (group == NotationGroup::notes);
+    dynamicPicker.setVisible (group != NotationGroup::notes);
+
+    if (group != NotationGroup::notes)
+        dynamicPicker.showGroup (group == NotationGroup::dynamics ? DynamicPicker::Group::dynamics
+                               : group == NotationGroup::flow     ? DynamicPicker::Group::flow
+                                                                  : DynamicPicker::Group::pedal);
+
+    // A dynamic, repeat sign or pedal chosen from a group that's hidden goes, and clicks add notes again.
+    if (const auto chosen = dynamicPicker.getChoice();
+        chosen.has_value() && (group == NotationGroup::notes || DynamicPicker::getGroup (*chosen) != dynamicPicker.getShownGroup()))
+        resumeAddingNotes();
 }

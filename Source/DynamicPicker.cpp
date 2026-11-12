@@ -76,7 +76,7 @@ DynamicPicker::DynamicPicker()
         addAndMakeVisible (*button);
     }
 
-    setSize (getIdealBounds().getWidth(), getIdealBounds().getHeight());
+    showGroup (Group::dynamics);
 }
 
 void DynamicPicker::setChoice (std::optional<music::Marking> newChoice)
@@ -87,18 +87,50 @@ void DynamicPicker::setChoice (std::optional<music::Marking> newChoice)
         button->setToggleState (button->marking == choice, juce::dontSendNotification);
 }
 
+DynamicPicker::Group DynamicPicker::getGroup (const music::Marking& marking)
+{
+    return std::holds_alternative<music::Repeat> (marking) ? Group::flow
+         : std::holds_alternative<music::Pedal> (marking)  ? Group::pedal
+                                                           : Group::dynamics;
+}
+
+void DynamicPicker::showGroup (Group group)
+{
+    shownGroup = group;
+
+    for (auto& button : buttons)
+        button->setVisible (getGroup (button->marking) == group);
+
+    setSize (getIdealBounds().getWidth(), getIdealBounds().getHeight());
+    resized();
+}
+
 juce::Rectangle<int> DynamicPicker::getIdealBounds() const
 {
-    return { (int) buttons.size() * buttonWidth + ((int) buttons.size() - 1) * gap + 3 * groupGap, buttonHeight };
+    // The dynamics have the hairpins a little apart after them.
+    auto count = 0;
+
+    for (const auto& button : buttons)
+        count += getGroup (button->marking) == shownGroup ? 1 : 0;
+
+    return { count * buttonWidth + juce::jmax (0, count - 1) * gap + (shownGroup == Group::dynamics ? groupGap : 0), buttonHeight };
 }
 
 void DynamicPicker::resized()
 {
-    for (size_t i = 0; i < buttons.size(); ++i)
-        buttons[i]->setBounds ((int) i * (buttonWidth + gap) + (i >= music::allDynamics.size() ? groupGap : 0)
-                                   + (i >= music::allDynamics.size() + 2 ? groupGap : 0)
-                                   + (i >= music::allDynamics.size() + 3 ? groupGap : 0),
-                               0, buttonWidth, buttonHeight);
+    auto x = 0;
+
+    for (const auto& button : buttons)
+    {
+        if (getGroup (button->marking) != shownGroup)
+            continue;
+
+        if (std::holds_alternative<music::Hairpin> (button->marking) && std::get<music::Hairpin> (button->marking) == music::Hairpin::crescendo)
+            x += groupGap;
+
+        button->setBounds (x, 0, buttonWidth, buttonHeight);
+        x += buttonWidth + gap;
+    }
 }
 
 //==============================================================================

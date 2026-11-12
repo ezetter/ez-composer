@@ -12,7 +12,8 @@
 /** Small buttons, side by side, showing the dynamics from ppp to fff, then a crescendo and a
     decrescendo hairpin, then the sustain pedal, then start and end repeat signs and first and
     second endings, for choosing one
-    for the score to mark. Clicking the chosen one again goes back to none.
+    for the score to mark. Clicking the chosen one again goes back to none. Only one group shows
+    at a time: the dynamics and hairpins, the repeat signs and endings, or the pedal.
 */
 class DynamicPicker final : public juce::Component
 {
@@ -28,7 +29,17 @@ public:
     /** Called when a button's clicked, with what's chosen now, or none. */
     std::function<void (std::optional<music::Marking>)> onChange;
 
-    /** The size the buttons need, side by side. */
+    /** The groups of buttons, one shown at a time */
+    enum class Group { dynamics, flow, pedal };
+
+    /** The group a marking's button is in */
+    static Group getGroup (const music::Marking&);
+
+    /** Shows only one group's buttons, from the left, and fits the picker to them. */
+    void showGroup (Group);
+    Group getShownGroup() const noexcept { return shownGroup; }
+
+    /** The size the buttons shown need, side by side. */
     juce::Rectangle<int> getIdealBounds() const;
 
     void resized() override;
@@ -51,6 +62,7 @@ private:
     MusicGlyphs glyphs;
     std::array<std::unique_ptr<MarkingButton>, music::allDynamics.size() + 6> buttons;
     std::optional<music::Marking> choice;
+    Group shownGroup = Group::dynamics;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DynamicPicker)
 };
