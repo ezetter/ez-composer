@@ -42,9 +42,9 @@ namespace
         return tones;
     }
 
-    /** Rests filling an empty stretch of a measure, from one 32nd note to another. A whole beat
+    /** Rests filling an empty stretch of a measure, from one 64th note to another. A whole beat
         gets a quarter rest, and two that make up the first half of 4/4 or 3/4, or the second half
-        of 4/4, share a half rest. Part of a beat gets the longest of an eighth, 16th or 32nd rest
+        of 4/4, share a half rest. Part of a beat gets the longest of an eighth, 16th, 32nd or 64th rest
         that starts where it does, in step with the beat, and fits.
     */
     void addRests (std::vector<StaffEvent>& events, int from, int to, int beatsPerMeasure)
@@ -354,7 +354,7 @@ namespace
 
     StaffContent getNotesContent (const Score& score, int part, Staff staff, int measure, const std::array<int, 7>& keyAlterations)
     {
-        // Notes start on 32nd notes: on a beat, or a number of 32nds through one.
+        // Notes start on 64th notes: on a beat, or a number of 64ths through one.
         const auto beats = score.getBeatsPerMeasure();
         const auto slots = beats * Score::slotsPerBeat;
         const auto beatOf = [] (int slot) { return (double) slot / Score::slotsPerBeat; };
@@ -452,7 +452,8 @@ Duration getDurationForBeats (double beats)
          : beats >= 0.75 ? Duration::dottedEighth
          : beats >= 0.5 ? Duration::eighth
          : beats >= 0.25 ? Duration::sixteenth
-                         : Duration::thirtySecond;
+         : beats >= 0.125 ? Duration::thirtySecond
+                          : Duration::sixtyFourth;
 }
 
 double StaffEvent::getPlayedBeats() const noexcept
@@ -474,6 +475,7 @@ double getBeats (Duration duration)
         case Duration::eighth:      return 0.5;
         case Duration::sixteenth:   return 0.25;
         case Duration::thirtySecond: return 0.125;
+        case Duration::sixtyFourth: return 0.0625;
     }
 
     return 1.0;

@@ -43,8 +43,8 @@ public:
     /** Forgets the keys still down, without writing them. */
     void clear() noexcept { held.clear(); }
 
-    /** What notes start and end on, in 32nds: a 16th note. */
-    static constexpr int grid = 2;
+    /** What notes start and end on, in the score's slots: a 16th note. */
+    static constexpr int grid = Score::slotsPerBeat / 4;
 
 private:
     struct HeldKey
@@ -54,14 +54,14 @@ private:
         Staff staff;
         int page;
         double beat;                    // where it went down, from the start of its page, as it's played
-        int start;                      // where its note starts, in 32nds from the start of its page, as it's played
+        int start;                      // where its note starts, in 64ths from the start of its page, as it's played
         std::optional<int> cut;         // where another note on its staff starts, if one has since
     };
 
     /** Writes a key's note, ending at a beat of its page, or a negative one for the end of the page. */
     void write (const HeldKey&, double endBeat);
 
-    /** How long a page is, as it's played, its repeats and all, in 32nds. */
+    /** How long a page is, as it's played, its repeats and all, in 64ths. */
     static int getScoreSlots (const Score&);
 
     Piece& piece;

@@ -2,7 +2,7 @@
 
 #include "Score.h"
 
-enum class Duration { whole, dottedHalf, half, quarter, eighth, sixteenth, thirtySecond, dottedQuarter, dottedEighth };
+enum class Duration { whole, dottedHalf, half, quarter, eighth, sixteenth, thirtySecond, dottedQuarter, dottedEighth, sixtyFourth };
 
 /** Whether a note or rest is written with a dot after it, making it half as long again. */
 bool isDotted (Duration);
@@ -35,7 +35,7 @@ struct StaffContent
 
     Source source = Source::notes;
     std::vector<StaffEvent> events;     // in time order
-    int notesPerBeat = 1;               // 2 for eighths, 4 for 16ths and 8 for 32nds
+    int notesPerBeat = 1;               // 2 for eighths, 4 for 16ths, 8 for 32nds and 16 for 64ths
 
     /** The notes tied to the next note of the same pitch, by when they start, in beats. */
     std::vector<std::pair<double, music::Pitch>> tiedNotes;
@@ -66,7 +66,7 @@ std::vector<music::Tone> getChordNoteChoices (const Score&, int part, int measur
 */
 Duration getFullMeasureDuration (int beatsPerMeasure);
 
-/** The longest note that lasts no longer than this many beats: a 32nd, 16th, eighth, dotted
+/** The longest note that lasts no longer than this many beats: a 64th, 32nd, 16th, eighth, dotted
     eighth, quarter, dotted quarter, half, dotted half or whole note.
 */
 Duration getDurationForBeats (double beats);

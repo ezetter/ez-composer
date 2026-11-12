@@ -82,7 +82,7 @@ namespace
 
     float getBeatWidth (int notesPerBeat)
     {
-        return notesPerBeat >= 8 ? 17.0f : notesPerBeat >= 6 ? 13.0f : notesPerBeat >= 4 ? 10.0f : notesPerBeat == 3 ? 8.0f : notesPerBeat == 2 ? 6.4f : 5.0f;
+        return notesPerBeat >= 16 ? 30.0f : notesPerBeat >= 12 ? 23.0f : notesPerBeat >= 8 ? 17.0f : notesPerBeat >= 6 ? 13.0f : notesPerBeat >= 4 ? 10.0f : notesPerBeat == 3 ? 8.0f : notesPerBeat == 2 ? 6.4f : 5.0f;
     }
 
     /** How wide a measure is, but for room for an end repeat: as wide as its beats need, with room
@@ -119,13 +119,20 @@ namespace
         return duration != Duration::whole;
     }
 
-    /** How many flags a note has on its own, or beams when it's beamed: 1 for an eighth, 2 for a 16th and 3 for a 32nd. */
+    /** How many flags a note has on its own, or beams when it's beamed: 1 for an eighth, 2 for a 16th, 3 for a 32nd and 4 for a 64th. */
     int getFlagCount (Duration duration)
     {
         return duration == Duration::eighth || duration == Duration::dottedEighth ? 1
              : duration == Duration::sixteenth ? 2
              : duration == Duration::thirtySecond ? 3
+             : duration == Duration::sixtyFourth ? 4
                                                   : 0;
+    }
+
+    /** How much longer than usual a stem with flags is, in staff spaces, so they fit */
+    float getExtraStemLength (int flags)
+    {
+        return flags == 4 ? 2.0f : flags == 3 ? 1.25f : flags == 2 ? 0.5f : 0.0f;
     }
 
     juce::juce_wchar getNoteheadGlyph (Duration duration)
@@ -140,7 +147,8 @@ namespace
             case Duration::dottedEighth:
             case Duration::eighth:
             case Duration::sixteenth:
-            case Duration::thirtySecond: break;
+            case Duration::thirtySecond:
+            case Duration::sixtyFourth: break;
         }
 
         return Smufl::noteheadBlack;
@@ -164,6 +172,7 @@ namespace
             case Duration::eighth:       return Smufl::rest8th;
             case Duration::sixteenth:    return Smufl::rest16th;
             case Duration::thirtySecond: return Smufl::rest32nd;
+            case Duration::sixtyFourth:  return Smufl::rest64th;
         }
 
         return Smufl::restQuarter;
@@ -1134,9 +1143,11 @@ juce::PopupMenu StaffView::createNoteMenu (const Note& note) const
         return std::make_unique<juce::DrawableImage> (image);
     };
 
-    for (auto [slots, name] : { std::pair { 32, "Whole note" }, { 24, "Dotted half note" }, { 16, "Half note" },
-                                { 12, "Dotted quarter note" }, { 8, "Quarter note" }, { 6, "Dotted eighth note" },
-                                { 4, "Eighth note" }, { 2, "16th note" }, { 1, "32nd note" } })
+    constexpr auto beat = Score::slotsPerBeat;
+
+    for (auto [slots, name] : { std::pair { 4 * beat, "Whole note" }, { 3 * beat, "Dotted half note" }, { 2 * beat, "Half note" },
+                                { 3 * beat / 2, "Dotted quarter note" }, { beat, "Quarter note" }, { 3 * beat / 4, "Dotted eighth note" },
+                                { beat / 2, "Eighth note" }, { beat / 4, "16th note" }, { beat / 8, "32nd note" }, { beat / 16, "64th note" } })
     {
         juce::PopupMenu::Item item (name);
         item.itemID = slots;
@@ -1554,7 +1565,7 @@ std::optional<Note> StaffView::getNoteAt (juce::Point<float> point, double lengt
     const auto fraction = juce::jlimit (0.0f, 1.0f, height - (float) below);
 
     // The nearest beat, or for a shorter note, the nearest step of its length without its dot: an
-    // eighth, 16th or 32nd. Notes already there can be clicked wherever they start.
+    // eighth, 16th, 32nd or 64th. Notes already there can be clicked wherever they start.
     auto grid = Score::slotsPerBeat;
 
     while (grid > 1 && grid > (int) std::lround (length * Score::slotsPerBeat))
@@ -1651,7 +1662,7 @@ double StaffView::getHairpinEndAt (float x) const
     if (measure < 0)
         return x < measureLayouts.front().x ? 0.0 : (double) (score.getNumMeasures() * beats);
 
-    // The nearest beat, counting the barline after the last, or 32nd note with a note starting there
+    // The nearest beat, counting the barline after the last, or 64th note with a note starting there
     const auto& layout = measureLayouts[(size_t) measure];
     const auto inBeats = (x - layout.x - layout.padding) / layout.beatWidth;
     const auto slot = juce::jlimit (0, beats * Score::slotsPerBeat, juce::roundToInt (inBeats * (float) Score::slotsPerBeat));
@@ -1709,7 +1720,7 @@ int StaffView::getSlotAt (int measure, float x, int grid, const std::function<bo
     const auto slots = score.getBeatsPerMeasure() * Score::slotsPerBeat;
     const auto inSlots = (x - layout.x - layout.padding) / slotWidth;
 
-    // The nearest 32nd note, if notes start there
+    // The nearest 64th note, if notes start there
     if (const auto slot = juce::jlimit (0, slots - 1, juce::roundToInt (inSlots)); hasNotesAt ((double) slot / Score::slotsPerBeat))
         return slot;
 
@@ -2345,7 +2356,7 @@ void StaffView::drawTupletMark (juce::Graphics& g, Staff staff, const std::vecto
         else if (hasStem (note->duration))
         {
             const auto flags = getFlagCount (note->duration);
-            const auto length = (stemLength + (flags == 3 ? 1.25f : flags == 2 ? 0.5f : 0.0f)) * staffSpace;
+            const auto length = (stemLength + getExtraStemLength (flags)) * staffSpace;
             const auto middleY = getY (staff, middleLine);
             end = stemUp ? juce::jmin (end - length, middleY) : juce::jmax (end + length, middleY);
         }
@@ -2478,7 +2489,7 @@ void StaffView::drawStem (juce::Graphics& g, Staff staff, const NoteLayout& note
     if (! note.beamed)
     {
         // The stem reaches an octave past the outermost note, and at least to the middle line.
-        const auto length = (stemLength + (flags == 3 ? 1.25f : flags == 2 ? 0.5f : 0.0f)) * staffSpace;
+        const auto length = (stemLength + getExtraStemLength (flags)) * staffSpace;
         const auto middleY = getY (staff, middleLine);
 
         end = note.stemUp ? juce::jmin (getY (staff, note.positions.back()) - length, middleY)
@@ -2494,10 +2505,10 @@ void StaffView::drawStem (juce::Graphics& g, Staff staff, const NoteLayout& note
     if (flags > 0)
     {
         // The flag's anchor, which meets the end of the stem, from Bravura's metadata
-        const auto glyph = note.stemUp ? (flags == 1 ? Smufl::flag8thUp : flags == 2 ? Smufl::flag16thUp : Smufl::flag32ndUp)
-                                       : (flags == 1 ? Smufl::flag8thDown : flags == 2 ? Smufl::flag16thDown : Smufl::flag32ndDown);
-        const auto anchor = note.stemUp ? (flags == 1 ? -0.04f : flags == 2 ? -0.088f : 0.376f)
-                                        : (flags == 1 ? 0.132f : flags == 2 ? 0.128f : -0.448f);
+        const auto glyph = note.stemUp ? (flags == 1 ? Smufl::flag8thUp : flags == 2 ? Smufl::flag16thUp : flags == 3 ? Smufl::flag32ndUp : Smufl::flag64thUp)
+                                       : (flags == 1 ? Smufl::flag8thDown : flags == 2 ? Smufl::flag16thDown : flags == 3 ? Smufl::flag32ndDown : Smufl::flag64thDown);
+        const auto anchor = note.stemUp ? (flags == 1 ? -0.04f : flags == 2 ? -0.088f : flags == 3 ? 0.376f : 1.168f)
+                                        : (flags == 1 ? 0.132f : flags == 2 ? 0.128f : flags == 3 ? -0.448f : -1.264f);
 
         glyphs.draw (g, glyph, { stemLeft, end + anchor * staffSpace });
     }
@@ -2526,11 +2537,11 @@ void StaffView::drawBeams (juce::Graphics& g, Staff, std::vector<NoteLayout*>& b
     };
 
     // The main beam joins them all. Each beam after it joins the notes next to one another that
-    // are short enough to have it: a second for 16ths and 32nds, and a third for 32nds. A note
+    // are short enough to have it: a second for 16ths and shorter, a third for 32nds and 64ths, and a fourth for 64ths. A note
     // without a neighbour to share it with has a short one, pointing into the group.
     drawBeam (0, left, right);
 
-    for (int level = 1; level < 3; ++level)
+    for (int level = 1; level < 4; ++level)
     {
         for (size_t i = 0; i < beamed.size();)
         {

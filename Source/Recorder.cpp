@@ -8,7 +8,7 @@ namespace
 {
     constexpr int middleC = 60;
 
-    /** The written length nearest to a number of 32nds, no longer than the room there is: a
+    /** The written length nearest to a number of slots, no longer than the room there is: a
         whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth or 16th note. Halfway
         between two, it's the shorter.
     */
@@ -16,7 +16,9 @@ namespace
     {
         auto nearest = 0;
 
-        for (auto length : { 2, 4, 6, 8, 12, 16, 24, 32 })
+        constexpr auto beat = Score::slotsPerBeat;
+
+        for (auto length : { beat / 4, beat / 2, 3 * beat / 4, beat, 3 * beat / 2, 2 * beat, 3 * beat, 4 * beat })
             if (length <= room && (nearest == 0 || std::abs (length - slots) < std::abs (nearest - slots)))
                 nearest = length;
 
@@ -111,7 +113,7 @@ void Recorder::write (const HeldKey& key, double endBeat)
         }
     }
 
-    // The notes it's written as, by where they start and how long they are, in 32nds from the start of the score
+    // The notes it's written as, by where they start and how long they are, in 64ths from the start of the score
     std::vector<std::pair<int, int>> written;
 
     for (auto at = key.start; at < end;)

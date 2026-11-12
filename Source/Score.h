@@ -11,21 +11,21 @@
 
 using music::Staff;
 
-/** A note on one staff, in one of the score's parts, starting on a beat or on a 32nd note between beats. */
+/** A note on one staff, in one of the score's parts, starting on a beat or on a 64th note between beats. */
 struct Note
 {
     Staff staff;
     int measure;
-    double beat;        // from the start of the measure, in steps of a 32nd note: 0, 0.125, 0.25...
+    double beat;        // from the start of the measure, in steps of a 64th note: 0, 0.0625, 0.125...
     music::Pitch pitch;
     int part = 0;
-    double length = 1;  // in beats: 0.125 for a 32nd note, 0.25 for a 16th, 0.5 for an eighth, 0.75 for a dotted eighth, 1 for a quarter,
+    double length = 1;  // in beats: 0.0625 for a 64th note, 0.125 for a 32nd, 0.25 for a 16th, 0.5 for an eighth, 0.75 for a dotted eighth, 1 for a quarter,
                         // 1.5 for a dotted quarter, 2 for a half, 3 for a dotted half, 4 for a whole
     bool staccato = false;  // played short and detached, with a dot over or under it
 
     bool operator== (const Note& other) const
     {
-        // Beats and lengths are whole numbers of 32nd notes, so they're compared exactly.
+        // Beats and lengths are whole numbers of 64th notes, so they're compared exactly.
         return staff == other.staff && measure == other.measure && juce::exactlyEqual (beat, other.beat)
             && pitch == other.pitch && part == other.part && juce::exactlyEqual (length, other.length) && staccato == other.staccato;
     }
@@ -62,7 +62,7 @@ struct Tuplet
 
     Staff staff;
     int measure;
-    double beat;            // where it starts, from the start of the measure, on a 32nd note
+    double beat;            // where it starts, from the start of the measure, on a 64th note
     int part = 0;
     double noteLength = 0.5;    // each note's written length, in beats: 2 for half notes, 1 for quarters, 0.5 for eighths, 0.25 for 16ths and 0.125 for 32nds
     std::vector<music::Pitch> pitches;  // one for each of its notes, from 2 to 10
@@ -87,9 +87,9 @@ struct Tuplet
 struct HairpinMark
 {
     int measure;
-    double beat;            // from the start of the measure, in steps of a 32nd note
+    double beat;            // from the start of the measure, in steps of a 64th note
     music::Hairpin type;
-    double length;          // in beats, a whole number of 32nd notes, which can run on into later measures
+    double length;          // in beats, a whole number of 64th notes, which can run on into later measures
 
     bool operator== (const HairpinMark& other) const
     {
@@ -121,7 +121,7 @@ struct PedalSpan
 */
 struct Rhythm
 {
-    /** A note, or notes starting together, in 32nds from the rhythm's start, or a tuplet: its
+    /** A note, or notes starting together, in 64ths from the rhythm's start, or a tuplet: its
         notes evenly through its length, never tied.
     */
     struct Hit
@@ -130,7 +130,7 @@ struct Rhythm
         int length = 8;
         bool staccato = false;
         bool tiedToNext = false;
-        int tupletNoteLength = 0;      // for a tuplet, its notes' written length, in 32nds
+        int tupletNoteLength = 0;      // for a tuplet, its notes' written length, in 64ths
         int tupletNotes = 0;           // and how many notes it has
 
         bool isTuplet() const noexcept { return tupletNoteLength > 0; }
@@ -149,7 +149,7 @@ struct Rhythm
     int numMeasures = 1;
     std::array<std::vector<Hit>, 2> staves;     // the treble staff's and the bass staff's, in order
 
-    /** How long it is, in 32nds: as long as its measures */
+    /** How long it is, in 64ths: as long as its measures */
     int getLength() const noexcept;
 
     bool hasNotes (music::Staff staff) const noexcept { return ! staves[(size_t) staff].empty(); }
@@ -172,7 +172,7 @@ struct Rhythm
     bool operator== (const Rhythm&) const = default;
 };
 
-/** A note a rhythm gives in one of the measures it's written in, in 32nds from the measure's start */
+/** A note a rhythm gives in one of the measures it's written in, in 64ths from the measure's start */
 struct RhythmNote
 {
     int onset = 0;
@@ -180,7 +180,7 @@ struct RhythmNote
     bool staccato = false;
     bool tiedToNext = false;
     int attack = 0;         // which of the notes that start afresh it is, from the rhythm's first: notes tied on from it are the same one
-    int tupletNoteLength = 0;  // for one of a tuplet's notes, their written length in 32nds; its onset and length are the tuplet's
+    int tupletNoteLength = 0;  // for one of a tuplet's notes, their written length in 64ths; its onset and length are the tuplet's
     int tupletIndex = 0;       // which of its notes it is
     int tupletNotes = 0;       // and how many it has
 
@@ -189,7 +189,7 @@ struct RhythmNote
     bool operator== (const RhythmNote&) const = default;
 };
 
-/** How many measures of so many 32nds a rhythm takes, one after another, its notes running on
+/** How many measures of so many 64ths a rhythm takes, one after another, its notes running on
     over the barlines: as many as its length needs, and at least one.
 */
 int getRhythmMeasureCount (const Rhythm&, int slotsPerMeasure);
@@ -211,7 +211,7 @@ struct ChordStyle
     Staff staff = Staff::treble;
     music::ChordType type = music::ChordType::block;
 
-    /** How long the chord's notes are written, in 32nds, as chosen in the chord window. Without
+    /** How long the chord's notes are written, in 64ths, as chosen in the chord window. Without
         one chosen, they're as long as the chord type makes them: see Score::getChordNoteLength().
     */
     std::optional<int> noteLength;
@@ -293,8 +293,10 @@ class Score : public juce::ChangeBroadcaster
 public:
     static constexpr int maxBeatsPerMeasure = 4;
 
-    /** Notes start on 32nd notes: on a beat, or a number of 32nds through one. */
-    static constexpr int slotsPerBeat = 8;
+    /** Notes start on 64th notes: on a beat, or a number of 64ths through one. Positions and
+        lengths are counted in these slots, a 64th each.
+    */
+    static constexpr int slotsPerBeat = 16;
     static constexpr int maxSlotsPerMeasure = maxBeatsPerMeasure * slotsPerBeat;
     static constexpr int initialMeasures = 4;
     static constexpr int initialParts = 2;
@@ -448,17 +450,17 @@ public:
     //==============================================================================
     /** Adds a note, as long as it asks, or as long as fits in what's left of the measure: the
         longest of a whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th
-        or 32nd note that does. It takes the place
+        32nd or 64th note that does. It takes the place
         of any notes it covers, and cuts short a longer note it starts during. The notes starting
         together all have the same length, and are all staccato or none are, so they take the new
         one's. Returns false if the score already has it, or its staff is taken by the measure's chord.
 
-        Beats are counted from 0, and notes start on them or on a 32nd note between them.
+        Beats are counted from 0, and notes start on them or on a 64th note between them.
     */
     bool addNote (const Note&);
 
     /** Writes notes in one go, with ties to the notes they say, in place of everything on each of
-        their staves for a stretch, in 32nds from the start of the score: notes starting in it are
+        their staves for a stretch, in 64ths from the start of the score: notes starting in it are
         taken out, and one held over into it ends where it starts. Adds measures at the end, in
         every part, for any that go past it. Measures where a chord has the staff are left alone.
     */
@@ -485,8 +487,8 @@ public:
     bool setStaccato (int part, Staff, int measure, double beat, bool);
 
     /** The longest note that's no longer than asked, and fits in the room there is, both in
-        32nd notes: a whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th
-        or 32nd note.
+        64th notes: a whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th,
+        32nd or 64th note.
     */
     static int fitNoteLength (int slots, int room);
 
@@ -513,7 +515,7 @@ public:
 
     /** Writes a tuplet, in place of whatever's on its staff for as long as it lasts: notes
         starting then, and other tuplets it overlaps, are taken out, and a note held over into it
-        ends where it starts. It has to start on a 32nd note and end by the end of the measure, and
+        ends where it starts. It has to start on a 64th note and end by the end of the measure, and
         its notes' length has to be one of tupletNoteLengths, and it has to have from
         Tuplet::minNotes to Tuplet::maxNotes notes. Returns false, changing nothing, if
         it can't go there, if the measure's chord has the staff, or if it's there already.
@@ -573,7 +575,7 @@ public:
     std::vector<PedalSpan> getPedals (int part) const;
 
     /** Replaces a part's pedal marks, where the time signature shows them, with these. They're
-        put down on a beat or a 32nd note, and those lifted come up on one, or at the end of the
+        put down on a beat or a 64th note, and those lifted come up on one, or at the end of the
         score. One lifted where the next goes down is lifted and put straight down again.
     */
     void setPedals (int part, const std::vector<PedalSpan>&);
@@ -694,7 +696,7 @@ public:
     /** The notes and names of a measure's chord in the current key, if it has any notes. */
     std::optional<music::Chord> getChordNotes (int part, int measure) const;
 
-    /** How long a chord's notes are written, in 32nds, in this time signature: the length chosen
+    /** How long a chord's notes are written, in 64ths, in this time signature: the length chosen
         for it, if it fits in a measure, or the longest that does. Without one chosen, a block or
         rolled chord lasts the measure, and the others' notes are quarters, or eighths or 16ths if
         there are too many notes for quarters to fit.
@@ -772,10 +774,10 @@ public:
     juce::Result loadJSON (const juce::var&);
 
 private:
-    /** What happens to the sustain pedal at a 32nd note: it comes up, then goes down, or both. */
+    /** What happens to the sustain pedal at a 64th note: it comes up, then goes down, or both. */
     static constexpr juce::uint8 pedalUp = 1, pedalDown = 2;
 
-    /** A hairpin, where it starts: which it is and how many 32nd notes it lasts. */
+    /** A hairpin, where it starts: which it is and how many 64th notes it lasts. */
     struct HairpinStart
     {
         music::Hairpin type;
@@ -792,33 +794,33 @@ private:
                 staffLengths.fill (slotsPerBeat);
         }
 
-        // By 32nd note: the notes starting there, how many 32nds they last, which are tied to the
+        // By 64th note: the notes starting there, how many 64ths they last, which are tied to the
         // next, and whether they're staccato
         std::array<std::array<std::vector<music::Pitch>, maxSlotsPerMeasure>, 2> notes;
         std::array<std::array<int, maxSlotsPerMeasure>, 2> lengths;
         std::array<std::array<std::vector<music::Pitch>, maxSlotsPerMeasure>, 2> ties;
         std::array<std::array<bool, maxSlotsPerMeasure>, 2> staccato {};
-        std::array<std::optional<music::Dynamic>, maxSlotsPerMeasure> dynamics;      // by 32nd note, for both staves
-        std::array<std::optional<HairpinStart>, maxSlotsPerMeasure> hairpins;      // starting at each 32nd
-        std::array<juce::uint8, maxSlotsPerMeasure> pedalMarks {};                 // at each 32nd: pedalUp, then pedalDown, or neither
+        std::array<std::optional<music::Dynamic>, maxSlotsPerMeasure> dynamics;      // by 64th note, for both staves
+        std::array<std::optional<HairpinStart>, maxSlotsPerMeasure> hairpins;      // starting at each 64th
+        std::array<juce::uint8, maxSlotsPerMeasure> pedalMarks {};                 // at each 64th: pedalUp, then pedalDown, or neither
         std::optional<MeasureChord> chord;
 
-        /** A tuplet, where it starts: its notes' length in 32nds, their pitches and whether they're staccato */
+        /** A tuplet, where it starts: its notes' length in 64ths, their pitches and whether they're staccato */
         struct TupletNotes
         {
             int noteLength = 4;
             std::vector<music::Pitch> pitches;
             bool staccato = false;
 
-            /** How many 32nds it lasts */
+            /** How many 64ths it lasts */
             int getLength() const noexcept { return Tuplet::getNormalCount ((int) pitches.size()) * noteLength; }
 
             bool operator== (const TupletNotes&) const = default;
         };
 
-        std::array<std::array<std::optional<TupletNotes>, maxSlotsPerMeasure>, 2> tuplets;     // by the 32nd each starts at
+        std::array<std::array<std::optional<TupletNotes>, maxSlotsPerMeasure>, 2> tuplets;     // by the 64th each starts at
 
-        /** Takes out a staff's tuplets that play during a stretch, in 32nds from the start of the measure. */
+        /** Takes out a staff's tuplets that play during a stretch, in 64ths from the start of the measure. */
         void removeTuplets (Staff staff, int from, int to)
         {
             auto& staffTuplets = tuplets[(size_t) staff];

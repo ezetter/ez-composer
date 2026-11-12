@@ -13,7 +13,7 @@
 /** The chord types, as the chord window names them, in the order of music::ChordType. */
 juce::StringArray getChordTypeNames();
 
-/** The note lengths a chord's notes can be chosen to have, in 32nds, longest first, and their
+/** The note lengths a chord's notes can be chosen to have, in the score's slots, longest first, and their
     names. A whole note is as long as the measure, whatever the time signature: a dotted half in
     3/4. Dotted notes aren't among them.
 */

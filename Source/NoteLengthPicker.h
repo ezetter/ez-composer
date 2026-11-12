@@ -9,7 +9,7 @@
 #include <functional>
 
 /** Small buttons, side by side, showing a whole, a dotted half, a half, a dotted quarter, a
-    quarter, a dotted eighth, an eighth, a 16th and a 32nd note, for choosing how long the notes
+    quarter, a dotted eighth, an eighth, a 16th, a 32nd and a 64th note, for choosing how long the notes
     that clicks add are. One is chosen at a time. After them, a little apart, a staccato dot turns
     staccato on or off for the notes clicks add, whatever their length. After that, a little apart
     again, a tuplet button chooses tuplets in place of a length, from 2 to 10 notes, showing how
@@ -20,7 +20,7 @@ class NoteLengthPicker final : public juce::Component
 public:
     NoteLengthPicker();
 
-    /** The length chosen, in beats: 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25 or 0.125. */
+    /** The length chosen, in beats: 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25, 0.125 or 0.0625. */
     double getLength() const noexcept { return length; }
 
     /** Chooses a length, in beats, without calling onChange. */
@@ -115,7 +115,7 @@ private:
     };
 
     MusicGlyphs glyphs;
-    std::array<std::unique_ptr<NoteButton>, 9> buttons;
+    std::array<std::unique_ptr<NoteButton>, 10> buttons;
     StaccatoButton staccatoButton;
     double length = 1.0;
     bool tuplet = false;

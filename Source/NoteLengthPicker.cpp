@@ -11,10 +11,10 @@ namespace
 NoteLengthPicker::NoteLengthPicker()
     : glyphs (glyphStaffSpace)
 {
-    // Whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th and 32nd, longest first
+    // Whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th, 32nd and 64th, longest first
     for (auto [index, beats, name] : { std::tuple { 0, 4.0, "Whole" }, { 1, 3.0, "Dotted half" }, { 2, 2.0, "Half" },
                                        { 3, 1.5, "Dotted quarter" }, { 4, 1.0, "Quarter" }, { 5, 0.75, "Dotted eighth" },
-                                       { 6, 0.5, "Eighth" }, { 7, 0.25, "16th" }, { 8, 0.125, "32nd" } })
+                                       { 6, 0.5, "Eighth" }, { 7, 0.25, "16th" }, { 8, 0.125, "32nd" }, { 9, 0.0625, "64th" } })
     {
         auto& button = buttons[(size_t) index];
         button = std::make_unique<NoteButton> (glyphs, beats);
@@ -124,16 +124,16 @@ void NoteLengthPicker::NoteButton::paintButton (juce::Graphics& g, bool highligh
 void NoteLengthPicker::drawNote (juce::Graphics& g, const MusicGlyphs& glyphs, double beats, juce::Rectangle<float> bounds)
 {
     // The note: an open notehead for a whole or half note, a filled one for a dotted quarter or
-    // shorter, a stem up for all but the whole note, flags on the stems of an eighth, 16th or 32nd,
+    // shorter, a stem up for all but the whole note, flags on the stems of an eighth, 16th, 32nd or 64th,
     // and a dot after a dotted half, quarter or eighth.
     const auto glyph = beats >= 4.0 ? Smufl::noteheadWhole : beats >= 2.0 ? Smufl::noteheadHalf : Smufl::noteheadBlack;
     const auto dotted = juce::exactlyEqual (beats, 3.0) || juce::exactlyEqual (beats, 1.5) || juce::exactlyEqual (beats, 0.75);
     const auto flagged = beats < 1.0;
     const auto headBounds = glyphs.getPath (glyph).getBounds();
     const auto hasStem = beats < 4.0;
-    const auto flagGlyph = beats >= 0.5 ? Smufl::flag8thUp : beats >= 0.25 ? Smufl::flag16thUp : Smufl::flag32ndUp;
-    const auto flagAnchor = beats >= 0.5 ? -0.04f : beats >= 0.25 ? -0.088f : 0.376f;     // from Bravura's metadata
-    const auto stemLength = (beats < 0.25 ? 3.4f : 2.8f) * glyphStaffSpace;
+    const auto flagGlyph = beats >= 0.5 ? Smufl::flag8thUp : beats >= 0.25 ? Smufl::flag16thUp : beats >= 0.125 ? Smufl::flag32ndUp : Smufl::flag64thUp;
+    const auto flagAnchor = beats >= 0.5 ? -0.04f : beats >= 0.25 ? -0.088f : beats >= 0.125 ? 0.376f : 1.168f;     // from Bravura's metadata
+    const auto stemLength = (beats < 0.125 ? 4.0f : beats < 0.25 ? 3.4f : 2.8f) * glyphStaffSpace;
     const auto noteHeight = headBounds.getHeight() + (hasStem ? stemLength - headBounds.getHeight() / 2.0f : 0.0f);
 
     // A dotted or flagged note is moved left a little, to leave room for its dot or flag, and one

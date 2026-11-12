@@ -750,8 +750,10 @@ void Score::placeNotes (int part, const std::array<std::optional<juce::Range<int
 
 int Score::fitNoteLength (int slots, int room)
 {
-    // Whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th and 32nd notes, in 32nds
-    for (auto length : { 32, 24, 16, 12, 8, 6, 4, 2, 1 })
+    // Whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th, 32nd and 64th notes, in slots
+    constexpr auto beat = slotsPerBeat;
+
+    for (auto length : { 4 * beat, 3 * beat, 2 * beat, 3 * beat / 2, beat, 3 * beat / 4, beat / 2, beat / 4, beat / 8, beat / 16 })
         if (length <= slots && length <= room)
             return length;
 
@@ -1035,7 +1037,7 @@ void Score::setHairpin (int part, const HairpinMark& hairpin)
     if (! juce::isPositiveAndBelow (hairpin.measure, getNumMeasures()) || ! juce::isPositiveAndBelow (slot, slotsPerMeasure))
         return;
 
-    // In 32nds from the start of the score, at least an eighth note long if there's room
+    // In 64ths from the start of the score, at least an eighth note long if there's room
     const auto start = hairpin.measure * slotsPerMeasure + slot;
     const auto room = getNumMeasures() * slotsPerMeasure - start;
     const auto end = start + juce::jlimit (juce::jmin (slotsPerBeat / 2, room), room, toSlot (hairpin.length));
@@ -1135,7 +1137,7 @@ void Score::setPedals (int part, const std::vector<PedalSpan>& spans)
 
 int Score::getVelocity (int part, int measure, double beat) const
 {
-    // Everything's counted in 32nds from the start of the score, up to the point asked about.
+    // Everything's counted in 64ths from the start of the score, up to the point asked about.
     const auto slotsPerMeasure = getSlotsPerMeasure();
     const auto point = measure * slotsPerMeasure + juce::jmin (toSlot (beat), slotsPerMeasure);
     auto velocity = (double) music::unmarkedVelocity;
@@ -1719,7 +1721,8 @@ namespace
     // 23: Root back on its own, and Octave, Block chord and Rolled chord, placed just past the chord
     // 24: triplets
     // 25: tuplets of 2 to 10 notes
-    constexpr int formatVersion = 25;
+    // 26: everything by 64th note, rather than by 32nd, so notes can be 64ths
+    constexpr int formatVersion = 26;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1808,6 +1811,7 @@ juce::var Rhythm::toJSON() const
     object->setProperty ("name", name);
     object->setProperty ("beatsPerMeasure", beatsPerMeasure);
     object->setProperty ("measures", numMeasures);
+    object->setProperty ("slotsPerBeat", Score::slotsPerBeat);     // what its hits are counted in
 
     for (auto staff : { music::Staff::treble, music::Staff::bass })
     {
@@ -1834,6 +1838,10 @@ std::optional<Rhythm> Rhythm::fromJSON (const juce::var& json)
     rhythm.beatsPerMeasure = readInt (json.getProperty ("beatsPerMeasure", {}), 1, Score::maxBeatsPerMeasure, 4);
     rhythm.numMeasures = readInt (json.getProperty ("measures", {}), 1, 1000, 1);
 
+    // Hits are counted in what the rhythm says, or before rhythms said, 32nds, whatever the score counts them in now.
+    const auto savedPerBeat = readInt (json.getProperty ("slotsPerBeat", {}), 1, Score::slotsPerBeat, 8);
+    const auto scale = Score::slotsPerBeat % savedPerBeat == 0 ? Score::slotsPerBeat / savedPerBeat : 1;
+
     // Notes in order, each after the one before ends, within the rhythm, as long as a note can be
     for (auto staff : { music::Staff::treble, music::Staff::bass })
     {
@@ -1843,8 +1851,8 @@ std::optional<Rhythm> Rhythm::fromJSON (const juce::var& json)
         {
             for (const auto& item : *list)
             {
-                Hit hit { readInt (listItem (item, 0), 0, rhythm.getLength() - 1, -1), readInt (listItem (item, 1), 1, Score::maxSlotsPerMeasure, -1),
-                          (bool) listItem (item, 2), (bool) listItem (item, 3), readInt (listItem (item, 4), 0, Score::maxSlotsPerMeasure, 0),
+                Hit hit { readInt (listItem (item, 0), 0, rhythm.getLength() / scale - 1, -1) * scale, readInt (listItem (item, 1), 1, Score::maxSlotsPerMeasure / scale, -1) * scale,
+                          (bool) listItem (item, 2), (bool) listItem (item, 3), readInt (listItem (item, 4), 0, Score::maxSlotsPerMeasure / scale, 0) * scale,
                           readInt (listItem (item, 5), Tuplet::minNotes, Tuplet::maxNotes, 3) };   // triplets, saved before other tuplets
 
                 // A tuplet's notes are a length a tuplet's can be, as many of them as its count
@@ -2013,7 +2021,7 @@ juce::var Score::toJSON (bool withPartIds) const
     {
         auto* measureObject = new juce::DynamicObject();
 
-        // By 32nd note, every one kept, including ones hidden by a shorter time signature
+        // By 64th note, every one kept, including ones hidden by a shorter time signature
         for (auto staff : { Staff::treble, Staff::bass })
         {
             juce::Array<juce::var> beats;
@@ -2030,7 +2038,7 @@ juce::var Score::toJSON (bool withPartIds) const
 
             measureObject->setProperty (staff == Staff::treble ? "treble" : "bass", beats);
 
-            // How many 32nds the notes starting at each 32nd last
+            // How many 64ths the notes starting at each 64th last
             juce::Array<juce::var> lengths;
 
             for (auto length : measure.lengths[(size_t) staff])
@@ -2038,7 +2046,7 @@ juce::var Score::toJSON (bool withPartIds) const
 
             measureObject->setProperty (staff == Staff::treble ? "trebleLengths" : "bassLengths", lengths);
 
-            // The notes starting at each 32nd that are tied to the next
+            // The notes starting at each 64th that are tied to the next
             juce::Array<juce::var> ties;
 
             for (const auto& tied : measure.ties[(size_t) staff])
@@ -2053,7 +2061,7 @@ juce::var Score::toJSON (bool withPartIds) const
 
             measureObject->setProperty (staff == Staff::treble ? "trebleTies" : "bassTies", ties);
 
-            // The 32nds whose notes are staccato, if there are any
+            // The 64ths whose notes are staccato, if there are any
             juce::Array<juce::var> staccato;
 
             for (int slot = 0; slot < maxSlotsPerMeasure; ++slot)
@@ -2063,7 +2071,7 @@ juce::var Score::toJSON (bool withPartIds) const
             if (! staccato.isEmpty())
                 measureObject->setProperty (staff == Staff::treble ? "trebleStaccato" : "bassStaccato", staccato);
 
-            // The tuplets, if there are any: at which 32nd, their notes' length in 32nds,
+            // The tuplets, if there are any: at which 64th, their notes' length in 64ths,
             // whether they're staccato, and the three notes' pitches
             juce::Array<juce::var> tuplets;
 
@@ -2092,7 +2100,7 @@ juce::var Score::toJSON (bool withPartIds) const
                 measureObject->setProperty (staff == Staff::treble ? "trebleTriplets" : "bassTriplets", tuplets);
         }
 
-        // The dynamic marked at each 32nd, or "" for none, if there are any
+        // The dynamic marked at each 64th, or "" for none, if there are any
         if (std::any_of (measure.dynamics.begin(), measure.dynamics.end(), [] (const auto& d) { return d.has_value(); }))
         {
             juce::Array<juce::var> dynamics;
@@ -2103,7 +2111,7 @@ juce::var Score::toJSON (bool withPartIds) const
             measureObject->setProperty ("dynamics", dynamics);
         }
 
-        // The hairpins starting in the measure: at which 32nd, which, and how many 32nds long
+        // The hairpins starting in the measure: at which 64th, which, and how many 64ths long
         juce::Array<juce::var> hairpins;
 
         for (int slot = 0; slot < maxSlotsPerMeasure; ++slot)
@@ -2121,7 +2129,7 @@ juce::var Score::toJSON (bool withPartIds) const
         if (! hairpins.isEmpty())
             measureObject->setProperty ("hairpins", hairpins);
 
-        // The pedal marks: at which 32nd, and whether the pedal comes up, goes down, or both
+        // The pedal marks: at which 64th, and whether the pedal comes up, goes down, or both
         juce::Array<juce::var> pedals;
 
         for (int slot = 0; slot < maxSlotsPerMeasure; ++slot)
@@ -2255,7 +2263,8 @@ juce::Result Score::loadJSON (const juce::var& json)
         // Scores from before version 8 have their notes, dynamics and hairpins by eighth note, and
         // before version 4, by beat, with their lengths the same way.
         const auto version = readInt (json.getProperty ("version", {}), 1, 1000, 1);
-        const auto slotsPerEntry = version >= 8 ? 1 : version >= 4 ? slotsPerBeat / 2 : slotsPerBeat;
+        // From then until version 26, they're by 32nd note, and since, by 64th.
+        const auto slotsPerEntry = version >= 26 ? 1 : version >= 8 ? slotsPerBeat / 8 : version >= 4 ? slotsPerBeat / 2 : slotsPerBeat;
 
         for (const auto& item : *measureList)
         {
@@ -2298,7 +2307,8 @@ juce::Result Score::loadJSON (const juce::var& json)
                 // Staccato, for notes that are there, in scores from version 15
                 if (const auto* staccato = item.getProperty (staff == Staff::treble ? "trebleStaccato" : "bassStaccato", {}).getArray())
                     for (const auto& entry : *staccato)
-                        if (const auto slot = readInt (entry, 0, maxSlotsPerMeasure - 1, -1); slot >= 0 && ! measure.notes[(size_t) staff][(size_t) slot].empty())
+                        if (const auto slot = readInt (entry, 0, maxSlotsPerMeasure / slotsPerEntry - 1, -1) * slotsPerEntry;
+                            slot >= 0 && ! measure.notes[(size_t) staff][(size_t) slot].empty())
                             measure.staccato[(size_t) staff][(size_t) slot] = true;
 
                 // Tuplets, in scores from version 24, each with notes of a length it can have,
@@ -2307,8 +2317,8 @@ juce::Result Score::loadJSON (const juce::var& json)
                 {
                     for (const auto& t : *tuplets)
                     {
-                        const auto slot = readInt (t.getProperty ("at", {}), 0, maxSlotsPerMeasure - 1, -1);
-                        const auto noteLength = readInt (t.getProperty ("noteLength", {}), 1, maxSlotsPerMeasure, 0);
+                        const auto slot = readInt (t.getProperty ("at", {}), 0, maxSlotsPerMeasure / slotsPerEntry - 1, -1) * slotsPerEntry;
+                        const auto noteLength = readInt (t.getProperty ("noteLength", {}), 1, maxSlotsPerMeasure / slotsPerEntry, 0) * slotsPerEntry;
                         const auto* pitches = t.getProperty ("pitches", {}).getArray();
                         const auto lengthAllowed = std::any_of (tupletNoteLengths.begin(), tupletNoteLengths.end(),
                                                                 [&] (double allowed) { return toSlot (allowed) == noteLength; });
@@ -2344,7 +2354,7 @@ juce::Result Score::loadJSON (const juce::var& json)
 
             if (const auto* pedals = item.getProperty ("pedals", {}).getArray())
                 for (const auto& pedal : *pedals)
-                    if (const auto slot = readInt (pedal.getProperty ("at", {}), 0, maxSlotsPerMeasure - 1, -1); slot >= 0)
+                    if (const auto slot = readInt (pedal.getProperty ("at", {}), 0, maxSlotsPerMeasure / slotsPerEntry - 1, -1) * slotsPerEntry; slot >= 0)
                         measure.pedalMarks[(size_t) slot] = (juce::uint8) (((bool) pedal.getProperty ("up", false) ? pedalUp : 0)
                                                                            | ((bool) pedal.getProperty ("down", false) ? pedalDown : 0));
 
@@ -2405,8 +2415,8 @@ juce::Result Score::loadJSON (const juce::var& json)
                     for (const auto& midi : *moved)
                         chord.movedNotes.push_back (readInt (midi, 0, 127, 0));
 
-                // One of the note lengths there are, in 32nds
-                if (const auto length = readInt (c.getProperty ("noteLength", {}), 1, maxSlotsPerMeasure, 0); length > 0)
+                // One of the note lengths there are, in slots
+                if (const auto length = readInt (c.getProperty ("noteLength", {}), 1, maxSlotsPerMeasure / slotsPerEntry, 0) * slotsPerEntry; length > 0)
                     chord.style.noteLength = fitNoteLength (length, length);
 
                 // The rhythm it's written in, and which of its measures this is, from version 18

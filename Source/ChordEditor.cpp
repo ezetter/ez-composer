@@ -30,8 +30,9 @@ juce::StringArray getChordTypeNames()
 
 const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths()
 {
-    static const std::array<std::pair<int, const char*>, 6> lengths { { { 32, "Whole measure" }, { 16, "Half notes" }, { 8, "Quarter notes" },
-                                                                        { 4, "Eighth notes" }, { 2, "16th notes" }, { 1, "32nd notes" } } };
+    constexpr auto beat = Score::slotsPerBeat;
+    static const std::array<std::pair<int, const char*>, 6> lengths { { { 4 * beat, "Whole measure" }, { 2 * beat, "Half notes" }, { beat, "Quarter notes" },
+                                                                        { beat / 2, "Eighth notes" }, { beat / 4, "16th notes" }, { beat / 8, "32nd notes" } } };
     return lengths;
 }
 

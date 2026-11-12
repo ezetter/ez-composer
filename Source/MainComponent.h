@@ -209,7 +209,7 @@ private:
     /** Takes a part out, after asking, unless there's nothing in it to lose. */
     void deletePart (int part);
 
-    /** Chooses the length of the notes that clicking the staff adds, in beats: 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25 or 0.125.
+    /** Chooses the length of the notes that clicking the staff adds, in beats: 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25, 0.125 or 0.0625.
         Clicks add notes again, if they were marking a dynamic.
     */
     void setNoteLength (double beats);

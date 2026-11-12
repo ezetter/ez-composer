@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Score.h"
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
@@ -12,7 +14,7 @@ struct ScaleSettings
     static constexpr int minNotes = 3, maxNotes = 16;
 
     int numNotes = 8;
-    int length = 8;             // in 32nds: a quarter note
+    int length = Score::slotsPerBeat;     // in the score's slots: a quarter note
     bool ascending = true;
     bool random = false;
 };

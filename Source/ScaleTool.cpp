@@ -6,9 +6,10 @@ namespace
 {
     constexpr int rowHeight = 26, gap = 6, labelWidth = 84, padding = 12;
 
-    /** The note lengths the notes can have, in 32nds, longest first, and their names */
-    const std::array<std::pair<int, const char*>, 6> noteLengths { { { 32, "Whole notes" }, { 16, "Half notes" }, { 8, "Quarter notes" },
-                                                                     { 4, "Eighth notes" }, { 2, "16th notes" }, { 1, "32nd notes" } } };
+    /** The note lengths the notes can have, in the score's slots, longest first, and their names */
+    constexpr auto beat = Score::slotsPerBeat;
+    const std::array<std::pair<int, const char*>, 6> noteLengths { { { 4 * beat, "Whole notes" }, { 2 * beat, "Half notes" }, { beat, "Quarter notes" },
+                                                                     { beat / 2, "Eighth notes" }, { beat / 4, "16th notes" }, { beat / 8, "32nd notes" } } };
 }
 
 ScalePanel::ScalePanel (const ScaleSettings& settings)

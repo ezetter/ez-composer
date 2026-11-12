@@ -47,7 +47,7 @@ public:
     */
     void followPart();
 
-    /** How long the notes that clicks add are, in beats: 0.125 for 32nd notes, 0.25 for 16ths,
+    /** How long the notes that clicks add are, in beats: 0.0625 for 64th notes, 0.125 for 32nds, 0.25 for 16ths,
         0.5 for eighths, 0.75 for dotted eighths, 1 for quarter notes, 1.5 for dotted quarters,
         2 for half notes, 3 for dotted half notes and 4 for whole notes. Clicks add notes shorter
         than a beat at the nearest step of their length without its dot, e.g. every 16th for 16ths
@@ -202,7 +202,7 @@ public:
     */
     void applyNoteMenuChoice (const Note&, int itemId);
 
-    static constexpr int deleteNoteItemId = 1000, staccatoItemId = 1001;     // the menu's other items are the lengths, in 32nds
+    static constexpr int deleteNoteItemId = 1000, staccatoItemId = 1001;     // the menu's other items are the lengths, in slots
 
     /** Called when an eraser stroke starts and finishes, so everything it takes out can be undone together. */
     std::function<void()> onEraseStarted, onEraseFinished;
@@ -345,8 +345,8 @@ private:
     float getEventX (int measure, const StaffEvent&) const;
     int findMeasure (float x) const;
 
-    /** The 32nd note of a measure nearest to x, if notes start there, or else the nearest step of
-        a grid, in 32nds: 8 for beats, 4 for eighths and so on.
+    /** The 64th note of a measure nearest to x, if notes start there, or else the nearest step of
+        a grid, in 64ths: 16 for beats, 8 for eighths and so on.
     */
     int getSlotAt (int measure, float x, int grid, const std::function<bool (double beat)>& hasNotesAt) const;
 
@@ -368,7 +368,7 @@ private:
 
     /** Which of a staff's notes, given in order, share a beam. In a run of eighths and shorter
         notes, each starting as the one before ends, every four eighths in a row share a beam; the
-        rest of the run is beamed a beat at a time, 16ths and 32nds with the eighths in their beat.
+        rest of the run is beamed a beat at a time, 16ths, 32nds and 64ths with the eighths in their beat.
         A note on its own in a group keeps its flag.
     */
     static std::vector<std::vector<size_t>> groupBeams (const std::vector<const StaffEvent*>& notes);
@@ -577,7 +577,7 @@ private:
     juce::Range<float> getEndingBracketSpan (int firstMeasure, int lastMeasure) const;
 
     /** Where clicking at this point would put a pedal mark, as a measure and beat: on or under
-        the lower staff, at the nearest beat, or 32nd note where a note starts.
+        the lower staff, at the nearest beat, or 64th note where a note starts.
     */
     std::optional<std::pair<int, double>> getPedalPointAt (juce::Point<float>) const;
 

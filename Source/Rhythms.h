@@ -33,7 +33,7 @@ struct RhythmPlan
     /** Its tuplets, at the note's pitch, but any that would cross a barline */
     std::vector<Tuplet> tuplets;
 
-    /** The stretch of each staff the rhythm takes, in 32nds from the start of the score, rests and all */
+    /** The stretch of each staff the rhythm takes, in 64ths from the start of the score, rests and all */
     std::array<std::optional<juce::Range<int>>, 2> spans;
 };
 

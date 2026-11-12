@@ -22,6 +22,8 @@ namespace Smufl
     constexpr juce::juce_wchar flag16thDown          = 0xE243;
     constexpr juce::juce_wchar flag32ndUp            = 0xE244;
     constexpr juce::juce_wchar flag32ndDown          = 0xE245;
+    constexpr juce::juce_wchar flag64thUp            = 0xE246;
+    constexpr juce::juce_wchar flag64thDown          = 0xE247;
     constexpr juce::juce_wchar accidentalFlat        = 0xE260;
     constexpr juce::juce_wchar accidentalNatural     = 0xE261;
     constexpr juce::juce_wchar accidentalSharp       = 0xE262;
@@ -34,6 +36,7 @@ namespace Smufl
     constexpr juce::juce_wchar rest8th               = 0xE4E6;
     constexpr juce::juce_wchar rest16th              = 0xE4E7;
     constexpr juce::juce_wchar rest32nd              = 0xE4E8;
+    constexpr juce::juce_wchar rest64th              = 0xE4E9;
     constexpr juce::juce_wchar tuplet0               = 0xE880;     // tuplet1 to tuplet9 follow
     constexpr juce::juce_wchar wiggleArpeggiatoUp    = 0xEAA9;
 
