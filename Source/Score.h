@@ -42,30 +42,41 @@ struct PlacedNote
     bool operator== (const PlacedNote&) const = default;
 };
 
-/** Three notes played in the time of two of their length, one after another on one staff of a
-    part: a triplet. A triplet of eighths lasts a beat, as two eighths do, each of its notes a
-    third of the beat. It's written with its notes' own length, beamed together if they're short
-    enough, and a 3 over or under them.
+/** From 2 to 10 notes played evenly in the time of a number of notes of their length, one after
+    another on one staff of a part: a tuplet. A triplet, 3 in the time of 2, of eighths lasts a
+    beat, as two eighths do, each of its notes a third of the beat. It's written with its notes'
+    own length, beamed together if they're short enough, and its number over or under them.
 */
-struct Triplet
+struct Tuplet
 {
-    static constexpr int numNotes = 3;
+    static constexpr int minNotes = 2, maxNotes = 10;
+
+    /** How many notes of their length a tuplet of so many notes takes the time of, as usual:
+        2 in the time of 3, 3 of 2, 4 of 3, 5, 6 and 7 of 4, 8 of 6, and 9 and 10 of 8.
+    */
+    static constexpr int getNormalCount (int numNotes) noexcept
+    {
+        constexpr int counts[] { 0, 0, 3, 2, 3, 4, 4, 4, 6, 8, 8 };
+        return numNotes >= minNotes && numNotes <= maxNotes ? counts[numNotes] : 0;
+    }
 
     Staff staff;
     int measure;
     double beat;            // where it starts, from the start of the measure, on a 32nd note
     int part = 0;
     double noteLength = 0.5;    // each note's written length, in beats: 2 for half notes, 1 for quarters, 0.5 for eighths and 0.25 for 16ths
-    std::array<music::Pitch, numNotes> pitches {};
+    std::vector<music::Pitch> pitches;  // one for each of its notes, from 2 to 10
     bool staccato = false;
 
-    /** How long it lasts, in beats: as long as two of its notes */
-    double getLength() const noexcept { return 2.0 * noteLength; }
+    int getNumNotes() const noexcept { return (int) pitches.size(); }
+
+    /** How long it lasts, in beats: as long as its normal count of its notes */
+    double getLength() const noexcept { return getNormalCount (getNumNotes()) * noteLength; }
 
     /** When one of its notes starts, in beats from the start of the measure */
-    double getNoteOnset (int index) const noexcept { return beat + (double) index * getLength() / (double) numNotes; }
+    double getNoteOnset (int index) const noexcept { return beat + (double) index * getLength() / (double) juce::jmax (1, getNumNotes()); }
 
-    bool operator== (const Triplet& other) const
+    bool operator== (const Tuplet& other) const
     {
         return staff == other.staff && measure == other.measure && juce::exactlyEqual (beat, other.beat) && part == other.part
             && juce::exactlyEqual (noteLength, other.noteLength) && pitches == other.pitches && staccato == other.staccato;
@@ -110,8 +121,8 @@ struct PedalSpan
 */
 struct Rhythm
 {
-    /** A note, or notes starting together, in 32nds from the rhythm's start, or a triplet: three
-        notes, each a third of its length, never tied.
+    /** A note, or notes starting together, in 32nds from the rhythm's start, or a tuplet: its
+        notes evenly through its length, never tied.
     */
     struct Hit
     {
@@ -119,12 +130,13 @@ struct Rhythm
         int length = 8;
         bool staccato = false;
         bool tiedToNext = false;
-        int tripletNoteLength = 0;      // for a triplet, its notes' written length, in 32nds: half its length
+        int tupletNoteLength = 0;      // for a tuplet, its notes' written length, in 32nds
+        int tupletNotes = 0;           // and how many notes it has
 
-        bool isTriplet() const noexcept { return tripletNoteLength > 0; }
+        bool isTuplet() const noexcept { return tupletNoteLength > 0; }
 
-        /** How many notes it is: three for a triplet */
-        int getNumNotes() const noexcept { return isTriplet() ? Triplet::numNotes : 1; }
+        /** How many notes it is: one, or a tuplet's */
+        int getNumNotes() const noexcept { return isTuplet() ? tupletNotes : 1; }
 
         bool operator== (const Hit&) const = default;
     };
@@ -168,10 +180,11 @@ struct RhythmNote
     bool staccato = false;
     bool tiedToNext = false;
     int attack = 0;         // which of the notes that start afresh it is, from the rhythm's first: notes tied on from it are the same one
-    int tripletNoteLength = 0;  // for one of a triplet's notes, their written length in 32nds; its onset and length are the triplet's
-    int tripletIndex = 0;       // and which of its three it is
+    int tupletNoteLength = 0;  // for one of a tuplet's notes, their written length in 32nds; its onset and length are the tuplet's
+    int tupletIndex = 0;       // which of its notes it is
+    int tupletNotes = 0;       // and how many it has
 
-    bool isTriplet() const noexcept { return tripletNoteLength > 0; }
+    bool isTuplet() const noexcept { return tupletNoteLength > 0; }
 
     bool operator== (const RhythmNote&) const = default;
 };
@@ -495,27 +508,28 @@ public:
     bool toggleTie (int part, Staff, int measure, double beat, int otherMeasure, double otherBeat, music::Pitch);
 
     //==============================================================================
-    /** The lengths a triplet's notes can be, in beats: half notes, quarters, eighths and 16ths. */
-    static constexpr std::array<double, 4> tripletNoteLengths { 2.0, 1.0, 0.5, 0.25 };
+    /** The lengths a tuplet's notes can be, in beats: half notes, quarters, eighths and 16ths. */
+    static constexpr std::array<double, 4> tupletNoteLengths { 2.0, 1.0, 0.5, 0.25 };
 
-    /** Writes a triplet, in place of whatever's on its staff for as long as it lasts: notes
-        starting then, and other triplets it overlaps, are taken out, and a note held over into it
+    /** Writes a tuplet, in place of whatever's on its staff for as long as it lasts: notes
+        starting then, and other tuplets it overlaps, are taken out, and a note held over into it
         ends where it starts. It has to start on a 32nd note and end by the end of the measure, and
-        its notes' length has to be one of tripletNoteLengths. Returns false, changing nothing, if
+        its notes' length has to be one of tupletNoteLengths, and it has to have from
+        Tuplet::minNotes to Tuplet::maxNotes notes. Returns false, changing nothing, if
         it can't go there, if the measure's chord has the staff, or if it's there already.
     */
-    bool addTriplet (const Triplet&);
+    bool addTuplet (const Tuplet&);
 
-    /** The triplet on a staff that's playing at a point, from where it starts to where it ends,
+    /** The tuplet on a staff that's playing at a point, from where it starts to where it ends,
         if one is: as long as the time signature has room for it.
     */
-    std::optional<Triplet> getTriplet (int part, Staff, int measure, double beat) const;
+    std::optional<Tuplet> getTuplet (int part, Staff, int measure, double beat) const;
 
-    /** A staff's triplets in a measure, in order, those the time signature has room for. */
-    std::vector<Triplet> getTriplets (int part, Staff, int measure) const;
+    /** A staff's tuplets in a measure, in order, those the time signature has room for. */
+    std::vector<Tuplet> getTuplets (int part, Staff, int measure) const;
 
-    /** Takes out the triplet playing at a point. Returns false if there isn't one. */
-    bool removeTriplet (int part, Staff, int measure, double beat);
+    /** Takes out the tuplet playing at a point. Returns false if there isn't one. */
+    bool removeTuplet (int part, Staff, int measure, double beat);
 
     /** Whether a staff has a note starting at a point on this line or space, whatever its sharp or flat. */
     bool hasNoteAt (int part, Staff, int measure, double beat, int step) const;
@@ -789,26 +803,29 @@ private:
         std::array<juce::uint8, maxSlotsPerMeasure> pedalMarks {};                 // at each 32nd: pedalUp, then pedalDown, or neither
         std::optional<MeasureChord> chord;
 
-        /** A triplet, where it starts: its notes' length in 32nds, their pitches and whether they're staccato */
-        struct TripletNotes
+        /** A tuplet, where it starts: its notes' length in 32nds, their pitches and whether they're staccato */
+        struct TupletNotes
         {
             int noteLength = 4;
-            std::array<music::Pitch, Triplet::numNotes> pitches {};
+            std::vector<music::Pitch> pitches;
             bool staccato = false;
 
-            bool operator== (const TripletNotes&) const = default;
+            /** How many 32nds it lasts */
+            int getLength() const noexcept { return Tuplet::getNormalCount ((int) pitches.size()) * noteLength; }
+
+            bool operator== (const TupletNotes&) const = default;
         };
 
-        std::array<std::array<std::optional<TripletNotes>, maxSlotsPerMeasure>, 2> triplets;     // by the 32nd each starts at
+        std::array<std::array<std::optional<TupletNotes>, maxSlotsPerMeasure>, 2> tuplets;     // by the 32nd each starts at
 
-        /** Takes out a staff's triplets that play during a stretch, in 32nds from the start of the measure. */
-        void removeTriplets (Staff staff, int from, int to)
+        /** Takes out a staff's tuplets that play during a stretch, in 32nds from the start of the measure. */
+        void removeTuplets (Staff staff, int from, int to)
         {
-            auto& staffTriplets = triplets[(size_t) staff];
+            auto& staffTuplets = tuplets[(size_t) staff];
 
             for (int slot = 0; slot < maxSlotsPerMeasure; ++slot)
-                if (const auto& triplet = staffTriplets[(size_t) slot]; triplet.has_value() && slot < to && slot + 2 * triplet->noteLength > from)
-                    staffTriplets[(size_t) slot].reset();
+                if (const auto& tuplet = staffTuplets[(size_t) slot]; tuplet.has_value() && slot < to && slot + tuplet->getLength() > from)
+                    staffTuplets[(size_t) slot].reset();
         }
 
         /** Takes out all of a staff's notes. */
@@ -823,8 +840,8 @@ private:
             lengths[(size_t) staff].fill (slotsPerBeat);
             staccato[(size_t) staff].fill (false);
 
-            for (auto& triplet : triplets[(size_t) staff])
-                triplet.reset();
+            for (auto& tuplet : tuplets[(size_t) staff])
+                tuplet.reset();
         }
     };
 

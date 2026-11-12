@@ -203,17 +203,18 @@ namespace
 
         for (const auto& note : notes)
         {
-            // A triplet's note, a third of the way on from the one before
-            if (note.isTriplet())
+            // A tuplet's note, evenly through it, on from the one before
+            if (note.isTuplet())
             {
-                if (note.tripletIndex == 0)
+                if (note.tupletIndex == 0)
                     addRests (content.events, slot, note.onset, beats);
 
                 const auto start = (double) note.onset / Score::slotsPerBeat;
-                StaffEvent event { start + (double) note.tripletIndex * note.length / Triplet::numNotes / Score::slotsPerBeat,
-                                   getDurationForBeats ((double) note.tripletNoteLength / Score::slotsPerBeat), tonesFor (note.attack),
+                StaffEvent event { start + (double) note.tupletIndex * note.length / juce::jmax (1, note.tupletNotes) / Score::slotsPerBeat,
+                                   getDurationForBeats ((double) note.tupletNoteLength / Score::slotsPerBeat), tonesFor (note.attack),
                                    rolled, false, note.staccato };
-                event.tripletStart = start;
+                event.tupletStart = start;
+                event.tupletNotes = note.tupletNotes;
                 content.events.push_back (event);
                 lastAttack = note.attack;
                 slot = note.onset + note.length;
@@ -358,17 +359,17 @@ namespace
         const auto slots = beats * Score::slotsPerBeat;
         const auto beatOf = [] (int slot) { return (double) slot / Score::slotsPerBeat; };
         StaffContent content;
-        content.triplets = score.getTriplets (part, staff, measure);
+        content.tuplets = score.getTuplets (part, staff, measure);
 
-        // A triplet's where it starts, and nothing else starts while it plays.
-        std::array<const Triplet*, Score::maxSlotsPerMeasure> tripletAt {};
+        // A tuplet's where it starts, and nothing else starts while it plays.
+        std::array<const Tuplet*, Score::maxSlotsPerMeasure> tupletAt {};
 
-        for (const auto& triplet : content.triplets)
-            tripletAt[(size_t) std::lround (triplet.beat * Score::slotsPerBeat)] = &triplet;
+        for (const auto& tuplet : content.tuplets)
+            tupletAt[(size_t) std::lround (tuplet.beat * Score::slotsPerBeat)] = &tuplet;
 
         const auto isEmpty = [&] (int slot)
         {
-            return score.getNotes (part, staff, measure, beatOf (slot)).empty() && tripletAt[(size_t) slot] == nullptr;
+            return score.getNotes (part, staff, measure, beatOf (slot)).empty() && tupletAt[(size_t) slot] == nullptr;
         };
 
         bool allEmpty = true;
@@ -387,18 +388,19 @@ namespace
         {
             const auto onset = beatOf (slot);
 
-            // A triplet's three notes, each with its notes' written length, played two thirds as long
-            if (const auto* triplet = tripletAt[(size_t) slot])
+            // A tuplet's notes, each with its notes' written length, played as long as its share of the tuplet
+            if (const auto* tuplet = tupletAt[(size_t) slot])
             {
-                for (int i = 0; i < Triplet::numNotes; ++i)
+                for (int i = 0; i < tuplet->getNumNotes(); ++i)
                 {
-                    StaffEvent event { triplet->getNoteOnset (i), getDurationForBeats (triplet->noteLength), {}, false, false, triplet->staccato };
-                    event.tones.push_back (makeTone (triplet->pitches[(size_t) i], keyAlterations));
-                    event.tripletStart = triplet->beat;
+                    StaffEvent event { tuplet->getNoteOnset (i), getDurationForBeats (tuplet->noteLength), {}, false, false, tuplet->staccato };
+                    event.tones.push_back (makeTone (tuplet->pitches[(size_t) i], keyAlterations));
+                    event.tupletStart = tuplet->beat;
+                    event.tupletNotes = tuplet->getNumNotes();
                     content.events.push_back (event);
                 }
 
-                slot += (int) std::lround (triplet->getLength() * Score::slotsPerBeat);
+                slot += (int) std::lround (tuplet->getLength() * Score::slotsPerBeat);
                 continue;
             }
 
@@ -455,7 +457,8 @@ Duration getDurationForBeats (double beats)
 
 double StaffEvent::getPlayedBeats() const noexcept
 {
-    return tripletStart.has_value() ? getBeats (duration) * 2.0 / 3.0 : getBeats (duration);
+    return tupletStart.has_value() && tupletNotes > 0 ? getBeats (duration) * Tuplet::getNormalCount (tupletNotes) / tupletNotes
+                                                      : getBeats (duration);
 }
 
 double getBeats (Duration duration)

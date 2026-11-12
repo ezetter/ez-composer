@@ -16,12 +16,13 @@ struct StaffEvent
     bool rolled = false;
     bool centred = false;               // written in the middle of the measure rather than at its onset
     bool staccato = false;              // played short and detached, with a dot over or under it
-    std::optional<double> tripletStart; // for one of a triplet's notes, when the triplet starts, in beats
+    std::optional<double> tupletStart; // for one of a tuplet's notes, when the tuplet starts, in beats
+    int tupletNotes = 0;                // and how many notes it has
 
     bool isRest() const noexcept { return tones.empty(); }
 
-    /** How many beats it lasts as it's played: as long as its duration, or for a triplet's
-        note, two thirds as long.
+    /** How many beats it lasts as it's played: as long as its duration, or for a tuplet's
+        note, its share of the tuplet: two thirds as long for a triplet's.
     */
     double getPlayedBeats() const noexcept;
 };
@@ -39,8 +40,8 @@ struct StaffContent
     /** The notes tied to the next note of the same pitch, by when they start, in beats. */
     std::vector<std::pair<double, music::Pitch>> tiedNotes;
 
-    /** The triplets written on it, in order. Their notes are among the events. */
-    std::vector<Triplet> triplets;
+    /** The tuplets written on it, in order. Their notes are among the events. */
+    std::vector<Tuplet> tuplets;
 };
 
 /** Everything written in a measure, worked out from the score. */

@@ -34,7 +34,7 @@ namespace Smufl
     constexpr juce::juce_wchar rest8th               = 0xE4E6;
     constexpr juce::juce_wchar rest16th              = 0xE4E7;
     constexpr juce::juce_wchar rest32nd              = 0xE4E8;
-    constexpr juce::juce_wchar tuplet3               = 0xE883;
+    constexpr juce::juce_wchar tuplet0               = 0xE880;     // tuplet1 to tuplet9 follow
     constexpr juce::juce_wchar wiggleArpeggiatoUp    = 0xEAA9;
 
     /** The dynamics, from ppp to fff, in the order of music::Dynamic */

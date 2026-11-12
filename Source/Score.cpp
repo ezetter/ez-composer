@@ -642,8 +642,8 @@ bool Score::putNote (const Note& note)
     if (alreadyThere && lengths[(size_t) slot] == length && staccato[(size_t) slot] == note.staccato)
         return false;
 
-    // It takes the place of triplets it plays during.
-    measure.removeTriplets (note.staff, slot, slot + length);
+    // It takes the place of tuplets it plays during.
+    measure.removeTuplets (note.staff, slot, slot + length);
 
     // A longer note held over this point is cut short to end here, as long as a note can be.
     for (int earlier = 0; earlier < slot; ++earlier)
@@ -712,15 +712,15 @@ void Score::placeNotes (int part, const std::array<std::optional<juce::Range<int
             m.ties[(size_t) staff][(size_t) slot].clear();
             m.lengths[(size_t) staff][(size_t) slot] = slotsPerBeat;
             m.staccato[(size_t) staff][(size_t) slot] = false;
-            m.triplets[(size_t) staff][(size_t) slot].reset();
+            m.tuplets[(size_t) staff][(size_t) slot].reset();
         }
 
-        // A note held over into it ends where it starts, as long as a note can be, and a triplet
+        // A note held over into it ends where it starts, as long as a note can be, and a tuplet
         // playing as it starts is taken out.
         if (const auto measure = span->getStart() / slotsPerMeasure, start = span->getStart() % slotsPerMeasure; ! chordUsesStaff (part, measure, staff))
         {
             auto& m = getMeasure (part, measure);
-            m.removeTriplets (staff, start, start + 1);
+            m.removeTuplets (staff, start, start + 1);
 
             for (int earlier = 0; earlier < start; ++earlier)
                 if (! m.notes[(size_t) staff][(size_t) earlier].empty() && earlier + m.lengths[(size_t) staff][(size_t) earlier] > start)
@@ -879,24 +879,24 @@ void Score::pruneTies()
                 }
 }
 
-bool Score::addTriplet (const Triplet& triplet)
+bool Score::addTuplet (const Tuplet& tuplet)
 {
-    const auto slot = toSlot (triplet.beat);
-    const auto noteLength = toSlot (triplet.noteLength);
-    const auto length = 2 * noteLength;
-    const auto lengthAllowed = std::any_of (tripletNoteLengths.begin(), tripletNoteLengths.end(),
-                                            [&] (double allowed) { return juce::exactlyEqual (allowed, triplet.noteLength); });
+    const auto slot = toSlot (tuplet.beat);
+    const auto noteLength = toSlot (tuplet.noteLength);
+    const auto length = Tuplet::getNormalCount (tuplet.getNumNotes()) * noteLength;
+    const auto lengthAllowed = std::any_of (tupletNoteLengths.begin(), tupletNoteLengths.end(),
+                                            [&] (double allowed) { return juce::exactlyEqual (allowed, tuplet.noteLength); });
 
-    if (! juce::isPositiveAndBelow (triplet.part, getNumParts()) || ! juce::isPositiveAndBelow (triplet.measure, getNumMeasures())
-        || ! lengthAllowed || ! juce::exactlyEqual (toBeats (slot), triplet.beat) || slot < 0 || slot + length > getSlotsPerMeasure()
-        || chordUsesStaff (triplet.part, triplet.measure, triplet.staff))
+    if (! juce::isPositiveAndBelow (tuplet.part, getNumParts()) || ! juce::isPositiveAndBelow (tuplet.measure, getNumMeasures())
+        || ! lengthAllowed || length == 0 || ! juce::exactlyEqual (toBeats (slot), tuplet.beat) || slot < 0 || slot + length > getSlotsPerMeasure()
+        || chordUsesStaff (tuplet.part, tuplet.measure, tuplet.staff))
         return false;
 
-    auto& measure = getMeasure (triplet.part, triplet.measure);
-    const auto staff = (size_t) triplet.staff;
-    const Measure::TripletNotes written { noteLength, triplet.pitches, triplet.staccato };
+    auto& measure = getMeasure (tuplet.part, tuplet.measure);
+    const auto staff = (size_t) tuplet.staff;
+    const Measure::TupletNotes written { noteLength, tuplet.pitches, tuplet.staccato };
 
-    if (measure.triplets[staff][(size_t) slot] == written)
+    if (measure.tuplets[staff][(size_t) slot] == written)
         return false;
 
     // The notes starting while it plays go, and one held over into it ends where it starts.
@@ -912,47 +912,47 @@ bool Score::addTriplet (const Triplet& triplet)
         if (! measure.notes[staff][(size_t) earlier].empty() && earlier + measure.lengths[staff][(size_t) earlier] > slot)
             measure.lengths[staff][(size_t) earlier] = fitNoteLength (slot - earlier, slot - earlier);
 
-    measure.removeTriplets (triplet.staff, slot, slot + length);
-    measure.triplets[staff][(size_t) slot] = written;
+    measure.removeTuplets (tuplet.staff, slot, slot + length);
+    measure.tuplets[staff][(size_t) slot] = written;
 
     pruneTies();
     sendSynchronousChangeMessage();
     return true;
 }
 
-std::vector<Triplet> Score::getTriplets (int part, Staff staff, int measure) const
+std::vector<Tuplet> Score::getTuplets (int part, Staff staff, int measure) const
 {
-    std::vector<Triplet> found;
+    std::vector<Tuplet> found;
     const auto& target = getMeasure (part, measure);
 
     for (int slot = 0; slot < getSlotsPerMeasure(); ++slot)
-        if (const auto& written = target.triplets[(size_t) staff][(size_t) slot];
-            written.has_value() && slot + 2 * written->noteLength <= getSlotsPerMeasure())
+        if (const auto& written = target.tuplets[(size_t) staff][(size_t) slot];
+            written.has_value() && slot + written->getLength() <= getSlotsPerMeasure())
             found.push_back ({ staff, measure, toBeats (slot), part, toBeats (written->noteLength), written->pitches, written->staccato });
 
     return found;
 }
 
-std::optional<Triplet> Score::getTriplet (int part, Staff staff, int measure, double beat) const
+std::optional<Tuplet> Score::getTuplet (int part, Staff staff, int measure, double beat) const
 {
     if (! juce::isPositiveAndBelow (measure, getNumMeasures()))
         return {};
 
-    for (const auto& triplet : getTriplets (part, staff, measure))
-        if (beat >= triplet.beat - 1.0e-9 && beat < triplet.beat + triplet.getLength() - 1.0e-9)
-            return triplet;
+    for (const auto& tuplet : getTuplets (part, staff, measure))
+        if (beat >= tuplet.beat - 1.0e-9 && beat < tuplet.beat + tuplet.getLength() - 1.0e-9)
+            return tuplet;
 
     return {};
 }
 
-bool Score::removeTriplet (int part, Staff staff, int measure, double beat)
+bool Score::removeTuplet (int part, Staff staff, int measure, double beat)
 {
-    const auto triplet = getTriplet (part, staff, measure, beat);
+    const auto tuplet = getTuplet (part, staff, measure, beat);
 
-    if (! triplet.has_value())
+    if (! tuplet.has_value())
         return false;
 
-    getMeasure (part, measure).triplets[(size_t) staff][(size_t) toSlot (triplet->beat)].reset();
+    getMeasure (part, measure).tuplets[(size_t) staff][(size_t) toSlot (tuplet->beat)].reset();
     sendSynchronousChangeMessage();
     return true;
 }
@@ -1344,9 +1344,9 @@ bool Score::chordsWouldReplace (int part, int firstMeasure, int count, Staff sta
     const auto hasNotes = [] (const Measure& m, Staff s)
     {
         const auto& slots = m.notes[(size_t) s];
-        const auto& triplets = m.triplets[(size_t) s];
+        const auto& tuplets = m.tuplets[(size_t) s];
         return std::any_of (slots.begin(), slots.end(), [] (const std::vector<music::Pitch>& pitches) { return ! pitches.empty(); })
-            || std::any_of (triplets.begin(), triplets.end(), [] (const auto& triplet) { return triplet.has_value(); });
+            || std::any_of (tuplets.begin(), tuplets.end(), [] (const auto& tuplet) { return tuplet.has_value(); });
     };
 
     for (auto measure = juce::jmax (0, firstMeasure); measure < juce::jmin (getNumMeasures(), firstMeasure + count); ++measure)
@@ -1558,9 +1558,9 @@ bool Score::hasNotes (int part) const
                 if (! notes.empty())
                     return true;
 
-        for (const auto& staff : measure.triplets)
-            for (const auto& triplet : staff)
-                if (triplet.has_value())
+        for (const auto& staff : measure.tuplets)
+            for (const auto& tuplet : staff)
+                if (tuplet.has_value())
                     return true;
     }
 
@@ -1582,7 +1582,7 @@ bool Score::isMeasureEmpty (int measure) const
                     return false;
 
         for (auto staff : { Staff::treble, Staff::bass })
-            if (! getTriplets (part, staff, measure).empty())
+            if (! getTuplets (part, staff, measure).empty())
                 return false;
     }
 
@@ -1718,7 +1718,8 @@ namespace
     // 22: the alternate staff's Root split into Root low and Root high, 5, which now opens as Root
     // 23: Root back on its own, and Octave, Block chord and Rolled chord, placed just past the chord
     // 24: triplets
-    constexpr int formatVersion = 24;
+    // 25: tuplets of 2 to 10 notes
+    constexpr int formatVersion = 25;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -1812,9 +1813,9 @@ juce::var Rhythm::toJSON() const
     {
         juce::Array<juce::var> hits;
 
-        // A triplet has its notes' length after the rest.
+        // A tuplet has its notes' length and how many there are after the rest.
         for (const auto& hit : staves[(size_t) staff])
-            hits.add (hit.isTriplet() ? juce::Array<juce::var> { hit.onset, hit.length, hit.staccato, false, hit.tripletNoteLength }
+            hits.add (hit.isTuplet() ? juce::Array<juce::var> { hit.onset, hit.length, hit.staccato, false, hit.tupletNoteLength, hit.tupletNotes }
                                       : juce::Array<juce::var> { hit.onset, hit.length, hit.staccato, hit.tiedToNext });
 
         object->setProperty (staff == music::Staff::treble ? "treble" : "bass", hits);
@@ -1843,15 +1844,20 @@ std::optional<Rhythm> Rhythm::fromJSON (const juce::var& json)
             for (const auto& item : *list)
             {
                 Hit hit { readInt (listItem (item, 0), 0, rhythm.getLength() - 1, -1), readInt (listItem (item, 1), 1, Score::maxSlotsPerMeasure, -1),
-                          (bool) listItem (item, 2), (bool) listItem (item, 3), readInt (listItem (item, 4), 0, Score::maxSlotsPerMeasure, 0) };
+                          (bool) listItem (item, 2), (bool) listItem (item, 3), readInt (listItem (item, 4), 0, Score::maxSlotsPerMeasure, 0),
+                          readInt (listItem (item, 5), Tuplet::minNotes, Tuplet::maxNotes, 3) };   // triplets, saved before other tuplets
 
-                // A triplet's notes are a length a triplet's can be, half as long as it, and aren't tied.
-                if (hit.isTriplet())
+                // A tuplet's notes are a length a tuplet's can be, as many of them as its count
+                // says it takes the time of, and aren't tied.
+                if (! hit.isTuplet())
+                    hit.tupletNotes = 0;
+
+                if (hit.isTuplet())
                 {
-                    const auto allowed = std::any_of (Score::tripletNoteLengths.begin(), Score::tripletNoteLengths.end(),
-                                                      [&] (double beats) { return (int) std::lround (beats * Score::slotsPerBeat) == hit.tripletNoteLength; });
+                    const auto allowed = std::any_of (Score::tupletNoteLengths.begin(), Score::tupletNoteLengths.end(),
+                                                      [&] (double beats) { return (int) std::lround (beats * Score::slotsPerBeat) == hit.tupletNoteLength; });
 
-                    if (! allowed || hit.length != 2 * hit.tripletNoteLength)
+                    if (! allowed || hit.length != Tuplet::getNormalCount (hit.tupletNotes) * hit.tupletNoteLength)
                         continue;
 
                     hit.tiedToNext = false;
@@ -1893,14 +1899,14 @@ std::vector<RhythmNote> layOutRhythm (const std::vector<Rhythm::Hit>& hits, int 
 
     for (const auto& hit : hits)
     {
-        // A triplet's three notes, each afresh, if it's all in the measure
-        if (hit.isTriplet())
+        // A tuplet's three notes, each afresh, if it's all in the measure
+        if (hit.isTuplet())
         {
             previous = &hit;
 
-            for (int i = 0; i < Triplet::numNotes; ++i)
+            for (int i = 0; i < hit.tupletNotes; ++i)
                 if (++attack; hit.onset >= from && hit.onset + hit.length <= to)
-                    notes.push_back ({ hit.onset - from, hit.length, hit.staccato, false, attack, hit.tripletNoteLength, i });
+                    notes.push_back ({ hit.onset - from, hit.length, hit.staccato, false, attack, hit.tupletNoteLength, i, hit.tupletNotes });
 
             continue;
         }
@@ -1935,7 +1941,7 @@ int countRhythmAttacks (const std::vector<Rhythm::Hit>& hits)
 
     for (const auto& hit : hits)
     {
-        attacks += hit.isTriplet() ? Triplet::numNotes : startsAfresh (previous, hit) ? 1 : 0;
+        attacks += hit.isTuplet() ? hit.tupletNotes : startsAfresh (previous, hit) ? 1 : 0;
         previous = &hit;
     }
 
@@ -2057,33 +2063,33 @@ juce::var Score::toJSON (bool withPartIds) const
             if (! staccato.isEmpty())
                 measureObject->setProperty (staff == Staff::treble ? "trebleStaccato" : "bassStaccato", staccato);
 
-            // The triplets, if there are any: at which 32nd, their notes' length in 32nds,
+            // The tuplets, if there are any: at which 32nd, their notes' length in 32nds,
             // whether they're staccato, and the three notes' pitches
-            juce::Array<juce::var> triplets;
+            juce::Array<juce::var> tuplets;
 
             for (int slot = 0; slot < maxSlotsPerMeasure; ++slot)
             {
-                if (const auto& triplet = measure.triplets[(size_t) staff][(size_t) slot])
+                if (const auto& tuplet = measure.tuplets[(size_t) staff][(size_t) slot])
                 {
                     juce::Array<juce::var> pitches;
 
-                    for (const auto& pitch : triplet->pitches)
+                    for (const auto& pitch : tuplet->pitches)
                         pitches.add (juce::Array<juce::var> { pitch.step, pitch.alter });
 
-                    auto* tripletObject = new juce::DynamicObject();
-                    tripletObject->setProperty ("at", slot);
-                    tripletObject->setProperty ("noteLength", triplet->noteLength);
-                    tripletObject->setProperty ("pitches", pitches);
+                    auto* tupletObject = new juce::DynamicObject();
+                    tupletObject->setProperty ("at", slot);
+                    tupletObject->setProperty ("noteLength", tuplet->noteLength);
+                    tupletObject->setProperty ("pitches", pitches);
 
-                    if (triplet->staccato)
-                        tripletObject->setProperty ("staccato", true);
+                    if (tuplet->staccato)
+                        tupletObject->setProperty ("staccato", true);
 
-                    triplets.add (tripletObject);
+                    tuplets.add (tupletObject);
                 }
             }
 
-            if (! triplets.isEmpty())
-                measureObject->setProperty (staff == Staff::treble ? "trebleTriplets" : "bassTriplets", triplets);
+            if (! tuplets.isEmpty())
+                measureObject->setProperty (staff == Staff::treble ? "trebleTriplets" : "bassTriplets", tuplets);
         }
 
         // The dynamic marked at each 32nd, or "" for none, if there are any
@@ -2295,26 +2301,28 @@ juce::Result Score::loadJSON (const juce::var& json)
                         if (const auto slot = readInt (entry, 0, maxSlotsPerMeasure - 1, -1); slot >= 0 && ! measure.notes[(size_t) staff][(size_t) slot].empty())
                             measure.staccato[(size_t) staff][(size_t) slot] = true;
 
-                // Triplets, in scores from version 24, each with notes of a length it can have,
+                // Tuplets, in scores from version 24, each with notes of a length it can have,
                 // in the measure, and not overlapping one before it
-                if (const auto* triplets = item.getProperty (staff == Staff::treble ? "trebleTriplets" : "bassTriplets", {}).getArray())
+                if (const auto* tuplets = item.getProperty (staff == Staff::treble ? "trebleTriplets" : "bassTriplets", {}).getArray())
                 {
-                    for (const auto& t : *triplets)
+                    for (const auto& t : *tuplets)
                     {
                         const auto slot = readInt (t.getProperty ("at", {}), 0, maxSlotsPerMeasure - 1, -1);
                         const auto noteLength = readInt (t.getProperty ("noteLength", {}), 1, maxSlotsPerMeasure, 0);
                         const auto* pitches = t.getProperty ("pitches", {}).getArray();
-                        const auto lengthAllowed = std::any_of (tripletNoteLengths.begin(), tripletNoteLengths.end(),
+                        const auto lengthAllowed = std::any_of (tupletNoteLengths.begin(), tupletNoteLengths.end(),
                                                                 [&] (double allowed) { return toSlot (allowed) == noteLength; });
 
-                        if (slot < 0 || ! lengthAllowed || slot + 2 * noteLength > maxSlotsPerMeasure || pitches == nullptr
-                            || pitches->size() != Triplet::numNotes)
+                        if (slot < 0 || ! lengthAllowed || pitches == nullptr || pitches->size() < Tuplet::minNotes || pitches->size() > Tuplet::maxNotes
+                            || slot + Tuplet::getNormalCount (pitches->size()) * noteLength > maxSlotsPerMeasure)
                             continue;
 
-                        Measure::TripletNotes written { noteLength, {}, (bool) t.getProperty ("staccato", false) };
+                        Measure::TupletNotes written { noteLength, {}, (bool) t.getProperty ("staccato", false) };
                         auto valid = true;
 
-                        for (int i = 0; i < Triplet::numNotes; ++i)
+                        written.pitches.resize ((size_t) pitches->size());
+
+                        for (int i = 0; i < pitches->size(); ++i)
                         {
                             const auto& pitch = pitches->getReference (i);
                             written.pitches[(size_t) i] = { readInt (pitch[0], 0, 80, -1), readInt (pitch[1], -2, 2, 0) };
@@ -2324,8 +2332,8 @@ juce::Result Score::loadJSON (const juce::var& json)
                         if (! valid)
                             continue;
 
-                        measure.removeTriplets (staff, slot, slot + 2 * noteLength);
-                        measure.triplets[(size_t) staff][(size_t) slot] = written;
+                        measure.removeTuplets (staff, slot, slot + written.getLength());
+                        measure.tuplets[(size_t) staff][(size_t) slot] = written;
                     }
                 }
             }

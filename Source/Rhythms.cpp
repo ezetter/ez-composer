@@ -45,12 +45,13 @@ SavedRhythm getRhythm (const Score& score, int part, int firstMeasure, int numMe
                 if (event.isRest())
                     continue;
 
-                // A triplet, once, as it starts
-                if (const auto start = event.tripletStart)
+                // A tuplet, once, as it starts
+                if (const auto start = event.tupletStart)
                 {
                     if (juce::exactlyEqual (event.onset, *start))
-                        rhythm.staves[(size_t) staff].push_back ({ i * slotsPerMeasure + toSlots (*start), 2 * toSlots (getBeats (event.duration)),
-                                                                  event.staccato, false, toSlots (getBeats (event.duration)) });
+                        rhythm.staves[(size_t) staff].push_back ({ i * slotsPerMeasure + toSlots (*start),
+                                                                  Tuplet::getNormalCount (event.tupletNotes) * toSlots (getBeats (event.duration)),
+                                                                  event.staccato, false, toSlots (getBeats (event.duration)), event.tupletNotes });
 
                     continue;
                 }
@@ -113,15 +114,16 @@ RhythmPlan planRhythm (const SavedRhythm& rhythm, int times, const Note& start, 
         {
             for (const auto& hit : hits)
             {
-                // A triplet, at the note's pitch, if it's all in one measure; across a barline,
+                // A tuplet, at the note's pitch, if it's all in one measure; across a barline,
                 // it's left out.
-                if (hit.isTriplet())
+                if (hit.isTuplet())
                 {
                     const auto at = origin + time * length + hit.onset;
 
                     if (const auto slot = at % slotsPerMeasure; slot + hit.length <= slotsPerMeasure)
-                        plan.triplets.push_back ({ staff, at / slotsPerMeasure, (double) slot / Score::slotsPerBeat, start.part,
-                                                   (double) hit.tripletNoteLength / Score::slotsPerBeat, { pitch, pitch, pitch }, hit.staccato });
+                        plan.tuplets.push_back ({ staff, at / slotsPerMeasure, (double) slot / Score::slotsPerBeat, start.part,
+                                                   (double) hit.tupletNoteLength / Score::slotsPerBeat,
+                                                   std::vector<music::Pitch> ((size_t) hit.tupletNotes, pitch), hit.staccato });
 
                     continue;
                 }

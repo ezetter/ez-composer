@@ -214,13 +214,13 @@ private:
     */
     void setNoteLength (double beats);
 
-    /** Makes clicks on the staff place triplets, with their notes this long, in beats, in place of single notes. */
-    void setTriplet (double noteBeats);
+    /** Makes clicks on the staff place tuplets, with their notes this long, in beats, in place of single notes. */
+    void setTuplet (double noteBeats, int numNotes);
 
-    /** Shows the lengths a triplet's notes can be, beside the triplet button, and places triplets meanwhile. */
-    void chooseTripletLength();
+    /** Shows the lengths a tuplet's notes can be, beside the tuplet button, and places tuplets meanwhile. */
+    void chooseTupletLength();
 
-    /** Goes back to adding what the note length buttons have chosen: single notes, or triplets. */
+    /** Goes back to adding what the note length buttons have chosen: single notes, or tuplets. */
     void resumeAddingNotes();
 
     /** Makes the notes that clicking the staff adds staccato, or not, whatever their length.
@@ -614,7 +614,7 @@ private:
     DynamicPicker dynamicPicker;        // beside it: a dynamic or hairpin to mark instead
 
     /** Which notation controls show, after the box choosing them: the note lengths, with
-        staccato and triplets; the dynamics and hairpins; the repeat signs and endings; or the pedal.
+        staccato and tuplets; the dynamics and hairpins; the repeat signs and endings; or the pedal.
     */
     enum class NotationGroup { notes, dynamics, flow, pedal };
     controls::TileComboBoxLookAndFeel tileComboBoxLookAndFeel;

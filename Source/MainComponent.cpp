@@ -361,12 +361,12 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     // Note lengths for clicking into the staff, quarter notes to start with, staccato or not, or dynamics and hairpins to mark
     noteLengthPicker.onChange = [this] (double beats) { setNoteLength (beats); };
     noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
-    noteLengthPicker.onTripletClicked = [this] { chooseTripletLength(); };
+    noteLengthPicker.onTupletClicked = [this] { chooseTupletLength(); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
 
     // Which notation controls show, as last time: the box's ids are the groups', from 1.
     notationGroupBox.addItemList ({ "Notes", "Dynamics", "Flow", "Pedal" }, 1);
-    notationGroupBox.setTooltip ("Which notation controls show: note lengths, staccato and triplets; dynamics and hairpins; repeats and endings; or the pedal");
+    notationGroupBox.setTooltip ("Which notation controls show: note lengths, staccato and tuplets; dynamics and hairpins; repeats and endings; or the pedal");
     notationGroupBox.setWantsKeyboardFocus (false);
     notationGroupBox.setLookAndFeel (&tileComboBoxLookAndFeel);
     notationGroupBox.setColour (juce::ComboBox::textColourId, juce::Colour (0xff1b1b1b));
@@ -1027,7 +1027,7 @@ void MainComponent::insertTrack (int index, bool reloadFromSettings)
 
     // It does what clicks on the other parts do.
     view.setNoteLength (noteLengthPicker.getLength());
-    view.setTripletLength (noteLengthPicker.isTriplet() ? std::optional (noteLengthPicker.getTripletLength()) : std::nullopt);
+    view.setTuplet (noteLengthPicker.isTuplet() ? std::optional (noteLengthPicker.getTupletLength()) : std::nullopt, noteLengthPicker.getTupletNotes());
     view.setStaccato (noteLengthPicker.isStaccato());
 
     if (eraserButton.getToggleState())
@@ -1620,50 +1620,52 @@ void MainComponent::setNoteLength (double beats)
     {
         view->setNoteLength (beats);
         view->setMarking ({});
-        view->setTripletLength ({});
+        view->setTuplet ({});
     }
 }
 
-void MainComponent::setTriplet (double noteBeats)
+void MainComponent::setTuplet (double noteBeats, int numNotes)
 {
     stopPlacingNotes();
     stopSelecting();
 
-    noteLengthPicker.setTriplet (noteBeats);
+    noteLengthPicker.setTuplet (noteBeats, numNotes);
     dynamicPicker.setChoice ({});
     eraserButton.setToggleState (false, juce::dontSendNotification);
 
     for (auto& view : staffSystems.views)
     {
         view->setMarking ({});
-        view->setTripletLength (noteBeats);
+        view->setTuplet (noteBeats, noteLengthPicker.getTupletNotes());
     }
 }
 
-void MainComponent::chooseTripletLength()
+void MainComponent::chooseTupletLength()
 {
-    // Triplets straight away, of the length chosen last, which the box can change
-    setTriplet (noteLengthPicker.getTripletLength());
+    // Tuplets straight away, as chosen last, which the box can change
+    setTuplet (noteLengthPicker.getTupletLength(), noteLengthPicker.getTupletNotes());
 
-    auto panel = std::make_unique<TripletLengthPanel> (noteLengthPicker.getTripletLength());
+    auto panel = std::make_unique<TupletLengthPanel> (noteLengthPicker.getTupletLength(), noteLengthPicker.getTupletNotes());
     auto* panelPointer = panel.get();
 
-    panel->onChoose = [this, panelPointer] (double beats)
+    // A number changes how many notes, and a length changes theirs and closes the box.
+    panel->onChoose = [this, panelPointer] (double beats, int numNotes, bool finished)
     {
-        if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
-            box->dismiss();
+        if (finished)
+            if (auto* box = panelPointer->findParentComponentOfClass<juce::CallOutBox>())
+                box->dismiss();
 
-        setTriplet (beats);
+        setTuplet (beats, numNotes);
     };
 
-    auto& button = noteLengthPicker.getTripletButton();
+    auto& button = noteLengthPicker.getTupletButton();
     juce::CallOutBox::launchAsynchronously (std::move (panel), getLocalArea (&button, button.getLocalBounds()), this);
 }
 
 void MainComponent::resumeAddingNotes()
 {
-    if (noteLengthPicker.isTriplet())
-        setTriplet (noteLengthPicker.getTripletLength());
+    if (noteLengthPicker.isTuplet())
+        setTuplet (noteLengthPicker.getTupletLength(), noteLengthPicker.getTupletNotes());
     else
         setNoteLength (noteLengthPicker.getLength());
 }

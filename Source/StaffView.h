@@ -61,16 +61,16 @@ public:
     */
     void setStaccato (bool);
 
-    /** Turns placing triplets on, with their notes' length in beats (one of
-        Score::tripletNoteLengths), or off, to go back to single notes. While it's on, a click
-        starts a triplet at the nearest beat, or step of its length if that's shorter, as far back
-        as it needs to fit in the measure, with the note clicked first. The next two clicks over
-        it, while it's on the same staff, are its second and third notes, at the pitches clicked.
-        Until they're placed, they're the first note's pitch, shown faintly, and stay that way if
-        the triplet's left unfinished: a click anywhere else starts another, as does choosing
-        anything else. Once all three are placed, the next click starts another.
+    /** Turns placing tuplets on, with their notes' length in beats (one of
+        Score::tupletNoteLengths) and how many notes they have, or off, to go back to single notes.
+        While it's on, a click starts a tuplet at the nearest beat, or step of its length if that's
+        shorter, as far back as it needs to fit in the measure, with the note clicked first. The
+        next clicks over it, while it's on the same staff, are its next notes, at the pitches
+        clicked. Until they're placed, they're the first note's pitch, shown faintly, and stay
+        that way if the tuplet's left unfinished: a click anywhere else starts another, as does
+        choosing anything else. Once all its notes are placed, the next click starts another.
     */
-    void setTripletLength (std::optional<double> noteBeats);
+    void setTuplet (std::optional<double> noteBeats, int numNotes = 3);
 
     /** What clicks mark, rather than adding notes, or none to go back to adding notes.
 
@@ -459,11 +459,11 @@ private:
     /** What a click without dragging does: adds or takes out a note. */
     void clickNote (const Note&);
 
-    /** Whether clicks place triplets, rather than doing what they'd do otherwise */
-    bool isPlacingTriplets() const noexcept;
+    /** Whether clicks place tuplets, rather than doing what they'd do otherwise */
+    bool isPlacingTuplets() const noexcept;
 
-    /** The triplet being placed, with the next of its notes to place, while it's still in the score as it was left */
-    struct TripletProgress
+    /** The tuplet being placed, with the next of its notes to place, while it's still in the score as it was left */
+    struct TupletProgress
     {
         Staff staff;
         int measure;
@@ -471,29 +471,29 @@ private:
         int placed = 1;     // how many of its notes have been clicked
     };
 
-    std::optional<Triplet> getTripletInProgress() const;
+    std::optional<Tuplet> getTupletInProgress() const;
 
-    /** Whether a point across the view is over the triplet being placed: from halfway back to
+    /** Whether a point across the view is over the tuplet being placed: from halfway back to
         where a note before its first would be, to halfway on from its last.
     */
-    bool isOverTriplet (const Triplet&, float x) const;
+    bool isOverTuplet (const Tuplet&, float x) const;
 
-    /** The triplet's note a click at this point would place: the next of the one being placed,
+    /** The tuplet's note a click at this point would place: the next of the one being placed,
         over it, or else the first of a new one.
     */
-    std::optional<Note> getTripletNoteAt (juce::Point<float>) const;
+    std::optional<Note> getTupletNoteAt (juce::Point<float>) const;
 
-    /** Places a triplet's note, as getTripletNoteAt() gave it. */
-    void placeTripletNote (const Note&);
+    /** Places a tuplet's note, as getTupletNoteAt() gave it. */
+    void placeTupletNote (const Note&);
 
-    /** Stops placing the triplet being placed, leaving its notes as they are. */
-    void endTriplet();
+    /** Stops placing the tuplet being placed, leaving its notes as they are. */
+    void endTuplet();
 
-    /** When the triplet note written on a line or space nearest to x starts, if there's one near enough. */
-    std::optional<double> findTripletNoteOnset (const Note& spot, float x) const;
+    /** When the tuplet note written on a line or space nearest to x starts, if there's one near enough. */
+    std::optional<double> findTupletNoteOnset (const Note& spot, float x) const;
 
-    /** A triplet's 3, beside its beam, or with a bracket over or under its notes, on their stems' side */
-    void drawTripletMark (juce::Graphics&, Staff, const std::vector<NoteLayout*>&) const;
+    /** A tuplet's number, beside its beam, or with a bracket over or under its notes, on their stems' side */
+    void drawTupletMark (juce::Graphics&, Staff, const std::vector<NoteLayout*>&) const;
 
     /** The notes adding from the scale at a note would add: one after another from it, each as
         long as asked, or as fits in its measure, and on into the measures after. In order, they go
@@ -649,8 +649,9 @@ private:
     bool active = false;
     double noteLength = 1.0;
     bool staccato = false;                          // whether the notes clicks add are staccato
-    std::optional<double> tripletNoteLength;        // placing triplets of notes this long, in beats, rather than single notes
-    std::optional<TripletProgress> tripletProgress;
+    std::optional<double> tupletNoteLength;        // placing tuplets of notes this long, in beats, rather than single notes
+    int tupletNotes = 3;                            // with this many notes
+    std::optional<TupletProgress> tupletProgress;
     std::optional<ScaleSettings> scalePlacement;    // adding notes from the scale, at the next click
     std::optional<RhythmPlacement> rhythmPlacement; // writing a rhythm, at the next click
     std::optional<Note> scaleHover;                 // where either would go
