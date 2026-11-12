@@ -317,6 +317,44 @@ namespace controls
         }
     };
 
+    /** Draws a dropdown like the small symbol buttons over the score: a white tile with rounded
+        corners and a fine outline, shaded under the pointer and while it's open, with dark text
+        and a small arrow at the right. Its menu is light too.
+    */
+    struct TileComboBoxLookAndFeel final : public juce::LookAndFeel_V4
+    {
+        TileComboBoxLookAndFeel() : LookAndFeel_V4 (getLightColourScheme()) {}
+
+        void drawComboBox (juce::Graphics& g, int width, int height, bool down, int, int, int, int, juce::ComboBox& box) override
+        {
+            const auto bounds = juce::Rectangle<float> ((float) width, (float) height).reduced (0.5f);
+            const auto highlighted = box.isMouseOver (true);
+
+            g.setColour (down || box.isPopupActive() ? juce::Colour (0xffe8e8ec) : highlighted ? juce::Colour (0xfff2f2f5) : juce::Colours::white);
+            g.fillRoundedRectangle (bounds, 5.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.18f));
+            g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+
+            // A chevron pointing down
+            const auto centre = juce::Point<float> ((float) width - 13.0f, (float) height / 2.0f + 0.5f);
+            juce::Path arrow;
+            arrow.startNewSubPath (centre.x - 4.0f, centre.y - 2.0f);
+            arrow.lineTo (centre.x, centre.y + 2.0f);
+            arrow.lineTo (centre.x + 4.0f, centre.y - 2.0f);
+            g.setColour (juce::Colour (0xff1b1b1b));
+            g.strokePath (arrow, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+
+        juce::Font getComboBoxFont (juce::ComboBox&) override { return juce::FontOptions (14.5f); }
+
+        void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
+        {
+            label.setBounds (4, 1, box.getWidth() - 26, box.getHeight() - 2);
+            label.setFont (getComboBoxFont (box));
+            label.setColour (juce::Label::textColourId, juce::Colour (0xff1b1b1b));
+        }
+    };
+
     /** Draws tooltips as quiet notes, like the system's: plain dark text, ranged left and wrapped
         to an easy width, on a pale panel with rounded corners and a fine outline, like the tiles
         of the buttons over the score. The tooltip window it's for mustn't be opaque, so the

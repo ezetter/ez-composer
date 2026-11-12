@@ -617,6 +617,7 @@ private:
         staccato and triplets; the dynamics and hairpins; the repeat signs and endings; or the pedal.
     */
     enum class NotationGroup { notes, dynamics, flow, pedal };
+    controls::TileComboBoxLookAndFeel tileComboBoxLookAndFeel;
     juce::ComboBox notationGroupBox;     // at the top left of the score, over the staves: which group shows
     NotationGroup notationGroup = NotationGroup::notes;
 

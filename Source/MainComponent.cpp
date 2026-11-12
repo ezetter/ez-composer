@@ -368,6 +368,8 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     notationGroupBox.addItemList ({ "Notes", "Dynamics", "Flow", "Pedal" }, 1);
     notationGroupBox.setTooltip ("Which notation controls show: note lengths, staccato and triplets; dynamics and hairpins; repeats and endings; or the pedal");
     notationGroupBox.setWantsKeyboardFocus (false);
+    notationGroupBox.setLookAndFeel (&tileComboBoxLookAndFeel);
+    notationGroupBox.setColour (juce::ComboBox::textColourId, juce::Colour (0xff1b1b1b));
     notationGroupBox.onChange = [this]
     {
         if (const auto id = notationGroupBox.getSelectedId(); id > 0)
@@ -532,6 +534,8 @@ MainComponent::~MainComponent()
     // The effects page goes, and the effects are kept, as they may have been changed in their editors.
     effectsWindow = nullptr;
     saveEffects();
+
+    notationGroupBox.setLookAndFeel (nullptr);
 
     // The menu bar stops watching the command manager before the manager goes, which is before
     // the menu bar is.
