@@ -368,8 +368,32 @@ StaffView::~StaffView()
 
 int StaffView::getContentWidth() const
 {
-    const auto& last = measureLayouts.back();
-    return (int) std::ceil (last.x + last.width + rightMargin * staffSpace);
+    const auto& last = measureLayouts[(size_t) juce::jmax (0, getShownMeasures().getEnd() - 1)];
+    const auto width = (int) std::ceil (last.x + last.width + rightMargin * staffSpace);
+    return pageLine.has_value() ? juce::jmax (width, pageLine->width) : width;
+}
+
+juce::Range<int> StaffView::getShownMeasures() const
+{
+    const auto numMeasures = (int) measureLayouts.size();
+
+    if (! pageLine.has_value())
+        return { 0, numMeasures };
+
+    const auto first = juce::jlimit (0, juce::jmax (0, numMeasures - 1), pageLine->firstMeasure);
+    return { first, juce::jlimit (first, numMeasures, first + pageLine->numMeasures) };
+}
+
+void StaffView::setLine (std::optional<Line> newLine)
+{
+    if (newLine == pageLine)
+        return;
+
+    pageLine = newLine;
+    updateLayout();
+    setSize (getContentWidth(), getContentHeight());
+    updateChordButtons();
+    repaint();
 }
 
 int StaffView::getContentHeight() const
@@ -1298,7 +1322,8 @@ void StaffView::updateLayout()
     const auto keySignatureWidth = (float) numAccidentals * (sharps ? 1.05f : 0.95f);
 
     timeSignatureLeft = keySignatureLeft + (numAccidentals > 0 ? keySignatureWidth + 0.9f : 0.4f);
-    firstMeasureLeft = timeSignatureLeft + 3.0f;
+    firstMeasureLeft = timeSignatureLeft + (pageLine.has_value() && ! pageLine->timeSignature ? 0.6f : 3.0f);
+    const auto inLine = [this] (int measure) { return ! pageLine.has_value() || (measure >= pageLine->firstMeasure && measure < pageLine->firstMeasure + pageLine->numMeasures); };
 
     auto x = firstMeasureLeft * staffSpace;
 
@@ -1309,6 +1334,20 @@ void StaffView::updateLayout()
     for (int measure = 0; measure < score.getNumMeasures(); ++measure)
     {
         MeasureLayout layout;
+
+        // On a line, the measures away from it are out of view, so they're just given room,
+        // without their music. The ones either side have theirs, for ties to and from them.
+        if (pageLine.has_value() && (measure < pageLine->firstMeasure - 1 || measure > pageLine->firstMeasure + pageLine->numMeasures))
+        {
+            layout.padding = measurePadding * staffSpace;
+            layout.beatWidth = getBeatWidth (1) * staffSpace;
+            layout.width = getMeasureWidth (score.getBeatsPerMeasure(), 1, layout.padding, 0.0f);
+            layout.x = x;
+            x += layout.width;
+            measureLayouts.push_back (std::move (layout));
+            continue;
+        }
+
         layout.content = getMeasureContent (score, part, measure);
 
         // Every part's measure is spaced the same, to fit what's in all of them, so their beats line up.
@@ -1348,9 +1387,13 @@ void StaffView::updateLayout()
 
         // How far the notes and their stems reach past the outer staves, which sets where the
         // chord names and numerals go. Stems run an octave from the note furthest in their
-        // direction, and arpeggios may be beamed either way, so they get room for both.
+        // direction, and arpeggios may be beamed either way, so they get room for both. On a
+        // line, it's just its own measures'.
         for (auto staff : { Staff::treble, Staff::bass })
         {
+            if (! inLine (measure))
+                break;
+
             const auto& content = layout.content.staves[(size_t) staff];
             const auto melodic = content.source == StaffContent::Source::chord && music::isMelodic (layout.content.chordStyle.type);
 
@@ -1400,6 +1443,52 @@ void StaffView::updateLayout()
         }
 
         measureLayouts.push_back (std::move (layout));
+    }
+
+    if (pageLine.has_value())
+        layOutLine();
+}
+
+void StaffView::layOutLine()
+{
+    const auto shown = getShownMeasures();
+
+    if (shown.isEmpty())
+        return;
+
+    // A full line is stretched to fill its width, its beats evenly wider.
+    const auto& last = measureLayouts[(size_t) shown.getEnd() - 1];
+    const auto natural = last.x + last.width - measureLayouts[(size_t) shown.getStart()].x;
+    const auto room = (float) pageLine->width - (firstMeasureLeft + rightMargin) * staffSpace;
+
+    if (pageLine->full && room > natural)
+    {
+        const auto extraPerBeat = (room - natural) / (float) (shown.getLength() * score.getBeatsPerMeasure());
+
+        for (auto measure = shown.getStart(); measure < shown.getEnd(); ++measure)
+        {
+            auto& layout = measureLayouts[(size_t) measure];
+            layout.beatWidth += extraPerBeat;
+            layout.width += extraPerBeat * (float) score.getBeatsPerMeasure();
+        }
+    }
+
+    // The line's measures start after the clefs, with those before it to the left, out of view,
+    // and those after it to the right.
+    auto x = firstMeasureLeft * staffSpace;
+
+    for (auto measure = shown.getStart(); measure < (int) measureLayouts.size(); ++measure)
+    {
+        measureLayouts[(size_t) measure].x = x;
+        x += measureLayouts[(size_t) measure].width;
+    }
+
+    x = firstMeasureLeft * staffSpace;
+
+    for (auto measure = shown.getStart() - 1; measure >= 0; --measure)
+    {
+        x -= measureLayouts[(size_t) measure].width;
+        measureLayouts[(size_t) measure].x = x;
     }
 }
 
@@ -1472,7 +1561,7 @@ int StaffView::findMeasure (float x) const
 
     const auto measure = (int) std::distance (measureLayouts.begin(), after) - 1;
     const auto& layout = measureLayouts[(size_t) measure];
-    return x < layout.x + layout.width ? measure : -1;
+    return x < layout.x + layout.width && getShownMeasures().contains (measure) ? measure : -1;
 }
 
 juce::Rectangle<int> StaffView::getBeatArea (int measure, double beat) const
@@ -1528,7 +1617,11 @@ juce::Rectangle<int> StaffView::getMeasureArea (int measure) const
 
 int StaffView::getFinalBarlineX() const
 {
-    return measureLayouts.empty() ? 0 : juce::roundToInt (measureLayouts.back().x + measureLayouts.back().width);
+    if (measureLayouts.empty())
+        return 0;
+
+    const auto& last = measureLayouts[(size_t) juce::jmax (0, getShownMeasures().getEnd() - 1)];
+    return juce::roundToInt (last.x + last.width);
 }
 
 std::optional<Note> StaffView::getNoteAt (juce::Point<float> point) const
@@ -1660,7 +1753,10 @@ double StaffView::getHairpinEndAt (float x) const
     const auto measure = findMeasure (x);
 
     if (measure < 0)
-        return x < measureLayouts.front().x ? 0.0 : (double) (score.getNumMeasures() * beats);
+    {
+        const auto shown = getShownMeasures();
+        return x < measureLayouts[(size_t) shown.getStart()].x ? (double) (shown.getStart() * beats) : (double) (shown.getEnd() * beats);
+    }
 
     // The nearest beat, counting the barline after the last, or 64th note with a note starting there
     const auto& layout = measureLayouts[(size_t) measure];
@@ -1760,11 +1856,12 @@ void StaffView::paint (juce::Graphics& g)
 
     // Only the measures that need repainting are drawn, allowing for symbols that overhang a little.
     const auto clip = g.getClipBounds().toFloat().expanded (3.0f * staffSpace, 0.0f);
-    const auto firstMeasure = juce::jmax (0, findMeasure (juce::jmax (clip.getX(), measureLayouts.front().x)));
+    const auto shown = getShownMeasures();
+    const auto firstMeasure = juce::jmax (shown.getStart(), findMeasure (juce::jmax (clip.getX(), measureLayouts[(size_t) shown.getStart()].x)));
     auto lastMeasure = findMeasure (clip.getRight());
 
     if (lastMeasure < 0)
-        lastMeasure = score.getNumMeasures() - 1;
+        lastMeasure = shown.getEnd() - 1;
 
     for (auto measure = firstMeasure; measure <= lastMeasure; ++measure)
     {
@@ -1811,7 +1908,7 @@ void StaffView::paint (juce::Graphics& g)
 
     const auto lineThickness = staffLineThickness * staffSpace;
     const auto linesLeft = systemLeft * staffSpace;
-    const auto linesRight = measureLayouts.back().x + measureLayouts.back().width;
+    const auto linesRight = (float) getFinalBarlineX();
 
     for (auto staff : { Staff::treble, Staff::bass })
         for (int line = 0; line <= topLine; line += 2)
@@ -1931,7 +2028,8 @@ void StaffView::drawHeader (juce::Graphics& g) const
 
     // The part's name at the top left, over the clefs, and a bar beside the active part's staves
     const auto titleTop = top - getChordButtonOffset() * staffSpace;
-    const auto titleRight = chordButtons.isEmpty() ? firstMeasureLeft * staffSpace : (float) chordButtons.getFirst()->getX() - 0.5f * staffSpace;
+    const auto* firstButton = chordButtons[getShownMeasures().getStart()];
+    const auto titleRight = firstButton == nullptr ? firstMeasureLeft * staffSpace : (float) firstButton->getX() - 0.5f * staffSpace;
     g.setColour (active ? selectionColour : measureNumberColour);
     g.setFont (juce::FontOptions (13.0f, active ? juce::Font::bold : juce::Font::plain));
     g.drawFittedText (title, juce::Rectangle<float> (systemLeft * staffSpace, titleTop, titleRight - systemLeft * staffSpace, 2.0f * staffSpace).toNearestInt(),
@@ -1975,6 +2073,9 @@ void StaffView::drawHeader (juce::Graphics& g) const
 
     for (auto staff : { Staff::treble, Staff::bass })
     {
+        if (pageLine.has_value() && ! pageLine->timeSignature)
+            break;
+
         glyphs.draw (g, (juce::juce_wchar) (Smufl::timeSig0 + score.getBeatsPerMeasure()), { timeSignatureLeft * staffSpace, getY (staff, 6) });
         glyphs.draw (g, (juce::juce_wchar) (Smufl::timeSig0 + 4), { timeSignatureLeft * staffSpace, getY (staff, 2) });
     }
@@ -2896,7 +2997,7 @@ juce::Range<float> StaffView::getPedalSpan (const std::vector<PedalSpan>& pedals
 
     const auto start = getScoreBeatsX (pedal.start) + (liftedJustBefore ? halfGap : 0.0f);
     const auto end = getScoreBeatsX (pedal.end) - (downJustAfter ? halfGap : 0.0f);
-    return { start, juce::jmax (start + 0.5f * staffSpace, end) };
+    return clipToLine ({ start, juce::jmax (start + 0.5f * staffSpace, end) });
 }
 
 void StaffView::drawPedals (juce::Graphics& g) const
@@ -3086,7 +3187,19 @@ juce::Range<float> StaffView::getHairpinSpan (int measure, double beat, double e
         finish = getOnsetX (endMeasure, endBeat) - 0.8f * staffSpace;
     }
 
-    return { start, juce::jmax (finish, start + 1.5f * staffSpace) };
+    return clipToLine ({ start, juce::jmax (finish, start + 1.5f * staffSpace) });
+}
+
+juce::Range<float> StaffView::clipToLine (juce::Range<float> span) const
+{
+    if (! pageLine.has_value() || measureLayouts.empty())
+        return span;
+
+    // What goes on from the line before, or into the next, goes off its edges.
+    const auto left = measureLayouts[(size_t) getShownMeasures().getStart()].x - 0.5f * staffSpace;
+    const auto right = (float) getFinalBarlineX() + 0.5f * staffSpace;
+    const auto start = juce::jlimit (left, right, span.getStart());
+    return { start, juce::jlimit (start, right, span.getEnd()) };
 }
 
 void StaffView::drawHairpin (juce::Graphics& g, music::Hairpin hairpin, juce::Range<float> span) const
@@ -4346,9 +4459,29 @@ std::vector<StaffView::TieShape> StaffView::getTieShapes (int firstMeasure, int 
 
                 // From just after the first notehead to just before the second, a little away from their centres
                 const auto offset = 0.45f * staffSpace * (from->upwards ? -1.0f : 1.0f);
-                shapes.push_back ({ Note { staff, measure, onset, pitch, part, 1.0 },
-                                    from->centre.translated (from->halfWidth + 0.15f * staffSpace, offset),
-                                    to->centre.translated (-to->halfWidth - 0.15f * staffSpace, offset), from->upwards, byHand });
+                auto start = from->centre.translated (from->halfWidth + 0.15f * staffSpace, offset);
+                auto end = to->centre.translated (-to->halfWidth - 0.15f * staffSpace, offset);
+
+                // On a line, one from the line before comes in from its start, and one to the
+                // next goes off past its end.
+                if (pageLine.has_value())
+                {
+                    const auto shown = getShownMeasures();
+                    const auto lineLeft = measureLayouts[(size_t) shown.getStart()].x;
+                    const auto lineRight = (float) getFinalBarlineX();
+                    const auto fromShown = shown.contains (measure), toShown = shown.contains (next->first);
+
+                    if (! fromShown && ! toShown)
+                        continue;
+
+                    if (! fromShown)
+                        start.x = juce::jmax (lineLeft - 0.5f * staffSpace, end.x - 3.0f * staffSpace);
+
+                    if (! toShown)
+                        end.x = juce::jmin (lineRight + 1.0f * staffSpace, start.x + 3.0f * staffSpace);
+                }
+
+                shapes.push_back ({ Note { staff, measure, onset, pitch, part, 1.0 }, start, end, from->upwards, byHand });
             }
         }
     }
@@ -4465,7 +4598,8 @@ void StaffView::updateChordButtons()
     if (part < 0)
         return;
 
-    const auto numMeasures = juce::jmin (score.getNumMeasures(), (int) measureLayouts.size());
+    // On a line, there are none after it.
+    const auto numMeasures = juce::jmin (score.getNumMeasures(), (int) measureLayouts.size(), getShownMeasures().getEnd());
 
     while (chordButtons.size() > numMeasures)
         chordButtons.removeLast();
@@ -4504,6 +4638,7 @@ void StaffView::updateChordButtons()
         button->setButtonText (hasChord ? "Edit Chord" : "Add Chord");
         button->setTooltip ((hasChord ? "Edit the chord in measure " : "Add a chord to measure ") + juce::String (measure + 1));
         button->setToggleState (measure == selectedMeasure, juce::dontSendNotification);
+        button->setVisible (getShownMeasures().contains (measure));
         button->setBounds (juce::Rectangle<float> (layout.x + (layout.width - width) / 2.0f, top, width, 2.0f * staffSpace).toNearestInt());
     }
 }

@@ -108,6 +108,62 @@ private:
         juce::TextButton addPartButton { "+" };
     };
 
+    /** One part's music as a page of a score: a line of its measures at a time, four to a line,
+        one line under another, each a view of its own. A full line is stretched across the
+        page; the last may be shorter. It has room either side for the arrows that go to the
+        part before and after.
+    */
+    struct ScorePage final : public juce::Component,
+                             private juce::ChangeListener,
+                             private juce::AsyncUpdater
+    {
+        explicit ScorePage (Score&);
+        ~ScorePage() override;
+
+        static constexpr int measuresPerLine = 4;
+
+        /** Shows a part's lines, or with none, nothing, e.g. while the page isn't shown. */
+        void showPart (std::optional<int> part);
+
+        /** The part it shows, if any, as it's numbered now */
+        std::optional<int> getPart() const;
+
+        /** How wide the page is, and at least how tall, to fill the view it's in. */
+        void setMinimumSize (int width, int height);
+
+        /** The part's name, over its first line */
+        void setTitle (const juce::String&);
+
+        /** Its lines, from the top: as many as its measures need, the first starting at measure 0 */
+        std::vector<std::unique_ptr<StaffView>> lines;
+
+        /** The line a measure's on, if it's shown */
+        StaffView* getLineOf (int measure) const;
+
+        /** Makes a line for each four measures, there being more or fewer, and lays them out. It's
+            done anyway once the score's changed; this is for anything that needs it sooner.
+        */
+        void update();
+
+        /** Called when a line's view is made, to set it up like the others, and when the lines move. */
+        std::function<void (StaffView&)> onLineAdded;
+        std::function<void()> onLayoutChanged;
+
+        static constexpr int sideMargin = 44;     // either side of the lines, for the arrows
+
+    private:
+        void changeListenerCallback (juce::ChangeBroadcaster*) override;
+        void handleAsyncUpdate() override;
+        void childBoundsChanged (juce::Component*) override;
+        void layOut();
+
+        Score& score;
+        std::optional<int> partId;
+        int minimumWidth = 0, minimumHeight = 0;
+        juce::String title;
+        bool layingOut = false;
+    };
+
     /** What each part has besides its staves: its instrument, the volume dial to the left of its
         staves, and a button to the right of them, past the end of the score, for taking the part out.
     */
@@ -178,9 +234,21 @@ private:
 
 
     /** Makes a part the active one: the keyboard plays its instrument, and the toolbar and the
-        sidebar's alternate staff show and set its.
+        sidebar's alternate staff show and set its. The score page shows it.
     */
     void setActivePart (int part);
+
+    /** Every view of a part's staves: each part's, one under another, and the score page's lines */
+    std::vector<StaffView*> getViews() const;
+
+    /** Sets up a view of a part's staves to do what the others do: clicks, the tool chosen, and
+        what it calls back.
+    */
+    void configureView (StaffView&);
+
+    /** Shows the score page, one instrument's measures four to a line, or the instruments' staves, one under another. */
+    void showScorePage (bool);
+    void updatePartArrows();
 
     /** Gives each of the score's parts a track, and takes away the tracks of parts that have
         gone, e.g. when a part's added or taken out, a score's opened, or a change is undone.
@@ -361,7 +429,8 @@ private:
 
     /** Closes the chord window, if it's open, without changing the chord. */
     void closeChordEditor();
-    void scrollToMeasure (int measure);
+    /** Brings a measure into view, if it's out of it, or with always, to the start of what's in view, the top of the score page. */
+    void scrollToMeasure (int measure, bool always = false);
     void pianoKeyClicked (int midiNote);
     void togglePlayback();
 
@@ -655,6 +724,12 @@ private:
 
     StaffSystems staffSystems { score };
     ScrollingViewport staffViewport;
+    ScorePage scorePage { score };          // in place of them, one instrument at a time
+    ScrollingViewport scorePageViewport;
+    bool showingScorePage = false;
+    juce::TextButton viewButton;            // beside the instrument menu: Instruments or Score, which shows
+    juce::ArrowButton previousPartButton { "Previous instrument", 0.5f, controls::accent };     // either side of the page
+    juce::ArrowButton nextPartButton { "Next instrument", 0.0f, controls::accent };
     PageTabs pageTabs;                  // along the top of the staves, a tab for each page
     PositionRuler positionRuler { score };     // under them, for choosing where the page plays from
     std::vector<double> playbackStarts { 0.0 };     // where Play and Record start on each page, in beats from its start

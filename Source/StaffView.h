@@ -251,6 +251,31 @@ public:
 
     Erasable findErasableAt (juce::Point<float>) const;
 
+    /** Some of the score's measures, shown as one line of a page of it: a run of them, from the
+        first, stretched to fill a width as far as their room allows if they're a full line, and
+        with the time signature only on the first line.
+    */
+    struct Line
+    {
+        int firstMeasure = 0;
+        int numMeasures = 4;
+        bool full = true;               // as many measures as a line has, rather than the last few
+        int width = 0;                  // the width to fill, if it's more than they need
+        bool timeSignature = true;
+
+        bool operator== (const Line&) const = default;
+    };
+
+    /** Shows just one line of measures, or with none, the whole score, as it does to start with.
+        The measures before and after the line are laid out out of view, either side of it, so
+        ties from the line before and to the next go off its edges.
+    */
+    void setLine (std::optional<Line>);
+    const std::optional<Line>& getLine() const noexcept { return pageLine; }
+
+    /** The measures it shows: all of them, or its line's */
+    juce::Range<int> getShownMeasures() const;
+
     /** Marks the view as showing the active part, whose instrument the keyboard plays. */
     void setActive (bool);
 
@@ -337,6 +362,12 @@ private:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void updateLayout();
+    void layOutLine();
+
+    /** On a line, a span across the view cut short at its edges, for what goes on from the line
+        before or into the next.
+    */
+    juce::Range<float> clipToLine (juce::Range<float>) const;
     void updateChordButtons();
 
     float getStaffTop (Staff) const;
@@ -696,6 +727,7 @@ private:
     std::vector<MeasureLayout> measureLayouts;
     float reachAbove = 0.0f;            // how far the music goes above the treble staff, in staff spaces
     float reachBelow = 0.0f;            // and below the bass staff
+    std::optional<Line> pageLine;       // showing just one line of measures
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StaffView)
 };

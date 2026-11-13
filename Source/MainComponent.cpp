@@ -35,6 +35,11 @@ namespace
     constexpr int selectionButtonHeight = 26, deleteMeasuresWidth = 64, moveMeasuresWidth = 56;
     constexpr int cloneButtonWidth = 56, cloneButtonHeight = 26;
     constexpr int rightMargin = measureButtonsGap + measureButtonsWidth + 12;      // after the final barline, for the measure buttons
+    constexpr int scorePageLineGap = 10;        // between the score page's lines
+    constexpr int viewButtonWidth = 96;         // Instruments or Score, beside the instrument menu
+    constexpr int partArrowWidth = 26, partArrowHeight = 44;
+    constexpr int scorePageBandHeight = 6;     // under the pages' tabs, where the ruler would be
+    const char* const scorePageKey = "showScorePage";
 
     // A full 88-key piano, A0 to C8
     constexpr int lowestKey = 21;
@@ -192,6 +197,158 @@ void MainComponent::StaffSystems::layOut()
     y += 4;
 
     setSize (juce::jmax (width + rightMargin, minimumWidth), juce::jmax (y, minimumHeight));
+
+    if (onLayoutChanged != nullptr)
+        onLayoutChanged();
+}
+
+//==============================================================================
+MainComponent::ScorePage::ScorePage (Score& scoreToShow)
+    : score (scoreToShow)
+{
+    score.addChangeListener (this);
+}
+
+MainComponent::ScorePage::~ScorePage()
+{
+    score.removeChangeListener (this);
+}
+
+void MainComponent::ScorePage::showPart (std::optional<int> part)
+{
+    const auto id = part.has_value() && juce::isPositiveAndBelow (*part, score.getNumParts()) ? std::optional (score.getPartId (*part)) : std::nullopt;
+
+    if (id == partId && (lines.empty() == ! id.has_value()))
+        return;
+
+    // Another part's lines are views of their own.
+    lines.clear();
+    partId = id;
+    update();
+}
+
+std::optional<int> MainComponent::ScorePage::getPart() const
+{
+    if (! partId.has_value())
+        return {};
+
+    const auto part = score.findPart (*partId);
+    return part >= 0 ? std::optional (part) : std::nullopt;
+}
+
+void MainComponent::ScorePage::setMinimumSize (int width, int height)
+{
+    if (width == minimumWidth && height == minimumHeight)
+        return;
+
+    minimumWidth = width;
+    minimumHeight = height;
+    update();
+}
+
+void MainComponent::ScorePage::setTitle (const juce::String& newTitle)
+{
+    title = newTitle;
+
+    for (size_t index = 0; index < lines.size(); ++index)
+        lines[index]->setTitle (index == 0 ? title : juce::String());
+}
+
+StaffView* MainComponent::ScorePage::getLineOf (int measure) const
+{
+    const auto index = measure / measuresPerLine;
+    return measure >= 0 && index < (int) lines.size() ? lines[(size_t) index].get() : nullptr;
+}
+
+void MainComponent::ScorePage::update()
+{
+    cancelPendingUpdate();
+    const auto part = getPart();
+
+    if (! part.has_value())
+    {
+        lines.clear();
+        layOut();
+        return;
+    }
+
+    const auto numMeasures = score.getNumMeasures();
+    const auto numLines = (size_t) juce::jmax (1, (numMeasures + measuresPerLine - 1) / measuresPerLine);
+
+    while (lines.size() > numLines)
+        lines.pop_back();
+
+    while (lines.size() < numLines)
+    {
+        auto& view = *lines.emplace_back (std::make_unique<StaffView> (score, *part));
+        addAndMakeVisible (view);
+
+        if (onLineAdded != nullptr)
+            onLineAdded (view);
+    }
+
+    // Each line as wide as the page, less room for the arrows, and the time signature on the first
+    const auto width = juce::jmax (0, minimumWidth - 2 * sideMargin);
+
+    for (size_t index = 0; index < lines.size(); ++index)
+    {
+        const auto first = (int) index * measuresPerLine;
+        lines[index]->setLine (StaffView::Line { first, measuresPerLine, first + measuresPerLine <= numMeasures, width, index == 0 });
+        lines[index]->setTitle (index == 0 ? title : juce::String());
+        lines[index]->setActive (true);
+    }
+
+    layOut();
+}
+
+void MainComponent::ScorePage::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    // Measures may have been added or taken out. The lines catch up once the change is done,
+    // as one of them may be the one changing it.
+    if (! partId.has_value())
+        return;
+
+    const auto numMeasures = score.getNumMeasures();
+    const auto numLines = (size_t) juce::jmax (1, (numMeasures + measuresPerLine - 1) / measuresPerLine);
+    const auto lastFull = numMeasures % measuresPerLine == 0;
+
+    if (lines.size() != numLines || score.findPart (*partId) < 0 || ! lines.back()->getLine().has_value()
+        || lines.back()->getLine()->full != lastFull)
+        triggerAsyncUpdate();
+}
+
+void MainComponent::ScorePage::handleAsyncUpdate()
+{
+    update();
+}
+
+void MainComponent::ScorePage::childBoundsChanged (juce::Component*)
+{
+    // A line grows or shrinks with what's in it.
+    layOut();
+}
+
+void MainComponent::ScorePage::layOut()
+{
+    if (layingOut)
+        return;
+
+    const juce::ScopedValueSetter<bool> guard (layingOut, true);
+
+    // From the top, under the note length buttons, one line under another
+    auto y = stavesTopPadding;
+    auto right = minimumWidth;
+
+    for (auto& line : lines)
+    {
+        const auto height = line->getContentHeight();
+        line->setBounds (sideMargin, y, line->getContentWidth(), height);
+        right = juce::jmax (right, line->getRight() + sideMargin);
+        y += height + scorePageLineGap;
+    }
+
+    // With room for the measure buttons under the last line
+    setSize (right, juce::jmax (y + measureButtonSize + 2 * scorePageLineGap, minimumHeight));
 
     if (onLayoutChanged != nullptr)
         onLayoutChanged();
@@ -445,6 +602,28 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     positionRuler.onBeatChosen = [this] (int beat) { choosePlaybackStart (beat); };
     addAndMakeVisible (positionRuler);
 
+    // Or in place of the instruments' staves, a page of the score for one instrument at a time,
+    // its lines scrolling down, with arrows either side going to the instruments before and after
+    scorePage.onLineAdded = [this] (StaffView& line) { configureView (line); };
+    scorePage.onLayoutChanged = [this] { positionMeasureButtons(); positionSelectionButtons(); };
+    scorePageViewport.setViewedComponent (&scorePage, false);
+    scorePageViewport.setScrollBarsShown (true, true);
+    addChildComponent (scorePageViewport);
+
+    previousPartButton.onClick = [this] { if (activePart > 0) setActivePart (activePart - 1); };
+    nextPartButton.onClick = [this] { if (activePart + 1 < score.getNumParts()) setActivePart (activePart + 1); };
+
+    for (auto* arrow : { &previousPartButton, &nextPartButton })
+    {
+        arrow->setWantsKeyboardFocus (false);
+        addChildComponent (arrow);
+    }
+
+    // Beside the instrument menu, which shows: the instruments' staves, or the score page
+    viewButton.setWantsKeyboardFocus (false);
+    viewButton.onClick = [this] { showScorePage (! showingScorePage); };
+    addAndMakeVisible (viewButton);
+
     // A tab for each page, choosing which is edited, with a + for adding another
     pageTabs.onPageChosen = [this] (int page) { piece.choosePage (page); };
     pageTabs.onAddPage = [this] { piece.addPage(); };
@@ -518,6 +697,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     setActivePart (0);
     showPartTitles();
+    showScorePage (settings.getBoolValue (scorePageKey, false));
     setSize (1676, 974);    // wide enough for four measures of most music, and the buttons after them, and tall enough for two instruments
 
     juce::AudioDeviceManager::AudioDeviceSetup preferredSetup;
@@ -584,6 +764,7 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (StaffView::paperColour);
     g.fillRect (staffViewport.getBounds());
     g.fillRect (volumeColumn.getBounds());
+    g.fillRect (scorePageViewport.getBounds());
 
     // The ruler's band goes on over the volume dials, so the chosen page's tab joins it all along.
     const auto rulerBand = positionRuler.getBounds().withLeft (volumeColumn.getX());
@@ -625,6 +806,8 @@ void MainComponent::resized()
     tempoDownButton.setBounds (arrows);
     toolbar.removeFromLeft (20);
     partBox.setBounds (toolbar.removeFromLeft (150));
+    toolbar.removeFromLeft (6);
+    viewButton.setBounds (toolbar.removeFromLeft (viewButtonWidth));
     toolbar.removeFromLeft (20);
 
     effectsButton.setBounds (toolbar.removeFromRight (84));
@@ -645,17 +828,29 @@ void MainComponent::resized()
     keyboard.setKeyWidth ((float) keyboard.getWidth() / (float) numWhiteKeys);
 
     // The pages' tabs go along the top, the ruler under them, and the volume dials and staves under that.
+    // The score page has no ruler, just its band, and no volume dials.
     pageTabs.setBounds (bounds.removeFromTop (PageTabs::height));
-    auto rulerRow = bounds.removeFromTop (PositionRuler::height);
+    auto rulerRow = bounds.removeFromTop (showingScorePage ? scorePageBandHeight : PositionRuler::height);
+    const auto pageArea = bounds;
     volumeColumn.setBounds (bounds.removeFromLeft (volumeColumnWidth));
     staffViewport.setBounds (bounds);
     positionRuler.setBounds (rulerRow.withLeft (staffViewport.getX()));
+    scorePageViewport.setBounds (pageArea);
+
+    // The arrows for the instruments before and after, either side of the page, halfway down
+    const auto arrowY = pageArea.getCentreY() - partArrowHeight / 2;
+    previousPartButton.setBounds (pageArea.getX() + (ScorePage::sideMargin - partArrowWidth) / 2, arrowY, partArrowWidth, partArrowHeight);
+    nextPartButton.setBounds (pageArea.getRight() - scorePageViewport.getScrollBarThickness() - (ScorePage::sideMargin + partArrowWidth) / 2,
+                              arrowY, partArrowWidth, partArrowHeight);
+
+    for (auto* arrow : { &previousPartButton, &nextPartButton })
+        arrow->toFront (false);
 
     // The note length and dynamic buttons stay in the top left corner of the score, over the
     // staves as they scroll, and the eraser in the top right corner, clear of the scroll bar.
     // The box choosing which notation controls show comes first, then the controls.
-    notationGroupBox.setBounds (volumeColumn.getX() + 10, staffViewport.getY() + toolButtonsTop, notationGroupBoxWidth, toolButtonsHeight);
-    noteLengthPicker.setTopLeftPosition (notationGroupBox.getRight() + 12, staffViewport.getY() + toolButtonsTop);
+    notationGroupBox.setBounds (pageArea.getX() + 10, pageArea.getY() + toolButtonsTop, notationGroupBoxWidth, toolButtonsHeight);
+    noteLengthPicker.setTopLeftPosition (notationGroupBox.getRight() + 12, pageArea.getY() + toolButtonsTop);
     dynamicPicker.setTopLeftPosition (noteLengthPicker.getX(), noteLengthPicker.getY());
     eraserButton.setBounds (staffViewport.getRight() - staffViewport.getScrollBarThickness() - eraserMargin - EraserButton::buttonWidth,
                             noteLengthPicker.getY(), EraserButton::buttonWidth, EraserButton::buttonHeight);
@@ -664,6 +859,8 @@ void MainComponent::resized()
 
     staffSystems.setMinimumSize (staffViewport.getWidth() - staffViewport.getScrollBarThickness(),
                                  staffViewport.getHeight() - staffViewport.getScrollBarThickness());
+    scorePage.setMinimumSize (scorePageViewport.getWidth() - scorePageViewport.getScrollBarThickness(),
+                              scorePageViewport.getHeight() - scorePageViewport.getScrollBarThickness());
     positionVolumeDials();
     positionMeasureButtons();
 }
@@ -819,6 +1016,7 @@ void MainComponent::pagesChanged()
         selectMeasures ({}, true);
         closeChordEditor();
         staffViewport.setViewPosition (0, staffViewport.getViewPositionY());
+        scorePageViewport.setViewPosition (0, 0);
 
         // Playing a page, it's the one being edited, so it goes on with the one chosen now, from where that plays from.
         if (instrumentHost.getPlaybackPosition().has_value() && ! isPlayingWholePiece())
@@ -923,9 +1121,86 @@ void MainComponent::setActivePart (int part)
         staffSystems.views[p]->setActive ((int) p == part);
     }
 
+    // The score page shows its music.
+    if (showingScorePage)
+    {
+        scorePage.showPart (part);
+        scorePage.setTitle (getPartTitle (part));
+    }
+
+    updatePartArrows();
+
     // The chord window is for the active part's chords.
     if (const auto* editor = getChordEditor(); editor != nullptr && editor->getPart() != part)
         closeChordEditor();
+}
+
+void MainComponent::showScorePage (bool show)
+{
+    // Where the music is in view, as near as can be, in what's shown instead
+    const auto shownMeasure = [this]() -> int
+    {
+        if (showingScorePage)
+        {
+            const auto top = scorePageViewport.getViewPositionY();
+
+            for (const auto& line : scorePage.lines)
+                if (line->getBottom() > top + stavesTopPadding)
+                    return line->getShownMeasures().getStart();
+
+            return 0;
+        }
+
+        if (staffSystems.views.empty())
+            return 0;
+
+        const auto& view = *staffSystems.views[0];
+        return juce::jlimit (0, score.getNumMeasures() - 1, view.getBarlineAt ((float) (staffViewport.getViewPositionX() - view.getX())));
+    }();
+
+    showingScorePage = show;
+    settings.setValue (scorePageKey, show);
+    viewButton.setButtonText (show ? "Score" : "Instruments");
+    viewButton.setTooltip (show ? "Score: one instrument at a time, four measures to a line. Click to show every instrument's staves, one under another."
+                                : "Instruments: every instrument's staves, one under another. Click to show one instrument at a time, as a page of a score.");
+
+    staffViewport.setVisible (! show);
+    volumeColumn.setVisible (! show);
+    positionRuler.setVisible (! show);
+    scorePageViewport.setVisible (show);
+
+    // The measure buttons, and those over the selected measures, go with the staves shown.
+    auto& holder = show ? static_cast<juce::Component&> (scorePage) : static_cast<juce::Component&> (staffSystems);
+
+    for (auto* button : std::initializer_list<juce::Component*> { &addMeasureButton, &removeMeasureButton, &cloneButton, &deleteMeasuresButton, &moveMeasuresButton })
+        holder.addChildComponent (button);
+
+    for (auto* button : std::initializer_list<juce::Component*> { &addMeasureButton, &removeMeasureButton, &cloneButton })
+        button->setVisible (true);
+
+    // The page's lines are only there while it's shown.
+    scorePage.showPart (show ? std::optional (activePart) : std::nullopt);
+
+    if (show && juce::isPositiveAndBelow (activePart, (int) tracks.size()))
+        scorePage.setTitle (getPartTitle (activePart));
+
+    updatePartArrows();
+    resized();
+    scrollToMeasure (shownMeasure, true);
+    repaint();
+}
+
+void MainComponent::updatePartArrows()
+{
+    const auto numParts = score.getNumParts();
+    previousPartButton.setVisible (showingScorePage);
+    nextPartButton.setVisible (showingScorePage);
+    previousPartButton.setEnabled (activePart > 0);
+    nextPartButton.setEnabled (activePart + 1 < numParts);
+    previousPartButton.setTooltip (activePart > 0 ? "Instrument " + juce::String (activePart) : juce::String ("This is the first instrument"));
+    nextPartButton.setTooltip (activePart + 1 < numParts ? "Instrument " + juce::String (activePart + 2) : juce::String ("This is the last instrument"));
+    previousPartButton.setAlpha (activePart > 0 ? 1.0f : 0.25f);
+    nextPartButton.setAlpha (activePart + 1 < numParts ? 1.0f : 0.25f);
 }
 
 void MainComponent::updatePartBox()
@@ -1012,8 +1287,29 @@ void MainComponent::insertTrack (int index, bool reloadFromSettings)
 
     tracks.insert (tracks.begin() + index, std::move (track));
 
+    configureView (staffSystems.insertView (index, index));
+
+    // A part being added starts at 0 dB, rather than with whatever its number had before.
+    setVolume (index, reloadFromSettings ? (float) settings.getDoubleValue (getVolumeKey (index), 0.0) : 0.0f, false);
+    setMuted (index, reloadFromSettings && settings.getBoolValue (getMutedKey (index), false), false);
+}
+
+std::vector<StaffView*> MainComponent::getViews() const
+{
+    std::vector<StaffView*> views;
+
+    for (const auto& view : staffSystems.views)
+        views.push_back (view.get());
+
+    for (const auto& line : scorePage.lines)
+        views.push_back (line.get());
+
+    return views;
+}
+
+void MainComponent::configureView (StaffView& view)
+{
     // Clicking the part's staff, or its chord buttons, makes it the active part.
-    auto& view = staffSystems.insertView (index, index);
     view.onClicked = [this, &view] { setActivePart (view.getPart()); };
     view.onChordButtonClicked = [this, &view] (int measure) { editChord (view.getPart(), measure); };
 
@@ -1047,10 +1343,11 @@ void MainComponent::insertTrack (int index, bool reloadFromSettings)
     view.setSelecting (isSelecting());
     view.setMeasureSelection (selectedMeasures);
     view.setMovingMeasures (moveMeasuresButton.getToggleState());
+    view.setSelectedMeasure (getChordEditor() != nullptr && getChordEditor()->getPart() == view.getPart() ? std::optional (getChordEditor()->getMeasure())
+                                                                                                          : std::nullopt);
 
-    // A part being added starts at 0 dB, rather than with whatever its number had before.
-    setVolume (index, reloadFromSettings ? (float) settings.getDoubleValue (getVolumeKey (index), 0.0) : 0.0f, false);
-    setMuted (index, reloadFromSettings && settings.getBoolValue (getMutedKey (index), false), false);
+    if (placingScale)
+        view.setScalePlacement (lastScale);
 }
 
 void MainComponent::removeTrack (int index)
@@ -1428,7 +1725,7 @@ void MainComponent::startPlacingScale (const ScaleSettings& scale)
     resumeAddingNotes();
     placingScale = true;
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setScalePlacement (scale);
 }
 
@@ -1436,7 +1733,7 @@ void MainComponent::stopPlacingScale()
 {
     placingScale = false;
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setScalePlacement ({});
 }
 
@@ -1557,7 +1854,7 @@ void MainComponent::startPlacingRhythm (const SavedRhythm& rhythm, int times)
     lastRhythmPlaced = rhythm.name;
     placingRhythm = true;
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setRhythmPlacement (StaffView::RhythmPlacement { rhythm, times });
 }
 
@@ -1565,7 +1862,7 @@ void MainComponent::stopPlacingRhythm()
 {
     placingRhythm = false;
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setRhythmPlacement ({});
 }
 
@@ -1616,7 +1913,7 @@ void MainComponent::setNoteLength (double beats)
     dynamicPicker.setChoice ({});
     eraserButton.setToggleState (false, juce::dontSendNotification);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
     {
         view->setNoteLength (beats);
         view->setMarking ({});
@@ -1633,7 +1930,7 @@ void MainComponent::setTuplet (double noteBeats, int numNotes)
     dynamicPicker.setChoice ({});
     eraserButton.setToggleState (false, juce::dontSendNotification);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
     {
         view->setMarking ({});
         view->setTuplet (noteBeats, noteLengthPicker.getTupletNotes());
@@ -1674,7 +1971,7 @@ void MainComponent::setStaccato (bool staccato)
 {
     noteLengthPicker.setStaccato (staccato);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setStaccato (staccato);
 
     // Back to adding notes, with the length chosen
@@ -1701,7 +1998,7 @@ void MainComponent::setMarking (std::optional<music::Marking> marking)
     noteLengthPicker.setChoiceShown (false);
     eraserButton.setToggleState (false, juce::dontSendNotification);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setMarking (marking);
 }
 
@@ -1721,7 +2018,7 @@ void MainComponent::setErasing (bool shouldErase)
     dynamicPicker.setChoice ({});
     noteLengthPicker.setChoiceShown (false);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setErasing (true);
 }
 
@@ -1736,7 +2033,7 @@ void MainComponent::setEditing (bool shouldEdit)
 
     editButton.setToggleState (shouldEdit, juce::dontSendNotification);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setEditing (shouldEdit);
 }
 
@@ -1760,7 +2057,7 @@ void MainComponent::setSelecting (bool shouldSelect)
     noteLengthPicker.setChoiceShown (false);
     selectButton.setToggleState (true, juce::dontSendNotification);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
     {
         view->setErasing (false);
         view->setSelecting (true);
@@ -1776,7 +2073,7 @@ void MainComponent::stopSelecting()
     selectButton.setToggleState (false, juce::dontSendNotification);
     noteLengthPicker.setChoiceShown (true);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setSelecting (false);
 }
 
@@ -1789,7 +2086,7 @@ void MainComponent::selectMeasures (std::optional<std::pair<int, int>> measures,
     selectedMeasures = measures;
     selectionFinished = finished && measures.has_value();
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setMeasureSelection (measures);
 
     positionSelectionButtons();
@@ -1811,7 +2108,7 @@ void MainComponent::setMovingMeasures (bool shouldMove)
 {
     moveMeasuresButton.setToggleState (shouldMove && selectedMeasures.has_value(), juce::dontSendNotification);
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setMovingMeasures (moveMeasuresButton.getToggleState());
 
     showMoveTarget ({});
@@ -1861,7 +2158,7 @@ void MainComponent::pushSelectedMeasures (int change)
 
 void MainComponent::showMoveTarget (std::optional<int> barline)
 {
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setMoveTarget (barline);
 }
 
@@ -1876,17 +2173,40 @@ void MainComponent::positionSelectionButtons()
     if (! show)
         return;
 
-    // Over the part of the selection that's in view, or the side of the view nearest it,
-    // halfway down what's in view
-    const auto& view = *staffSystems.views[0];
-    const auto selection = view.getMeasureArea (selectedMeasures->first).getUnion (view.getMeasureArea (selectedMeasures->second)).translated (view.getX(), 0);
-    const auto viewArea = staffViewport.getViewArea();
     const auto width = deleteMeasuresWidth + editButtonGap + moveMeasuresWidth;
-    const auto left = juce::jmax (selection.getX(), viewArea.getX()), right = juce::jmin (selection.getRight(), viewArea.getRight());
-    const auto centreX = left <= right ? (left + right) / 2
-                       : selection.getRight() < viewArea.getX() ? viewArea.getX() + width / 2
-                                                                : viewArea.getRight() - width / 2;
-    auto pair = juce::Rectangle<int> (width, selectionButtonHeight).withCentre ({ centreX, viewArea.getCentreY() });
+    juce::Rectangle<int> pair;
+
+    if (showingScorePage)
+    {
+        // Over the selection's first line, level with the middle of its staves
+        const auto* line = scorePage.getLineOf (selectedMeasures->first);
+
+        if (line == nullptr)
+        {
+            deleteMeasuresButton.setVisible (false);
+            moveMeasuresButton.setVisible (false);
+            return;
+        }
+
+        const auto lastOnLine = juce::jmin (selectedMeasures->second, line->getShownMeasures().getEnd() - 1);
+        const auto selection = line->getMeasureArea (selectedMeasures->first).getUnion (line->getMeasureArea (lastOnLine)).translated (line->getX(), line->getBounds().getY());
+        const auto staves = line->getStavesRange();
+        pair = juce::Rectangle<int> (width, selectionButtonHeight).withCentre ({ selection.getCentreX(), line->getBounds().getY() + staves.getStart() + staves.getLength() / 2 });
+    }
+    else
+    {
+        // Over the part of the selection that's in view, or the side of the view nearest it,
+        // halfway down what's in view
+        const auto& view = *staffSystems.views[0];
+        const auto selection = view.getMeasureArea (selectedMeasures->first).getUnion (view.getMeasureArea (selectedMeasures->second)).translated (view.getX(), 0);
+        const auto viewArea = staffViewport.getViewArea();
+        const auto left = juce::jmax (selection.getX(), viewArea.getX()), right = juce::jmin (selection.getRight(), viewArea.getRight());
+        const auto centreX = left <= right ? (left + right) / 2
+                           : selection.getRight() < viewArea.getX() ? viewArea.getX() + width / 2
+                                                                    : viewArea.getRight() - width / 2;
+        pair = juce::Rectangle<int> (width, selectionButtonHeight).withCentre ({ centreX, viewArea.getCentreY() });
+    }
+
     deleteMeasuresButton.setBounds (pair.removeFromLeft (deleteMeasuresWidth));
     moveMeasuresButton.setBounds (pair.removeFromRight (moveMeasuresWidth));
 
@@ -1906,6 +2226,9 @@ void MainComponent::showPartTitles()
 {
     for (size_t part = 0; part < tracks.size(); ++part)
         staffSystems.views[part]->setTitle (getPartTitle ((int) part));
+
+    if (const auto shown = scorePage.getPart(); shown.has_value() && *shown < (int) tracks.size())
+        scorePage.setTitle (getPartTitle (*shown));
 
     // The effects page names the instruments too.
     if (effectsWindow != nullptr)
@@ -1988,6 +2311,25 @@ void MainComponent::positionVolumeDials()
 
 void MainComponent::positionMeasureButtons()
 {
+    // On the score page, under the last line, ending at its final barline: +, − and Clone in a row
+    if (showingScorePage)
+    {
+        if (scorePage.lines.empty())
+            return;
+
+        constexpr int gap = 6;
+        const auto& last = *scorePage.lines.back();
+        const auto width = 2 * measureButtonSize + gap + 2 * gap + cloneButtonWidth;
+        auto row = juce::Rectangle<int> (width, measureButtonSize)
+                       .withPosition (juce::jmax (last.getX(), last.getX() + last.getFinalBarlineX() - width), last.getBottom() + scorePageLineGap / 2);
+        addMeasureButton.setBounds (row.removeFromLeft (measureButtonSize));
+        row.removeFromLeft (gap);
+        removeMeasureButton.setBounds (row.removeFromLeft (measureButtonSize));
+        row.removeFromLeft (2 * gap);
+        cloneButton.setBounds (row.withSizeKeepingCentre (cloneButtonWidth, cloneButtonHeight));
+        return;
+    }
+
     if (staffSystems.views.empty())
         return;
 
@@ -2067,7 +2409,7 @@ void MainComponent::editChord (int part, int measure)
 
         chordWindow->setVisible (false);
 
-        for (auto& view : staffSystems.views)
+        for (auto* view : getViews())
             view->setSelectedMeasure ({});
 
         showHeldNotes();
@@ -2088,6 +2430,11 @@ void MainComponent::editChord (int part, int measure)
     chordWindow->setVisible (true);
 
     staffSystems.views[(size_t) part]->setSelectedMeasure (measure);
+
+    if (scorePage.getPart() == part)
+        for (auto& line : scorePage.lines)
+            line->setSelectedMeasure (measure);
+
     scrollToMeasure (measure);
     showHeldNotes();
 }
@@ -2101,19 +2448,41 @@ void MainComponent::closeChordEditor()
 {
     chordWindow = nullptr;
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setSelectedMeasure ({});
 
     showHeldNotes();
 }
 
-void MainComponent::scrollToMeasure (int measure)
+void MainComponent::scrollToMeasure (int measure, bool always)
 {
+    // On the score page, its line is brought into view, with the lines after it below.
+    if (showingScorePage)
+    {
+        if (scorePage.getLineOf (measure) == nullptr)
+            scorePage.update();
+
+        if (const auto* line = scorePage.getLineOf (measure))
+        {
+            const auto viewArea = scorePageViewport.getViewArea();
+
+            if (always || line->getBounds().getY() < viewArea.getY() + stavesTopPadding || line->getBottom() > viewArea.getBottom())
+                scorePageViewport.setViewPosition (viewArea.getX(), line->getBounds().getY() - stavesTopPadding);
+        }
+
+        return;
+    }
+
+    if (staffSystems.views.empty() || ! juce::isPositiveAndBelow (measure, score.getNumMeasures()))
+        return;
+
     // A measure out of view is brought to a quarter of the way across.
     const auto area = staffSystems.views[0]->getMeasureArea (measure);
     const auto viewArea = staffViewport.getViewArea();
 
-    if (area.getX() < viewArea.getX() || area.getRight() > viewArea.getRight())
+    if (always)
+        staffViewport.setViewPosition (measure == 0 ? 0 : area.getX() - 40, viewArea.getY());
+    else if (area.getX() < viewArea.getX() || area.getRight() > viewArea.getRight())
         staffViewport.setViewPosition (area.getX() - viewArea.getWidth() / 4, viewArea.getY());
 }
 
@@ -3044,7 +3413,7 @@ void MainComponent::showPlaybackPosition()
                         : stepRecording ? std::optional (playbackStarts[(size_t) piece.getCurrentPage()])
                                         : std::nullopt;
 
-    for (auto& view : staffSystems.views)
+    for (auto* view : getViews())
         view->setPlaybackPosition (position);
 
     // The ruler's marker is where it's playing, or where it'll start from.
@@ -3062,6 +3431,13 @@ void MainComponent::showPlaybackPosition()
 
     if (! position.has_value())
         return;
+
+    // On the score page, the line that's playing is kept in view.
+    if (showingScorePage)
+    {
+        scrollToMeasure ((int) std::floor (*position / score.getBeatsPerMeasure() + 1.0e-9));
+        return;
+    }
 
     // When the beat that's playing goes out of view, scroll it back to a quarter of the way across.
     const auto playingArea = staffSystems.views[0]->getPlaybackArea();
@@ -3131,6 +3507,9 @@ void MainComponent::addMeasure()
 
     // Scroll to the end, so the new measure is in view.
     staffViewport.setViewPosition (staffSystems.getWidth(), staffViewport.getViewPositionY());
+
+    if (showingScorePage)
+        scrollToMeasure (score.getNumMeasures() - 1);
 }
 
 void MainComponent::cloneMeasures()
@@ -3139,6 +3518,9 @@ void MainComponent::cloneMeasures()
 
     // Scroll to the end, so the new measures are in view.
     staffViewport.setViewPosition (staffSystems.getWidth(), staffViewport.getViewPositionY());
+
+    if (showingScorePage)
+        scrollToMeasure (score.getNumMeasures() - 1);
 }
 
 void MainComponent::removeMeasure()
@@ -3396,6 +3778,7 @@ void MainComponent::scoreReplaced()
     showPlaybackPosition();
     closeChordEditor();
     staffViewport.setViewPosition (0, 0);
+    scorePageViewport.setViewPosition (0, 0);
 }
 
 void MainComponent::showDocumentTitle()
