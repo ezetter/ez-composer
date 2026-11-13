@@ -36,7 +36,7 @@ namespace
     constexpr int cloneButtonWidth = 56, cloneButtonHeight = 26;
     constexpr int rightMargin = measureButtonsGap + measureButtonsWidth + 12;      // after the final barline, for the measure buttons
     constexpr int scorePageLineGap = 4;         // between the score page's lines
-    constexpr int viewButtonWidth = 132;        // Instruments View or Score View, before the instrument menu
+    constexpr int viewButtonWidth = 132;        // Tracks View or Score View, before the instrument menu
     constexpr int partArrowWidth = 26, partArrowHeight = 44;
     constexpr int scorePageBandHeight = 6;     // under the pages' tabs, where the ruler would be
     const char* const scorePageKey = "showScorePage";
@@ -1284,9 +1284,9 @@ void MainComponent::showScorePage (bool show)
 
     showingScorePage = show;
     settings.setValue (scorePageKey, show);
-    viewButton.setButtonText (show ? "Score View" : "Instruments View");
+    viewButton.setButtonText (show ? "Score View" : "Tracks View");
     viewButton.setTooltip (show ? "Score View: one instrument at a time, as many measures to a line as fit. Click to show every instrument's staves, one under another."
-                                : "Instruments View: every instrument's staves, one under another. Click to show one instrument at a time, as a page of a score.");
+                                : "Tracks View: every instrument's staves, one under another. Click to show one instrument at a time, as a page of a score.");
 
     staffViewport.setVisible (! show);
     volumeColumn.setVisible (! show);
@@ -4359,7 +4359,7 @@ void MainComponent::getCommandInfo (juce::CommandID command, juce::ApplicationCo
                            info.setActive (itemSelection.has_value());
                            info.addDefaultKeypress ('r', cmd); break;
         case showInstrumentsView:
-                           info.setInfo ("Instruments", "Shows every instrument's staves, one under another", "View", 0);
+                           info.setInfo ("Tracks", "Shows every instrument's staves, one under another", "View", 0);
                            info.setTicked (! showingScorePage);
                            info.addDefaultKeypress ('1', cmd); break;
         case showScoreView:
