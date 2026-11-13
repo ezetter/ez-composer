@@ -655,6 +655,14 @@ private:
     /** Whether a measure has a Random chord with notes. */
     bool hasRandomChord (int measure) const;
 
+    /** How far up a staff a point is, in lines and spaces from its bottom line. */
+    float getLinesAndSpacesUp (Staff, float y) const;
+
+    /** The note a semitone above or below a note of its own, at its time, when a point's a little
+        above or below its notehead, but not on it: as long as the length chosen.
+    */
+    std::optional<Note> getSemitoneNeighbourAt (juce::Point<float>) const;
+
     /** When the note written on a line or space nearest to x starts, if there's one near enough. */
     std::optional<double> findWrittenNoteOnset (const Note& spot, float x) const;
 

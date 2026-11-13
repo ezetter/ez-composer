@@ -14,6 +14,14 @@ namespace
     // The size of a staff space in pixels. All the other dimensions here are in staff spaces.
     constexpr float staffSpace = 12.0f;
 
+    // Clicking on a note written in, or a little above or below it. In lines and spaces up or
+    // down from the middle of its notehead (half a staff space each): this near selects it, and
+    // from there out to semitoneReach puts in the note a semitone above or below it. Across, the
+    // point has to be this many staff spaces from the middle of the notehead, or nearer.
+    constexpr float noteheadReach = 0.6f;
+    constexpr float semitoneReach = 1.2f;
+    constexpr float noteheadReachAcross = 0.8f;
+
     // Horizontal layout
     constexpr float systemLeft = 3.0f;          // where the staff lines start, just right of the brace
     constexpr float clefLeft = systemLeft + 0.8f;
@@ -883,11 +891,17 @@ std::optional<Note> StaffView::findTupletNoteAt (juce::Point<float> point) const
     if (! spot.has_value() || score.chordUsesStaff (part, spot->measure, spot->staff))
         return {};
 
-    if (const auto onset = findTupletNoteOnset (*spot, point.x))
-        if (const auto tuplet = score.getTuplet (part, spot->staff, spot->measure, *onset))
+    for (const auto& event : measureLayouts[(size_t) spot->measure].content.staves[(size_t) spot->staff].events)
+    {
+        if (! event.tupletStart.has_value() || std::abs (point.x - getEventX (spot->measure, event)) > noteheadReachAcross * staffSpace)
+            continue;
+
+        if (const auto tuplet = score.getTuplet (part, spot->staff, spot->measure, event.onset))
             for (int i = 0; i < tuplet->getNumNotes(); ++i)
-                if (std::abs (tuplet->getNoteOnset (i) - *onset) < 1.0e-9 && tuplet->pitches[(size_t) i].step == spot->pitch.step)
-                    return Note { spot->staff, spot->measure, *onset, tuplet->pitches[(size_t) i], part, tuplet->noteLength, tuplet->staccato };
+                if (std::abs (tuplet->getNoteOnset (i) - event.onset) < 1.0e-9
+                    && std::abs (getLinesAndSpacesUp (spot->staff, point.y) - (float) (tuplet->pitches[(size_t) i].step - getBottomLineStep (spot->staff))) <= noteheadReach)
+                    return Note { spot->staff, spot->measure, event.onset, tuplet->pitches[(size_t) i], part, tuplet->noteLength, tuplet->staccato };
+    }
 
     return {};
 }
@@ -946,19 +960,21 @@ std::optional<Note> StaffView::findEditableNoteAt (juce::Point<float> point) con
         return {};
 
     std::optional<Note> found;
-    auto nearestDistance = 1.4f * staffSpace;
+    auto nearestDistance = noteheadReachAcross * staffSpace;
+    const auto height = getLinesAndSpacesUp (spot->staff, point.y);
 
     for (const auto& event : measureLayouts[(size_t) spot->measure].content.staves[(size_t) spot->staff].events)
     {
         const auto distance = std::abs (point.x - getEventX (spot->measure, event));
 
-        // A tuplet's notes go together, so they're not edited one at a time.
+        // A tuplet's notes go together, so they're not dragged one at a time.
         if (distance > nearestDistance || event.tupletStart.has_value())
             continue;
 
+        // Its notehead, not just its line or space: a little above or below puts in a semitone instead.
         for (const auto& pitch : score.getNotes (part, spot->staff, spot->measure, event.onset))
         {
-            if (pitch.step == spot->pitch.step)
+            if (std::abs (height - (float) (pitch.step - getBottomLineStep (spot->staff))) <= noteheadReach)
             {
                 found = Note { spot->staff, spot->measure, event.onset, pitch, part,
                                score.getNoteLength (part, spot->staff, spot->measure, event.onset),
@@ -2452,8 +2468,11 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
     {
         std::optional<int> highlightedPosition;
 
-        // Only a note a click would take out: one with another sharp or flat would be changed to the hovered one's.
-        if (hoverNote.has_value() && ! hoverHintHidden && hoverNote->staff == staff && hoverNote->measure == measure)
+        // Only a chord's note a click would take out: one with another sharp or flat would be
+        // changed to the hovered one's. A click on a note of its own selects it instead, so it's
+        // red only under the eraser.
+        if (hoverNote.has_value() && ! hoverHintHidden && hoverNote->staff == staff && hoverNote->measure == measure
+            && (erasing || content.source != StaffContent::Source::notes))
             if (const auto under = findNoteUnder (*hoverNote); ! under.has_value() || under->pitch.alter == hoverNote->pitch.alter)
                 highlightedPosition = hoverNote->pitch.step - getBottomLineStep (staff);
 
@@ -4254,8 +4273,54 @@ void StaffView::placeTupletNote (const Note& note)
     repaint();
 }
 
+float StaffView::getLinesAndSpacesUp (Staff staff, float y) const
+{
+    return (getY (staff, 0) - y) / (staffSpace / 2.0f);
+}
+
+std::optional<Note> StaffView::getSemitoneNeighbourAt (juce::Point<float> point) const
+{
+    const auto spot = getNoteAt (point);
+
+    if (! spot.has_value() || score.chordUsesStaff (part, spot->measure, spot->staff))
+        return {};
+
+    const auto height = getLinesAndSpacesUp (spot->staff, point.y);
+    std::optional<Note> found;
+    auto nearest = semitoneReach;
+
+    for (const auto& event : measureLayouts[(size_t) spot->measure].content.staves[(size_t) spot->staff].events)
+    {
+        if (event.tupletStart.has_value() || std::abs (point.x - getEventX (spot->measure, event)) > noteheadReachAcross * staffSpace)
+            continue;
+
+        for (const auto& pitch : score.getNotes (part, spot->staff, spot->measure, event.onset))
+        {
+            const auto offset = height - (float) (pitch.step - getBottomLineStep (spot->staff));
+
+            if (std::abs (offset) <= noteheadReach || std::abs (offset) > nearest)
+                continue;
+
+            nearest = std::abs (offset);
+            found = Note { spot->staff, spot->measure, event.onset,
+                           music::spellMidiNote (score.getKey(), pitch.getMidiNoteNumber() + (offset > 0.0f ? 1 : -1)),
+                           part, noteLength, staccato };
+        }
+    }
+
+    // On a note's own line or space, it takes the place of the note, if not, it joins it.
+    if (found.has_value() && found->pitch.step < 0)
+        return {};
+
+    return found;
+}
+
 std::optional<Note> StaffView::getNoteToClickAt (juce::Point<float> point) const
 {
+    // Just above or below a note of its own, the note a semitone above or below it, at its time
+    if (const auto neighbour = getSemitoneNeighbourAt (point))
+        return neighbour;
+
     auto note = getNoteAt (point);
 
     // A Random chord's notes are each taken out on their own, so it's the one under the point.
@@ -4393,17 +4458,29 @@ void StaffView::clickNote (const Note& note)
         hoverHintHidden = true;
         return;
     }
-    // Clicking a note selects it; clicking anywhere else adds one.
+    // Clicking a note selects it, or with another sharp or flat, a little above or below it,
+    // changes it to that one, keeping its length; clicking anywhere else adds one.
     else if (score.hasNoteAt (part, note.staff, note.measure, note.beat, note.pitch.step))
     {
-        for (const auto& pitch : score.getNotes (part, note.staff, note.measure, note.beat))
-            if (pitch.step == note.pitch.step)
-                clickWrittenNote (Note { note.staff, note.measure, note.beat, pitch, part,
-                                         score.getNoteLength (part, note.staff, note.measure, note.beat),
-                                         score.isStaccato (part, note.staff, note.measure, note.beat) });
+        const auto& written = score.getNotes (part, note.staff, note.measure, note.beat);
+        const auto sameStep = std::find_if (written.begin(), written.end(), [&] (const music::Pitch& p) { return p.step == note.pitch.step; });
+        const Note existing { note.staff, note.measure, note.beat, *sameStep, part,
+                              score.getNoteLength (part, note.staff, note.measure, note.beat),
+                              score.isStaccato (part, note.staff, note.measure, note.beat) };
 
-        hoverHintHidden = true;
-        return;
+        if (existing.pitch.alter == note.pitch.alter)
+        {
+            clickWrittenNote (existing);
+            hoverHintHidden = true;
+            return;
+        }
+
+        auto replacement = existing;
+        replacement.pitch = note.pitch;
+        score.removeNotesAt (part, note.staff, note.measure, note.beat, note.pitch.step);
+        score.addNote (replacement);
+        tieFromLast (replacement, false);
+        notifyPlaced (note.staff, note.measure, note.beat);
     }
     else if (score.addNote (note))
     {
