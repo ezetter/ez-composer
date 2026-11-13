@@ -123,8 +123,18 @@ public:
     std::function<void (std::vector<WrittenItem>)> onItemsSelected;
 
     /** What the buttons over the notes selected do. */
-    enum class SelectionAction { repeat, copy, cut };
+    enum class SelectionAction { repeat, copy, cut, move };
     std::function<void (SelectionAction)> onSelectionAction;
+
+    /** Turns moving what's selected on or off, shown by the Move button over it. While it's
+        on, dragging anywhere on the staves moves it all together: across, by steps of the note
+        length chosen, and up or down, by lines and spaces. It shows faintly where it would go,
+        and when the mouse is let go, onItemsMoved is called with how far, in 64ths and lines
+        and spaces up.
+    */
+    void setMovingItems (bool);
+    bool isMovingItems() const noexcept { return movingItems; }
+    std::function<void (int slots, int steps)> onItemsMoved;
 
     /** The notes, rests written in and tuplets with a notehead or rest in an area: a chord's
         notes are left out. Selecting them as well as these would add them, unless they're
@@ -820,6 +830,10 @@ private:
     bool isRestSelected (Staff, int measure, double onset) const;
 
     void drawPasteHint (juce::Graphics&) const;
+    void drawItemMoveHint (juce::Graphics&) const;
+
+    /** Draws a passage faintly, from a point in 64ths from the start of the score, with a line where it starts. */
+    void drawPassageHint (juce::Graphics&, const Passage&, int start) const;
 
     Score& score;
     const int partId;
@@ -868,7 +882,12 @@ private:
     std::vector<WrittenItem> boxItems;               // what's in it
     juce::Point<float> boxStart;
     bool pressedToDeselect = false;                  // the mouse went down to let go of what's selected
-    juce::TextButton repeatButton { "Repeat" }, copyButton { "Copy" }, cutButton { "Cut" };
+    juce::TextButton repeatButton { "Repeat" }, copyButton { "Copy" }, cutButton { "Cut" }, moveButton { "Move" };
+    bool movingItems = false;                        // dragging moves what's selected
+    std::optional<Passage> itemMovePassage;          // what's selected, being dragged
+    juce::Point<float> itemMovePress;                // where the mouse went down
+    std::optional<std::pair<int, double>> itemMovePressPoint;  // and the measure and beat there
+    int itemMoveSlots = 0, itemMoveSteps = 0;        // how far it's been dragged
     std::optional<Passage> pastePassage;             // pasted by a click
     std::optional<std::pair<int, double>> pasteHover, pressedPaste;
     Erasable hoverErasable;

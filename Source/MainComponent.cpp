@@ -1451,11 +1451,15 @@ void MainComponent::configureView (StaffView& view)
     {
         if (action == StaffView::SelectionAction::repeat)
             repeatSelection();
+        else if (action == StaffView::SelectionAction::move)
+            setMovingItems (! movingItems);
         else
             copySelection (action == StaffView::SelectionAction::cut);
     };
     view.setPasting (pasting ? clipboard : std::nullopt);
     view.onPasteClicked = [this, &view] (int measure, double beat) { pasteAt (view.getPart(), measure, beat); };
+    view.setMovingItems (movingItems);
+    view.onItemsMoved = [this] (int slots, int steps) { moveSelection (slots, steps); };
 
     // Selecting measures in any part selects them in all of them, and moves them in all of them.
     view.onMeasuresSelected = [this] (std::optional<std::pair<int, int>> measures, bool finished) { selectMeasures (measures, finished); };
@@ -2278,12 +2282,47 @@ void MainComponent::selectItems (int part, std::vector<WrittenItem> items)
         return;
     }
 
+    // Move stays on for what's selected next.
+    const auto wasMoving = movingItems;
     selectNote ({});
     stopPasting();
     itemSelection = ItemSelection { part, std::move (items) };
 
     for (auto* view : getViews())
         view->setItemSelection (view->getPart() == part ? itemSelection->items : std::vector<WrittenItem>());
+
+    setMovingItems (wasMoving);
+}
+
+void MainComponent::setMovingItems (bool shouldMove)
+{
+    movingItems = shouldMove && itemSelection.has_value();
+
+    for (auto* view : getViews())
+        view->setMovingItems (movingItems);
+}
+
+void MainComponent::moveSelection (int slots, int steps)
+{
+    checkItemSelection();
+
+    if (! itemSelection.has_value())
+        return;
+
+    const auto selection = *itemSelection;
+    const auto passage = score.getPassage (selection.part, selection.items);
+    const auto moved = Score::transpose (passage, steps, score.getKey());
+
+    if (passage.isEmpty() || ! moved.has_value())
+        return;
+
+    // Taken out, then written where it goes, so it can overlap where it was. Move stays on.
+    const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+    const auto at = juce::jmax (0, passage.origin + slots);
+    const auto wasMoving = movingItems;
+    score.removeItems (selection.part, selection.items);
+    selectItems (selection.part, score.writePassage (selection.part, *moved, at / slotsPerMeasure, (double) (at % slotsPerMeasure) / Score::slotsPerBeat));
+    setMovingItems (wasMoving);
 }
 
 void MainComponent::clearItemSelection()
@@ -2295,6 +2334,8 @@ void MainComponent::clearItemSelection()
 
     for (auto* view : getViews())
         view->setItemSelection ({});
+
+    setMovingItems (false);
 }
 
 void MainComponent::checkItemSelection()

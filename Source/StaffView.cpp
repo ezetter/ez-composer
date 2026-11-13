@@ -993,13 +993,15 @@ void StaffView::updateSelectionActions()
             if (std::find (itemSelection.begin(), itemSelection.end(), item) != itemSelection.end())
                 bounds = bounds.has_value() ? bounds->getUnion ({ point, point }) : juce::Rectangle<float> { point, point };
 
-    for (auto* button : { &repeatButton, &copyButton, &cutButton })
+    for (auto* button : { &repeatButton, &copyButton, &cutButton, &moveButton })
     {
         if (button->getParentComponent() == nullptr)
         {
             button->setWantsKeyboardFocus (false);
             button->setColour (juce::TextButton::buttonColourId, paperColour);
+            button->setColour (juce::TextButton::buttonOnColourId, editColour);
             button->setColour (juce::TextButton::textColourOffId, editColour);
+            button->setColour (juce::TextButton::textColourOnId, paperColour);
             addChildComponent (button);
         }
 
@@ -1012,13 +1014,16 @@ void StaffView::updateSelectionActions()
     repeatButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::repeat); };
     copyButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::copy); };
     cutButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::cut); };
+    moveButton.setTooltip ("Turn on to drag the notes selected: across in time, or up and down in pitch");
+    moveButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::move); };
+    moveButton.setToggleState (movingItems, juce::dontSendNotification);
 
     if (! bounds.has_value())
         return;
 
     // Side by side, over the highest of them, or under the lowest if there isn't room.
     constexpr int buttonWidth = 64, buttonHeight = 24, gap = 4;
-    const auto width = 3 * buttonWidth + 2 * gap;
+    const auto width = 4 * buttonWidth + 3 * gap;
     auto x = juce::jlimit (0, juce::jmax (0, getWidth() - width), juce::roundToInt (bounds->getCentreX()) - width / 2);
     auto y = juce::roundToInt (bounds->getY() - 1.5f * staffSpace) - buttonHeight;
 
@@ -1027,7 +1032,7 @@ void StaffView::updateSelectionActions()
 
     y = juce::jlimit (0, juce::jmax (0, getHeight() - buttonHeight), y);
 
-    for (auto* button : { &repeatButton, &copyButton, &cutButton })
+    for (auto* button : { &repeatButton, &copyButton, &cutButton, &moveButton })
     {
         button->setBounds (x, y, buttonWidth, buttonHeight);
         button->toFront (false);
@@ -1052,13 +1057,35 @@ std::optional<std::pair<int, double>> StaffView::getPastePointAt (juce::Point<fl
     return {};
 }
 
+void StaffView::setMovingItems (bool shouldMove)
+{
+    movingItems = shouldMove;
+    moveButton.setToggleState (shouldMove, juce::dontSendNotification);
+    itemMovePassage.reset();
+    repaint();
+}
+
 void StaffView::drawPasteHint (juce::Graphics& g) const
 {
     if (! pastePassage.has_value() || ! pasteHover.has_value())
         return;
 
     const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
-    const auto start = pasteHover->first * slotsPerMeasure + (int) std::lround (pasteHover->second * Score::slotsPerBeat);
+    drawPassageHint (g, *pastePassage, pasteHover->first * slotsPerMeasure + (int) std::lround (pasteHover->second * Score::slotsPerBeat));
+}
+
+void StaffView::drawItemMoveHint (juce::Graphics& g) const
+{
+    if (! itemMovePassage.has_value() || (itemMoveSlots == 0 && itemMoveSteps == 0))
+        return;
+
+    if (const auto moved = Score::transpose (*itemMovePassage, itemMoveSteps, score.getKey()))
+        drawPassageHint (g, *moved, itemMovePassage->origin + itemMoveSlots);
+}
+
+void StaffView::drawPassageHint (juce::Graphics& g, const Passage& passage, int start) const
+{
+    const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
     const auto shown = getShownMeasures();
     const auto locate = [&] (int at) -> std::optional<std::pair<int, double>>
     {
@@ -1077,11 +1104,11 @@ void StaffView::drawPasteHint (juce::Graphics& g) const
         g.fillRect (juce::Rectangle<float> (x - 0.75f, top, 1.5f, bottom - top));
     }
 
-    for (const auto& note : pastePassage->notes)
+    for (const auto& note : passage.notes)
         if (const auto at = locate (start + note.start))
             drawGhostNote (g, { note.staff, at->first, at->second, note.pitch, part, (double) note.length / Score::slotsPerBeat, note.staccato });
 
-    for (const auto& tuplet : pastePassage->tuplets)
+    for (const auto& tuplet : passage.tuplets)
         for (int i = 0; i < (int) tuplet.pitches.size(); ++i)
         {
             const auto length = Tuplet::getNormalCount ((int) tuplet.pitches.size()) * tuplet.noteLength;
@@ -1091,7 +1118,7 @@ void StaffView::drawPasteHint (juce::Graphics& g) const
                                     (double) tuplet.noteLength / Score::slotsPerBeat, tuplet.staccato });
         }
 
-    for (const auto& rest : pastePassage->rests)
+    for (const auto& rest : passage.rests)
         if (const auto at = locate (start + rest.start))
         {
             g.setColour (hoverColour);
@@ -2252,6 +2279,7 @@ void StaffView::paint (juce::Graphics& g)
     drawScaleHint (g);
     drawRhythmHint (g);
     drawPasteHint (g);
+    drawItemMoveHint (g);
 
     // The box being dragged out to select notes
     if (selectionBox.has_value())
@@ -3814,6 +3842,15 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
+    // Moving what's selected, a drag anywhere moves it.
+    if (! itemSelection.empty() && movingItems && ! selecting)
+    {
+        setHoverNote ({});
+        setHoverRest ({});
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        return;
+    }
+
     // With notes selected, a click off a note lets go of them, so nothing shows what it would add.
     if (! itemSelection.empty() && ! selecting && ! findEditableNoteAt (e.position).has_value() && ! findTupletNoteAt (e.position).has_value())
     {
@@ -4014,6 +4051,20 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // Moving what's selected, a drag from anywhere moves it all, when the mouse is let go.
+    if (! itemSelection.empty() && movingItems && ! selecting)
+    {
+        itemMovePassage = score.getPassage (part, itemSelection);
+        itemMovePress = e.position;
+        itemMovePressPoint = getPastePointAt (e.position);
+        itemMoveSlots = itemMoveSteps = 0;
+
+        if (itemMovePassage->isEmpty())
+            itemMovePassage.reset();
+
+        return;
+    }
+
     // With notes selected, a click on a note selects it alone, and anywhere else lets go of
     // them, and does nothing more.
     if (! itemSelection.empty() && ! selecting && ! findEditableNoteAt (e.position).has_value() && ! findTupletNoteAt (e.position).has_value())
@@ -4170,6 +4221,33 @@ void StaffView::mouseDrag (const juce::MouseEvent& e)
         eraseAlong (lastErasePoint, e.position);
         lastErasePoint = e.position;
         setHoverErasable (findErasableAt (e.position));
+        return;
+    }
+
+    // What's selected follows the mouse: across, by steps of the note length chosen, from
+    // where it was taken hold of, and up or down by lines and spaces. It can't go before the start.
+    if (itemMovePassage.has_value())
+    {
+        if (! e.mouseWasDraggedSinceMouseDown())
+            return;
+
+        if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+            viewport->autoScroll (viewport->getLocalPoint (this, e.position).roundToInt().x, viewport->getHeight() / 2, 40, 24);
+
+        const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+        const auto toSlots = [&] (std::pair<int, double> point) { return point.first * slotsPerMeasure + (int) std::lround (point.second * Score::slotsPerBeat); };
+
+        if (const auto point = getPastePointAt ({ e.position.x, itemMovePress.y }); point.has_value() && itemMovePressPoint.has_value())
+            itemMoveSlots = juce::jmax (-itemMovePassage->origin, toSlots (*point) - toSlots (*itemMovePressPoint));
+
+        itemMoveSteps = (int) std::lround ((itemMovePress.y - e.position.y) / (staffSpace / 2.0f));
+        hoverHintHidden = true;
+
+        // The buttons are out of the way while it's dragged.
+        for (auto* button : { &repeatButton, &copyButton, &cutButton, &moveButton })
+            button->setVisible (false);
+
+        repaint();
         return;
     }
 
@@ -4340,6 +4418,19 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
 
         if (onItemsSelected != nullptr)
             onItemsSelected (items);
+
+        return;
+    }
+
+    // Moved, it goes where it was let go. A click without moving it does nothing.
+    if (const auto moving = std::exchange (itemMovePassage, std::nullopt))
+    {
+        const auto slots = std::exchange (itemMoveSlots, 0), steps = std::exchange (itemMoveSteps, 0);
+        updateSelectionActions();
+        repaint();
+
+        if (! e.mods.isPopupMenu() && e.mouseWasDraggedSinceMouseDown() && (slots != 0 || steps != 0) && onItemsMoved != nullptr)
+            onItemsMoved (slots, steps);
 
         return;
     }

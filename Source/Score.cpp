@@ -885,6 +885,33 @@ Passage Score::getPassage (int part, const std::vector<WrittenItem>& items) cons
     return passage;
 }
 
+std::optional<Passage> Score::transpose (Passage passage, int steps, music::Key key)
+{
+    if (steps == 0)
+        return passage;
+
+    const auto alterations = music::getKeyAlterations (key);
+    auto fits = true;
+    const auto shift = [&] (music::Pitch& pitch)
+    {
+        pitch.step += steps;
+        pitch.alter = alterations[(size_t) pitch.getLetter()];
+        fits = fits && pitch.step >= 0 && juce::isPositiveAndBelow (pitch.getMidiNoteNumber(), 128);
+    };
+
+    for (auto& note : passage.notes)
+        shift (note.pitch);
+
+    for (auto& tuplet : passage.tuplets)
+        for (auto& pitch : tuplet.pitches)
+            shift (pitch);
+
+    if (! fits)
+        return {};
+
+    return passage;
+}
+
 void Score::removeItems (int part, const std::vector<WrittenItem>& items)
 {
     auto changed = false;

@@ -639,6 +639,12 @@ public:
     */
     std::vector<WrittenItem> writePassage (int part, const Passage&, int measure, double beat);
 
+    /** A passage with its notes moved up or down by lines and spaces, on their own staves,
+        taking the key signature's sharps and flats where they go. Nothing if any would go
+        outside the MIDI notes.
+    */
+    static std::optional<Passage> transpose (Passage, int steps, music::Key);
+
     //==============================================================================
     /** The dynamic marked at a point of a part, if there's one there. Each part has its own
         dynamics, written between its staves, on a beat or halfway through one.

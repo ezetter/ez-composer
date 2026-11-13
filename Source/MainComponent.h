@@ -377,6 +377,16 @@ private:
     /** Takes out what's selected together. */
     void deleteSelectedItems();
 
+    /** Turns moving what's selected together by dragging it on or off. It goes off when
+        nothing's selected.
+    */
+    void setMovingItems (bool);
+
+    /** Moves what's selected together on by some 64ths, back if it's negative, and up or down
+        by lines and spaces, and selects it where it goes.
+    */
+    void moveSelection (int slots, int steps);
+
     /** Whether the note selected is one of a tuplet's, and if so, which. */
     std::optional<std::pair<Tuplet, int>> getSelectedTupletNote() const;
 
@@ -845,6 +855,7 @@ private:
     std::optional<ItemSelection> itemSelection;      // selected together, to repeat, copy or cut
     std::optional<Passage> clipboard;                // copied or cut last
     bool pasting = false;                            // a click on the staves pastes it
+    bool movingItems = false;                        // dragging moves what's selected together
     std::vector<Note> lastStepNotes, stepNotes;      // the notes the step before wrote, for tying to, and this one's
     juce::TimedCallback stepKeysTimer { [this] { takeStepKeys(); } };
 
