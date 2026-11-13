@@ -527,7 +527,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     noteLengthPicker.onChange = [this] (double beats) { setNoteLength (beats); };
     noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
     noteLengthPicker.onTupletClicked = [this] { chooseTupletLength(); };
-    restLengthPicker.onChange = [this] (double beats) { setRestLength (beats); };
+    restLengthPicker.onChange = [this] (double beats) { setRestLength (beats, true); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
 
     // Which notation controls show, as last time: the box's ids are the groups', from 1.
@@ -1946,7 +1946,9 @@ void MainComponent::setNoteLength (double beats)
 
     stopSelecting();
 
+    // The rests go to the same length, for when they show.
     addingRests = false;
+    restLengthPicker.setLength (beats);
     restLengthPicker.setChoiceShown (false);
     noteLengthPicker.setLength (beats);
     dynamicPicker.setChoice ({});
@@ -1961,13 +1963,17 @@ void MainComponent::setNoteLength (double beats)
     }
 }
 
-void MainComponent::setRestLength (double beats)
+void MainComponent::setRestLength (double beats, bool matchNotes)
 {
     stopPlacingNotes();
     stopSelecting();
 
     addingRests = true;
     restLengthPicker.setLength (beats);
+
+    if (matchNotes)
+        noteLengthPicker.setLength (beats);
+
     noteLengthPicker.setChoiceShown (false);
     dynamicPicker.setChoice ({});
     eraserButton.setToggleState (false, juce::dontSendNotification);
@@ -1996,7 +2002,9 @@ void MainComponent::setTuplet (double noteBeats, int numNotes)
     stopPlacingNotes();
     stopSelecting();
 
+    // A rest for a tuplet is a beat long.
     addingRests = false;
+    restLengthPicker.setLength (1.0);
     restLengthPicker.setChoiceShown (false);
     noteLengthPicker.setTuplet (noteBeats, numNotes);
     dynamicPicker.setChoice ({});

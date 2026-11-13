@@ -302,8 +302,11 @@ private:
     /** Shows the lengths a tuplet's notes can be, beside the tuplet button, and places tuplets meanwhile. */
     void chooseTupletLength();
 
-    /** Makes clicks on the staff, and steps recorded, add rests this long, in beats, in place of notes. */
-    void setRestLength (double beats);
+    /** Makes clicks on the staff, and steps recorded, add rests this long, in beats, in place of
+        notes. Chosen from the rest buttons, the notes go to the same length, for when the notes
+        show again; tuplets, chosen there, give way to it.
+    */
+    void setRestLength (double beats, bool matchNotes = false);
 
     /** Goes back to adding what was chosen last: rests, or what the note length buttons have
         chosen, single notes or tuplets.
