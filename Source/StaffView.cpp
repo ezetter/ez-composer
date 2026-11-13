@@ -3028,9 +3028,16 @@ std::optional<StaffView::RestSpot> StaffView::getRestAt (juce::Point<float> poin
 void StaffView::clickRest (const RestSpot& spot)
 {
     if (score.getRestLength (part, spot.staff, spot.measure, spot.beat) == std::optional (spot.length))
+    {
         score.removeRest (part, spot.staff, spot.measure, spot.beat);
-    else
-        score.addRest (part, spot.staff, spot.measure, spot.beat, spot.length);
+    }
+    else if (score.addRest (part, spot.staff, spot.measure, spot.beat, spot.length) && onPlaced != nullptr)
+    {
+        const auto slot = (int) std::lround (spot.beat * Score::slotsPerBeat);
+        const auto length = Score::fitNoteLength ((int) std::lround (spot.length * Score::slotsPerBeat),
+                                                  score.getBeatsPerMeasure() * Score::slotsPerBeat - slot);
+        onPlaced (toScoreBeats (spot.measure, (double) (slot + length) / Score::slotsPerBeat));
+    }
 
     // Show what the click did, rather than what another click would do.
     hoverHintHidden = true;
@@ -4146,6 +4153,9 @@ void StaffView::placeTupletNote (const Note& note)
         changed.pitches[(size_t) tupletProgress->placed] = note.pitch;
         score.addTuplet (changed);
 
+        if (onPlaced != nullptr)
+            onPlaced (toScoreBeats (changed.measure, changed.getNoteOnset (tupletProgress->placed + 1)));
+
         if (++tupletProgress->placed == changed.getNumNotes())
             tupletProgress.reset();
 
@@ -4158,7 +4168,12 @@ void StaffView::placeTupletNote (const Note& note)
     tupletProgress.reset();
 
     if (score.addTuplet (tuplet) || score.getTuplet (part, note.staff, note.measure, note.beat) == tuplet)
+    {
         tupletProgress = TupletProgress { note.staff, note.measure, note.beat, 1 };
+
+        if (onPlaced != nullptr)
+            onPlaced (toScoreBeats (tuplet.measure, tuplet.getNoteOnset (1)));
+    }
 
     repaint();
 }
@@ -4241,6 +4256,16 @@ void StaffView::writeOutRandomChordWithout (int measure, Staff staff, double bea
     score.replaceChordWithNotes (part, measure, notes);
 }
 
+void StaffView::notifyPlaced (Staff staff, int measure, double beat)
+{
+    if (onPlaced == nullptr)
+        return;
+
+    // As long as they're shown, to the next point a note can start, or the end of the score
+    const auto next = score.getFollowingBeat (part, staff, measure, beat);
+    onPlaced (next.has_value() ? toScoreBeats (next->first, next->second) : (double) (score.getNumMeasures() * score.getBeatsPerMeasure()));
+}
+
 void StaffView::clickNote (const Note& note)
 {
     // In a measure with a Random chord, clicking one of its notes takes out just that note: the
@@ -4319,8 +4344,8 @@ void StaffView::clickNote (const Note& note)
         if (changed)
             score.addNote (replacement);
     }
-    else
-        score.addNote (note);
+    else if (score.addNote (note))
+        notifyPlaced (note.staff, note.measure, note.beat);
 
     // Show what the click did, rather than what another click would do.
     hoverHintHidden = true;

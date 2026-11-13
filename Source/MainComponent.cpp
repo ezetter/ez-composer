@@ -1354,6 +1354,18 @@ void MainComponent::configureView (StaffView& view)
     view.onEraseFinished = [this] { history.endGesture(); };
 
     // Adding from the scale is done once the notes have gone in.
+    // Recording a step at a time, a note or rest clicked in moves the marker on to just after it,
+    // where the next step goes.
+    view.onPlaced = [this] (double scoreBeats)
+    {
+        if (! stepRecording || ! stepKeysHeld.empty())
+            return;
+
+        playbackStarts[(size_t) piece.getCurrentPage()] = scoreBeats;
+        pausedAt.reset();
+        showPlaybackPosition();
+    };
+
     view.onScalePlaced = [this] { stopPlacingScale(); };
     view.onRhythmPlaced = [this] { stopPlacingRhythm(); };
 

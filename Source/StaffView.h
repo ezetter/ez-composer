@@ -319,6 +319,11 @@ public:
     /** The name written at the top left, such as the part's number and instrument. */
     void setTitle (const juce::String&);
 
+    /** Called when a click adds a note, a rest or one of a tuplet's notes, with where what it
+        added ends, in beats from the start of the score: where the next would start.
+    */
+    std::function<void (double scoreBeats)> onPlaced;
+
     /** Called when the view is clicked, to make its part the active one. */
     std::function<void()> onClicked;
     ~StaffView() override;
@@ -536,6 +541,9 @@ private:
     */
     struct TiePoint { juce::Point<float> centre; float halfWidth; bool upwards; };
     std::optional<TiePoint> getTiePoint (int measure, Staff, double beat, music::Pitch) const;
+
+    /** Tells onPlaced where the notes starting at a point of a staff end, as they're shown. */
+    void notifyPlaced (Staff, int measure, double beat);
 
     /** What a click without dragging does: adds or takes out a note. */
     void clickNote (const Note&);
