@@ -927,6 +927,15 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         return true;
     }
 
+    // Recording a step at a time, the left and right arrow keys move the marker back or on a
+    // step, unless they're moving through text being typed.
+    if (stepRecording && (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey)
+        && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr)
+    {
+        moveStepMarker (key == juce::KeyPress::leftKey ? -1 : 1);
+        return true;
+    }
+
     // Esc lets go of the selected measures.
     if (key == juce::KeyPress::escapeKey && selectedMeasures.has_value())
     {
@@ -2812,6 +2821,34 @@ void MainComponent::takeStepKeys()
             }
         }
     }
+}
+
+double MainComponent::getStepLength() const
+{
+    if (addingRests)
+        return restLengthPicker.getLength();
+
+    // A tuplet's step is one of its notes, its share of the tuplet.
+    if (noteLengthPicker.isTuplet())
+        return Tuplet::getNormalCount (noteLengthPicker.getTupletNotes()) * noteLengthPicker.getTupletLength() / noteLengthPicker.getTupletNotes();
+
+    return noteLengthPicker.getLength();
+}
+
+void MainComponent::moveStepMarker (int steps)
+{
+    // Not while a step's keys are down, whose notes are going where it is
+    if (! stepRecording || ! stepKeysHeld.empty())
+        return;
+
+    const auto page = piece.getCurrentPage();
+    const auto end = (double) (score.getNumMeasures() * score.getBeatsPerMeasure());
+    const auto moved = juce::jlimit (0.0, end, playbackStarts[(size_t) page] + steps * getStepLength());
+
+    playbackStarts[(size_t) page] = std::abs (moved - std::round (moved)) < 1.0e-9 ? std::round (moved) : moved;
+    pausedAt.reset();
+    scrollToMeasure (juce::jmin (score.getNumMeasures() - 1, (int) std::floor (moved / score.getBeatsPerMeasure() + 1.0e-9)));
+    showPlaybackPosition();
 }
 
 bool MainComponent::isTupletStepContinuing (int page) const

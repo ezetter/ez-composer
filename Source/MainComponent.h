@@ -617,6 +617,14 @@ private:
     void takeStepKeys();
 
     /** Where a step's notes go, on the page being edited: its measure and beat, and how long they are, in beats */
+    /** How far a step moves the marker on: the rest or note length chosen, or a tuplet's note's share of it. */
+    double getStepLength() const;
+
+    /** Moves the marker back or on, while recording a step at a time, by so many steps, as far
+        as the start or the end of the score.
+    */
+    void moveStepMarker (int steps);
+
     struct StepChord
     {
         int measure;
