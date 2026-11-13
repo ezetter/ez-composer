@@ -357,7 +357,7 @@ private:
     /** Lets go of what's selected together that's not in the score any more. */
     void checkItemSelection();
 
-    /** Writes what's selected together again straight after the last of it ends, and selects that. */
+    /** Writes what's selected together again straight after the last of it ends, and lets go of it. */
     void repeatSelection();
 
     /** Copies what's selected together, or cuts it, taking it out, and then waits for a click
@@ -371,7 +371,7 @@ private:
     void startPasting();
     void stopPasting();
 
-    /** Pastes what was copied or cut into a part, from a point, and selects it. */
+    /** Pastes what was copied or cut into a part, from a point. Nothing's selected afterwards. */
     void pasteAt (int part, int measure, double beat);
 
     /** Takes out what's selected together. */

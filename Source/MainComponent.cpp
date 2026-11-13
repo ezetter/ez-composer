@@ -2401,10 +2401,11 @@ void MainComponent::repeatSelection()
     if (passage.isEmpty())
         return;
 
-    // Straight after the last of it ends
+    // Straight after the last of it ends. That done, nothing's selected, so the buttons are out of the way.
     const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
     const auto at = passage.origin + passage.length;
-    selectItems (part, score.writePassage (part, passage, at / slotsPerMeasure, (double) (at % slotsPerMeasure) / Score::slotsPerBeat));
+    clearItemSelection();
+    score.writePassage (part, passage, at / slotsPerMeasure, (double) (at % slotsPerMeasure) / Score::slotsPerBeat);
 }
 
 void MainComponent::copySelection (bool cut)
@@ -2457,9 +2458,10 @@ void MainComponent::pasteAt (int part, int measure, double beat)
     if (! pasting || ! clipboard.has_value())
         return;
 
+    // Pasted, nothing's selected, so the buttons are out of the way.
     const auto passage = *clipboard;
     stopPasting();
-    selectItems (part, score.writePassage (part, passage, measure, beat));
+    score.writePassage (part, passage, measure, beat);
 }
 
 void MainComponent::deleteSelectedItems()
