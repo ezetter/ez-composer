@@ -34,6 +34,8 @@ namespace
     constexpr float minMarginBelow = noteRoom;
     constexpr float chordNameHeight = 1.2f;     // from the chord name's baseline to just over its top
     constexpr float chordButtonHeight = 2.0f;
+    constexpr float pageLineMarginAbove = 5.5f, pageLineMarginBelow = 5.0f;     // on the score page, so its lines are closer
+    constexpr float compactPageLineMargin = 3.4f;
     constexpr float compactMargin = 4.5f;       // above and below the system without the chord buttons and numerals, still with room for notes on two ledger lines
 
     // Line thicknesses and notehead metrics, from Bravura's metadata
@@ -438,13 +440,18 @@ float StaffView::getNumeralOffset() const
 
 float StaffView::getMarginAbove() const
 {
-    return juce::jmax (chordControlsShown ? minMarginAbove : compactMargin, getChordButtonOffset() + 0.4f);
+    // A line of the score page leaves less room, so the lines are closer together.
+    const auto minimum = chordControlsShown ? (pageLine.has_value() ? pageLineMarginAbove : minMarginAbove)
+                                            : (pageLine.has_value() ? compactPageLineMargin : compactMargin);
+    return juce::jmax (minimum, getChordButtonOffset() + 0.4f);
 }
 
 float StaffView::getMarginBelow() const
 {
     // Room for the numerals, and the pedal marks below them
-    return juce::jmax (chordControlsShown ? minMarginBelow : compactMargin, getNumeralOffset() + 2.4f);
+    const auto minimum = chordControlsShown ? (pageLine.has_value() ? pageLineMarginBelow : minMarginBelow)
+                                            : (pageLine.has_value() ? compactPageLineMargin : compactMargin);
+    return juce::jmax (minimum, getNumeralOffset() + (pageLine.has_value() ? 2.0f : 2.4f));
 }
 
 void StaffView::setChordControlsShown (bool shown)

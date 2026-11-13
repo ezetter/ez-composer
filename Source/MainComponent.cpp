@@ -35,13 +35,13 @@ namespace
     constexpr int selectionButtonHeight = 26, deleteMeasuresWidth = 64, moveMeasuresWidth = 56;
     constexpr int cloneButtonWidth = 56, cloneButtonHeight = 26;
     constexpr int rightMargin = measureButtonsGap + measureButtonsWidth + 12;      // after the final barline, for the measure buttons
-    constexpr int scorePageLineGap = 10;        // between the score page's lines
+    constexpr int scorePageLineGap = 4;         // between the score page's lines
     constexpr int viewButtonWidth = 96;         // Instruments or Score, beside the instrument menu
     constexpr int partArrowWidth = 26, partArrowHeight = 44;
     constexpr int scorePageBandHeight = 6;     // under the pages' tabs, where the ruler would be
     const char* const scorePageKey = "showScorePage";
     const char* const chordControlsKey = "showChordControls";
-    constexpr int compactLineGap = 2;           // between the score page's lines without the chord buttons
+    constexpr int compactLineGap = 0;           // between the score page's lines without the chord buttons
 
     // A full 88-key piano, A0 to C8
     constexpr int lowestKey = 21;
