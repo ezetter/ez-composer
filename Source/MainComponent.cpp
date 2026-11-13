@@ -928,6 +928,24 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         return true;
     }
 
+    // With notes selected together, the arrow keys move them: left and right a step of the note
+    // length chosen, up and down a line or space, or with Shift, an octave.
+    if (itemSelection.has_value() && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr
+        && (key.isKeyCode (juce::KeyPress::leftKey) || key.isKeyCode (juce::KeyPress::rightKey)
+            || key.isKeyCode (juce::KeyPress::upKey) || key.isKeyCode (juce::KeyPress::downKey)))
+    {
+        const auto octave = key.getModifiers().isShiftDown() ? 7 : 1;
+
+        if (key.isKeyCode (juce::KeyPress::leftKey))
+            moveSelection (-getSelectionStep(), 0);
+        else if (key.isKeyCode (juce::KeyPress::rightKey))
+            moveSelection (getSelectionStep(), 0);
+        else
+            moveSelection (0, key.isKeyCode (juce::KeyPress::upKey) ? octave : -octave);
+
+        return true;
+    }
+
     // Recording a step at a time, the left and right arrow keys move the marker back or on a
     // step, unless they're moving through text being typed.
     if (stepRecording && (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey)
@@ -2302,6 +2320,21 @@ void MainComponent::setMovingItems (bool shouldMove)
         view->setMovingItems (movingItems);
 }
 
+int MainComponent::getSelectionStep() const
+{
+    const auto length = (int) std::lround ((addingRests ? restLengthPicker.getLength() : noteLengthPicker.getLength()) * Score::slotsPerBeat);
+
+    if (length >= Score::slotsPerBeat)
+        return Score::slotsPerBeat;
+
+    auto step = 1;
+
+    while (step * 2 <= length)
+        step *= 2;
+
+    return step;
+}
+
 void MainComponent::moveSelection (int slots, int steps)
 {
     checkItemSelection();
@@ -2317,8 +2350,13 @@ void MainComponent::moveSelection (int slots, int steps)
         return;
 
     // Taken out, then written where it goes, so it can overlap where it was. Move stays on.
+    // It can't go before the start, and going nowhere changes nothing.
     const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
     const auto at = juce::jmax (0, passage.origin + slots);
+
+    if (at == passage.origin && steps == 0)
+        return;
+
     const auto wasMoving = movingItems;
     score.removeItems (selection.part, selection.items);
     selectItems (selection.part, score.writePassage (selection.part, *moved, at / slotsPerMeasure, (double) (at % slotsPerMeasure) / Score::slotsPerBeat));

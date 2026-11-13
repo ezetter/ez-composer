@@ -387,6 +387,12 @@ private:
     */
     void moveSelection (int slots, int steps);
 
+    /** How far the left and right arrow keys move what's selected together, in 64ths: a step
+        of the note length chosen without its dot, as clicks place notes, or a beat for a
+        quarter note or longer.
+    */
+    int getSelectionStep() const;
+
     /** Whether the note selected is one of a tuplet's, and if so, which. */
     std::optional<std::pair<Tuplet, int>> getSelectedTupletNote() const;
 
