@@ -477,7 +477,7 @@ private:
     */
     static std::vector<std::vector<size_t>> groupBeams (const std::vector<const StaffEvent*>& notes);
     void drawNote (juce::Graphics&, Staff, const NoteLayout&, bool rolled, std::optional<int> highlightedPosition,
-                   juce::Colour highlightColour) const;
+                   juce::Colour highlightColour, std::optional<int> highlightedAlter = {}) const;
     void drawStem (juce::Graphics&, Staff, const NoteLayout&) const;
     void drawBeams (juce::Graphics&, Staff, std::vector<NoteLayout*>&) const;
     void drawLedgerLines (juce::Graphics&, Staff, const std::vector<int>& staffPositions,
@@ -663,6 +663,9 @@ private:
     */
     std::optional<Note> getSemitoneNeighbourAt (juce::Point<float>) const;
 
+    /** The same, with the pitch of the note it's a semitone from. */
+    std::optional<std::pair<Note, music::Pitch>> findSemitoneNeighbourAt (juce::Point<float>) const;
+
     /** When the note written on a line or space nearest to x starts, if there's one near enough. */
     std::optional<double> findWrittenNoteOnset (const Note& spot, float x) const;
 
@@ -809,6 +812,7 @@ private:
     bool tying = false;                             // clicks tie notes
     std::optional<Note> tieAnchor;                  // the note clicked or added last while tying
     std::optional<Note> pressedTupletNote;          // the tuplet's note the mouse went down on
+    std::optional<std::pair<Note, music::Pitch>> pressedNeighbour;  // a semitone from a note, where the mouse went down
     juce::Point<float> lastErasePoint;
     Erasable hoverErasable;
     juce::String title;

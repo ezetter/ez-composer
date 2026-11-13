@@ -1032,6 +1032,26 @@ bool Score::hasNoteAt (int part, Staff staff, int measure, double beat, int step
     return std::any_of (notes.begin(), notes.end(), [step] (const music::Pitch& pitch) { return pitch.step == step; });
 }
 
+bool Score::removeNote (int part, Staff staff, int measure, double beat, music::Pitch pitch)
+{
+    const auto slot = (size_t) toSlot (beat);
+    auto& target = getMeasure (part, measure);
+    auto& notes = target.notes[(size_t) staff][slot];
+
+    if (std::erase (notes, pitch) == 0)
+        return false;
+
+    if (notes.empty())
+    {
+        target.lengths[(size_t) staff][slot] = slotsPerBeat;
+        target.staccato[(size_t) staff][slot] = false;
+    }
+
+    pruneTies();
+    sendSynchronousChangeMessage();
+    return true;
+}
+
 bool Score::removeNotesAt (int part, Staff staff, int measure, double beat, int step)
 {
     const auto slot = (size_t) toSlot (beat);

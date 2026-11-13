@@ -555,6 +555,11 @@ public:
     /** Removes the notes starting at a point on a line or space. Returns false if there weren't any. */
     bool removeNotesAt (int part, Staff, int measure, double beat, int step);
 
+    /** Removes one note starting at a point, of exactly this pitch, leaving any others on its line
+        or space with another sharp or flat. Returns false if it wasn't there.
+    */
+    bool removeNote (int part, Staff, int measure, double beat, music::Pitch);
+
     //==============================================================================
     /** The dynamic marked at a point of a part, if there's one there. Each part has its own
         dynamics, written between its staves, on a beat or halfway through one.

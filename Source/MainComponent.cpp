@@ -2304,7 +2304,7 @@ void MainComponent::moveSelectedNoteTo (int midiNote)
                  score.isStaccato (note.part, note.staff, note.measure, note.beat) };
 
     history.beginGesture();
-    score.removeNotesAt (note.part, note.staff, note.measure, note.beat, note.pitch.step);
+    score.removeNote (note.part, note.staff, note.measure, note.beat, note.pitch);
     score.addNote (moved);
     history.endGesture();
 
@@ -2323,7 +2323,7 @@ void MainComponent::deleteSelectedNote()
     if (getSelectedTupletNote().has_value())
         score.removeTuplet (note.part, note.staff, note.measure, note.beat);
     else
-        score.removeNotesAt (note.part, note.staff, note.measure, note.beat, note.pitch.step);
+        score.removeNote (note.part, note.staff, note.measure, note.beat, note.pitch);
 
     selectNote ({});
 }
