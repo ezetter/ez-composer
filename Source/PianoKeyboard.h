@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 
 /** The on-screen piano. It reports clicked keys, and can mark a chord's notes on its keys. */
 class PianoKeyboard final : public juce::MidiKeyboardComponent,
@@ -18,6 +19,9 @@ public:
     /** Tints these notes' keys and labels them with the notes' names. */
     void setHeldNotes (std::map<int, juce::String>);
 
+    /** Colours one note's key blue, for the note selected on the staves, or none. */
+    void setSelectedNote (std::optional<int> midiNote);
+
 private:
     bool mouseDownOnKey (int midiNoteNumber, const juce::MouseEvent&) override;
     juce::String getWhiteNoteText (int midiNoteNumber) override;
@@ -27,6 +31,7 @@ private:
                         bool isDown, bool isOver, juce::Colour noteFillColour) override;
 
     std::map<int, juce::String> heldNotes;
+    std::optional<int> selectedNote;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PianoKeyboard)
 };

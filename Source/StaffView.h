@@ -17,14 +17,13 @@
     It shows one of the score's parts. Its measures are as wide as any part needs, so the parts'
     staves line up when they're stacked.
 
-    Clicking the staff adds a note and clicking a note takes it out again: a note of the length
-    chosen, staccato if that's chosen, or on a staff with a chord's notes, a note of the chord. Both happen when the mouse is
-    let go without moving. Dragging from a note to the next note of the same pitch ties them, or
-    unties them; dragging anywhere else does nothing. Above each measure is a button to add a
-    chord to it, or edit the one it has.
-
-    With editing on, dragging a note of its own moves it, and clicking one offers a menu of
-    lengths to change it to, and Delete; anywhere else, clicks and drags do what they would anyway.
+    Clicking the staff adds a note of the length chosen, staccato if that's chosen, or on a staff
+    with a chord's notes, a note of the chord, whose notes a click takes out again. Clicking a
+    note of its own, or a tuplet's, selects it, calling onNoteSelected, and a right click takes it
+    out. Dragging a note of its own moves it, with the notes tied to it, or let go on the note
+    before or after it of the same pitch, ties them, or unties them. Dragging an arpeggio's or
+    Random chord's note moves it to another of the chord's notes. Clicks happen when the mouse is
+    let go without moving. Above each measure is a button to add a chord to it, or edit the one it has.
 
     With rests chosen, clicks add a rest of the length chosen instead, and clicking one takes it out.
 
@@ -97,12 +96,13 @@ public:
     */
     void setErasing (bool);
 
-    /** Turns editing notes on or off. While it's on, dragging a note moves it to wherever it's
-        let go, and clicking one without dragging offers a menu of note lengths to change it to,
-        and Delete. Clicks and drags anywhere else, and on a chord's notes, do what they would
-        anyway: adding notes of the length chosen, or marking what's chosen.
+    /** Shows a note as selected, in blue, if it's in this view's part, or none. */
+    void setSelectedNote (std::optional<Note>);
+
+    /** Called when a note's clicked, with the note, to select it, or with none, when the note
+        selected is clicked again, or a click adds a note, to select none.
     */
-    void setEditing (bool);
+    std::function<void (std::optional<Note>)> onNoteSelected;
 
     /** Turns selecting measures on or off. While it's on, dragging along the staves selects the
         whole measures it goes over, and a click selects the one clicked, calling
@@ -201,18 +201,23 @@ public:
     */
     std::vector<Note> planMove (const Note& dragged, juce::Point<float>) const;
 
-    /** The menu clicking a note while editing shows: its lengths, the ones that fit in what's left
-        of its measure, with its own ticked, Staccato, ticked if it is, and Delete.
+    /** The tuplet's note whose head is at a point, as it's written, if any: its onset, pitch,
+        and the tuplet's note length and staccato.
     */
-    juce::PopupMenu createNoteMenu (const Note&) const;
+    std::optional<Note> findTupletNoteAt (juce::Point<float>) const;
 
-    /** Does what was chosen from a note's menu: changes its length, or makes it staccato or not,
-        along with the notes starting with it, or takes it out. Nothing happens if the note's gone
-        in the meantime.
+    /** The note a note dragged to a point would be tied to, or untied from: the one of the same
+        pitch on its staff there, if it starts just as the dragged one ends, or ends as it starts.
     */
-    void applyNoteMenuChoice (const Note&, int itemId);
+    std::optional<Note> getTieTarget (const Note& from, juce::Point<float>) const;
 
-    static constexpr int deleteNoteItemId = 1000, staccatoItemId = 1001;     // the menu's other items are the lengths, in slots
+    /** What a right click does: takes out the note under a point, a tuplet with its notes, a
+        rest written in, or one of a chord's notes.
+    */
+    void deleteAt (juce::Point<float>);
+
+    /** Whether clicks add notes of the length chosen, rather than rests, tuplets, marks or anything else */
+    bool isAddingNotes() const noexcept;
 
     /** Called when an eraser stroke starts and finishes, so everything it takes out can be undone together. */
     std::function<void()> onEraseStarted, onEraseFinished;
@@ -485,7 +490,6 @@ private:
     void drawMoveHint (juce::Graphics&) const;
     void setEditHover (std::optional<Note>);
     void setChordNoteHover (std::optional<ChordNote>);
-    void showNoteMenu (const Note&);
 
     /** The note of a measure's chord that a note it writes is: the same note, or for one in another
         octave, such as one moved there or an arpeggio's octave at the top, the chord's note of the
@@ -760,7 +764,6 @@ private:
     std::optional<HairpinMark> hoverHairpin, pressedHairpin;     // the hairpin under the mouse, and one a click would take out
     std::optional<HairpinDrag> hairpinDrag;
     bool erasing = false, erasingStroke = false;    // the eraser's chosen, and its button's down
-    bool editing = false;
     bool selecting = false, movingMeasures = false;
     std::optional<std::pair<int, int>> measureSelection;    // shown as selected, from one measure to another
     std::optional<int> selectionAnchor;             // the measure a drag selecting measures started at
@@ -775,7 +778,8 @@ private:
     std::optional<ChordNote> chordNoteHover;        // while editing, the chord's note under the mouse
     std::optional<ChordNote> movedChordNote;        // the chord's note the mouse went down on
     std::optional<music::Tone> chordNoteTarget;     // the chord's note a drag would move it to
-    MusicGlyphs menuGlyphs;                         // for the notes in a note's menu
+    std::optional<Note> selectedNote;               // shown in blue
+    std::optional<Note> pressedTupletNote;          // the tuplet's note the mouse went down on
     juce::Point<float> lastErasePoint;
     Erasable hoverErasable;
     juce::String title;

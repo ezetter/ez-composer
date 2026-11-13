@@ -2,6 +2,11 @@
 
 #include "Controls.h"
 
+namespace
+{
+    const juce::Colour selectedColour { 0xff2f7de1 };      // as the note selected on the staves
+}
+
 PianoKeyboard::PianoKeyboard (juce::MidiKeyboardState& state)
     : MidiKeyboardComponent (state, horizontalKeyboard)
 {
@@ -13,6 +18,15 @@ void PianoKeyboard::setHeldNotes (std::map<int, juce::String> notes)
         return;
 
     heldNotes = std::move (notes);
+    repaint();
+}
+
+void PianoKeyboard::setSelectedNote (std::optional<int> midiNote)
+{
+    if (midiNote == selectedNote)
+        return;
+
+    selectedNote = midiNote;
     repaint();
 }
 
@@ -43,8 +57,16 @@ void PianoKeyboard::drawWhiteNote (int midiNoteNumber, juce::Graphics& g, juce::
         g.fillRect (area);
     }
 
+    const auto selected = selectedNote == midiNoteNumber;
+
+    if (selected)
+    {
+        g.setColour (selectedColour);
+        g.fillRect (area);
+    }
+
     MidiKeyboardComponent::drawWhiteNote (midiNoteNumber, g, area, isDown, isOver, lineColour,
-                                          held && ! isDown ? controls::accent : textColour);
+                                          selected ? juce::Colours::white : held && ! isDown ? controls::accent : textColour);
 }
 
 void PianoKeyboard::drawBlackNote (int midiNoteNumber, juce::Graphics& g, juce::Rectangle<float> area,
@@ -53,7 +75,9 @@ void PianoKeyboard::drawBlackNote (int midiNoteNumber, juce::Graphics& g, juce::
     const auto held = heldNotes.find (midiNoteNumber);
 
     MidiKeyboardComponent::drawBlackNote (midiNoteNumber, g, area, isDown, isOver,
-                                          held != heldNotes.end() ? controls::accent : noteFillColour);
+                                          selectedNote == midiNoteNumber ? selectedColour
+                                          : held != heldNotes.end()      ? controls::accent
+                                                                         : noteFillColour);
 
     if (held != heldNotes.end())
     {

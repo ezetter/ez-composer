@@ -28,7 +28,7 @@ namespace
     constexpr int measureButtonsWidth = 84;     // the measure buttons, after the final barline
     constexpr int measureButtonsGap = 14;       // between the final barline and them
     constexpr int eraserMargin = 10;            // from the eraser to the scroll bar
-    constexpr int editButtonWidth = 44, editButtonGap = 6;     // the Edit button, to the eraser's left
+    constexpr int toolButtonGap = 6;     // between Select and the eraser
     constexpr int selectButtonWidth = 56;                       // and Select, between them
     constexpr int notationGroupBoxWidth = 112;
     const char* const notationGroupKey = "notationGroup";
@@ -524,7 +524,11 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
         button->setWantsKeyboardFocus (false);
     }
     // Note lengths for clicking into the staff, quarter notes to start with, staccato or not, or dynamics and hairpins to mark
-    noteLengthPicker.onChange = [this] (double beats) { setNoteLength (beats); };
+    noteLengthPicker.onChange = [this] (double beats)
+    {
+        changeSelectedNoteLength (beats);
+        setNoteLength (beats);
+    };
     noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
     noteLengthPicker.onTupletClicked = [this] { chooseTupletLength(); };
     restLengthPicker.onChange = [this] (double beats) { setRestLength (beats, true); };
@@ -546,8 +550,6 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
             showNotationGroup ((NotationGroup) (id - 1));
     };
     eraserButton.onClick = [this] { setErasing (! eraserButton.getToggleState()); };
-    editButton.setTooltip ("Edit notes: drag a note to move it, or click one to change its length, make it staccato, or delete it");
-    editButton.onClick = [this] { setEditing (! editButton.getToggleState()); };
 
     // Select picks out whole measures, to delete or move, with the buttons over them.
     selectButton.setTooltip ("Select measures: drag across them, then delete them, or move them between others");
@@ -605,7 +607,6 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     // Only the notation controls shown last are visible.
     showNotationGroup ((NotationGroup) juce::jlimit (0, (int) NotationGroup::rests, settings.getIntValue (notationGroupKey, 0)));
     addAndMakeVisible (eraserButton);
-    addAndMakeVisible (editButton);
     addAndMakeVisible (selectButton);
 
     for (auto* component : std::initializer_list<juce::Component*> { &addMeasureButton, &removeMeasureButton, &cloneButton })
@@ -875,8 +876,7 @@ void MainComponent::resized()
     dynamicPicker.setTopLeftPosition (noteLengthPicker.getX(), noteLengthPicker.getY());
     eraserButton.setBounds (staffViewport.getRight() - staffViewport.getScrollBarThickness() - eraserMargin - EraserButton::buttonWidth,
                             noteLengthPicker.getY(), EraserButton::buttonWidth, EraserButton::buttonHeight);
-    selectButton.setBounds (eraserButton.getBounds().withWidth (selectButtonWidth).translated (-selectButtonWidth - editButtonGap, 0));
-    editButton.setBounds (selectButton.getBounds().withWidth (editButtonWidth).translated (-editButtonWidth - editButtonGap, 0));
+    selectButton.setBounds (eraserButton.getBounds().withWidth (selectButtonWidth).translated (-selectButtonWidth - toolButtonGap, 0));
 
     staffSystems.setMinimumSize (staffViewport.getWidth() - staffViewport.getScrollBarThickness(),
                                  staffViewport.getHeight() - staffViewport.getScrollBarThickness());
@@ -936,6 +936,22 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         return true;
     }
 
+    // Delete or Backspace takes out the note selected, and Esc lets go of it.
+    if (selectedNote.has_value() && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr)
+    {
+        if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
+        {
+            deleteSelectedNote();
+            return true;
+        }
+
+        if (key == juce::KeyPress::escapeKey)
+        {
+            selectNote ({});
+            return true;
+        }
+    }
+
     // Esc lets go of the selected measures.
     if (key == juce::KeyPress::escapeKey && selectedMeasures.has_value())
     {
@@ -985,6 +1001,9 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 
 void MainComponent::scoreChanged()
 {
+    // The note selected may have gone.
+    checkSelectedNote();
+
     // Parts may have been added or taken out, or a whole new score loaded.
     updateTracks();
     updateRemoveMeasureButton();
@@ -1389,7 +1408,8 @@ void MainComponent::configureView (StaffView& view)
     else if (const auto marking = dynamicPicker.getChoice())
         view.setMarking (marking);
 
-    view.setEditing (editButton.getToggleState());
+    view.setSelectedNote (selectedNote);
+    view.onNoteSelected = [this] (std::optional<Note> note) { selectNote (note); };
 
     // Selecting measures in any part selects them in all of them, and moves them in all of them.
     view.onMeasuresSelected = [this] (std::optional<std::pair<int, int>> measures, bool finished) { selectMeasures (measures, finished); };
@@ -1986,6 +2006,8 @@ void MainComponent::setNoteLength (double beats)
 
 void MainComponent::setRestLength (double beats, bool matchNotes)
 {
+    selectNote ({});
+
     stopPlacingNotes();
     stopSelecting();
 
@@ -2020,6 +2042,8 @@ void MainComponent::showLengthChoice (bool shown)
 
 void MainComponent::setTuplet (double noteBeats, int numNotes)
 {
+    selectNote ({});
+
     stopPlacingNotes();
     stopSelecting();
 
@@ -2071,8 +2095,44 @@ void MainComponent::resumeAddingNotes()
         setNoteLength (noteLengthPicker.getLength());
 }
 
+void MainComponent::changeSelectedNoteLength (double beats)
+{
+    checkSelectedNote();
+
+    // A tuplet's notes keep the tuplet's length.
+    if (! selectedNote.has_value() || getSelectedTupletNote().has_value())
+        return;
+
+    auto changed = *selectedNote;
+    changed.length = beats;
+    changed.staccato = score.isStaccato (changed.part, changed.staff, changed.measure, changed.beat);
+    score.addNote (changed);
+}
+
 void MainComponent::setStaccato (bool staccato)
 {
+    // With a note selected, it's made staccato, or not, and the button goes on showing
+    // whether the notes added are.
+    checkSelectedNote();
+
+    if (selectedNote.has_value())
+    {
+        noteLengthPicker.setStaccato (! staccato);
+        const auto& note = *selectedNote;
+
+        if (auto tupletNote = getSelectedTupletNote())
+        {
+            tupletNote->first.staccato = ! tupletNote->first.staccato;
+            score.addTuplet (tupletNote->first);
+        }
+        else
+        {
+            score.setStaccato (note.part, note.staff, note.measure, note.beat, ! score.isStaccato (note.part, note.staff, note.measure, note.beat));
+        }
+
+        return;
+    }
+
     noteLengthPicker.setStaccato (staccato);
 
     for (auto* view : getViews())
@@ -2094,6 +2154,7 @@ void MainComponent::setMarking (std::optional<music::Marking> marking)
     }
 
     stopSelecting();
+    selectNote ({});
 
     // Its group shows, if it doesn't already.
     dynamicPicker.setChoice (marking);
@@ -2117,7 +2178,7 @@ void MainComponent::setErasing (bool shouldErase)
         return;
     }
 
-    setEditing (false);
+    selectNote ({});
     stopSelecting();
     eraserButton.setToggleState (true, juce::dontSendNotification);
     dynamicPicker.setChoice ({});
@@ -2127,19 +2188,130 @@ void MainComponent::setErasing (bool shouldErase)
         view->setErasing (true);
 }
 
-void MainComponent::setEditing (bool shouldEdit)
+void MainComponent::selectNote (std::optional<Note> note)
 {
-    // Editing goes with adding notes or marking, as before, but not with erasing.
-    if (shouldEdit && eraserButton.getToggleState())
-        setErasing (false);
+    if (note == selectedNote)
+        return;
 
-    if (shouldEdit)
-        stopSelecting();
-
-    editButton.setToggleState (shouldEdit, juce::dontSendNotification);
+    selectedNote = note;
 
     for (auto* view : getViews())
-        view->setEditing (shouldEdit);
+        view->setSelectedNote (note);
+
+    keyboard.setSelectedNote (note.has_value() ? std::optional (note->pitch.getMidiNoteNumber()) : std::nullopt);
+
+    // Keys played before it was selected don't move it.
+    if (note.has_value() && ! stepRecording)
+        instrumentHost.takeRecordedKeys();
+
+    updateKeyCapture();
+}
+
+void MainComponent::updateKeyCapture()
+{
+    const auto capture = stepRecording || selectedNote.has_value();
+    instrumentHost.setStepRecording (capture);
+
+    if (capture && ! stepKeysTimer.isTimerRunning())
+        stepKeysTimer.startTimerHz (60);
+    else if (! capture)
+        stepKeysTimer.stopTimer();
+}
+
+std::optional<std::pair<Tuplet, int>> MainComponent::getSelectedTupletNote() const
+{
+    if (! selectedNote.has_value() || ! juce::isPositiveAndBelow (selectedNote->part, score.getNumParts())
+        || ! juce::isPositiveAndBelow (selectedNote->measure, score.getNumMeasures()))
+        return {};
+
+    const auto& note = *selectedNote;
+
+    if (const auto tuplet = score.getTuplet (note.part, note.staff, note.measure, note.beat))
+        for (int i = 0; i < tuplet->getNumNotes(); ++i)
+            if (std::abs (tuplet->getNoteOnset (i) - note.beat) < 1.0e-9 && tuplet->pitches[(size_t) i] == note.pitch)
+                return std::pair { *tuplet, i };
+
+    return {};
+}
+
+void MainComponent::checkSelectedNote()
+{
+    if (! selectedNote.has_value())
+        return;
+
+    const auto& note = *selectedNote;
+    auto there = juce::isPositiveAndBelow (note.part, score.getNumParts()) && juce::isPositiveAndBelow (note.measure, score.getNumMeasures())
+              && note.beat < score.getBeatsPerMeasure();
+
+    if (there && ! getSelectedTupletNote().has_value())
+    {
+        const auto& pitches = score.getNotes (note.part, note.staff, note.measure, note.beat);
+        there = ! score.chordUsesStaff (note.part, note.measure, note.staff) && std::find (pitches.begin(), pitches.end(), note.pitch) != pitches.end();
+    }
+
+    if (! there)
+        selectNote ({});
+}
+
+void MainComponent::moveSelectedNoteTo (int midiNote)
+{
+    checkSelectedNote();
+
+    if (! selectedNote.has_value())
+        return;
+
+    const auto note = *selectedNote;
+    const auto pitch = music::spellMidiNote (score.getKey(), midiNote);
+
+    if (pitch.step < 0 || pitch == note.pitch)
+        return;
+
+    // A tuplet's note changes its pitch, on the tuplet's staff.
+    if (auto tupletNote = getSelectedTupletNote())
+    {
+        auto& [tuplet, index] = *tupletNote;
+        tuplet.pitches[(size_t) index] = pitch;
+        score.addTuplet (tuplet);
+
+        auto moved = note;
+        moved.pitch = pitch;
+        selectNote (moved);
+        return;
+    }
+
+    // A note of its own goes to the key's line or space, on its staff, keeping its length and staccato.
+    const auto staff = midiNote >= 60 ? Staff::treble : Staff::bass;
+
+    if (score.chordUsesStaff (note.part, note.measure, staff))
+        return;
+
+    Note moved { staff, note.measure, note.beat, pitch, note.part,
+                 score.getNoteLength (note.part, note.staff, note.measure, note.beat),
+                 score.isStaccato (note.part, note.staff, note.measure, note.beat) };
+
+    history.beginGesture();
+    score.removeNotesAt (note.part, note.staff, note.measure, note.beat, note.pitch.step);
+    score.addNote (moved);
+    history.endGesture();
+
+    selectNote (moved);
+}
+
+void MainComponent::deleteSelectedNote()
+{
+    checkSelectedNote();
+
+    if (! selectedNote.has_value())
+        return;
+
+    const auto note = *selectedNote;
+
+    if (getSelectedTupletNote().has_value())
+        score.removeTuplet (note.part, note.staff, note.measure, note.beat);
+    else
+        score.removeNotesAt (note.part, note.staff, note.measure, note.beat, note.pitch.step);
+
+    selectNote ({});
 }
 
 //==============================================================================
@@ -2155,8 +2327,8 @@ void MainComponent::setSelecting (bool shouldSelect)
 
     stopPlacingNotes();
 
-    // Clicks select measures, rather than adding notes, marking, editing or erasing.
-    setEditing (false);
+    // Clicks select measures, rather than adding notes, marking, or erasing.
+    selectNote ({});
     eraserButton.setToggleState (false, juce::dontSendNotification);
     dynamicPicker.setChoice ({});
     showLengthChoice (false);
@@ -2278,7 +2450,7 @@ void MainComponent::positionSelectionButtons()
     if (! show)
         return;
 
-    const auto width = deleteMeasuresWidth + editButtonGap + moveMeasuresWidth;
+    const auto width = deleteMeasuresWidth + toolButtonGap + moveMeasuresWidth;
     juce::Rectangle<int> pair;
 
     if (showingScorePage)
@@ -2680,6 +2852,7 @@ void MainComponent::resumeFromPause()
     // Recording a step at a time, it goes on recording as it plays.
     if (wasStepping && instrumentHost.getPlaybackPosition().has_value())
     {
+        selectNote ({});
         history.beginGesture();
         instrumentHost.takeRecordedKeys();
         instrumentHost.setRecording (true);
@@ -2696,9 +2869,8 @@ void MainComponent::startStepRecording()
     stepChord.reset();
     stepTuplet.reset();
     instrumentHost.takeRecordedKeys();      // what was played before doesn't count
-    instrumentHost.setStepRecording (true);
     recordButton.setToggleState (true, juce::dontSendNotification);
-    stepKeysTimer.startTimerHz (60);
+    updateKeyCapture();
 }
 
 void MainComponent::stopStepRecording()
@@ -2717,13 +2889,35 @@ void MainComponent::stopStepRecording()
     }
 
     stepRecording = false;
-    instrumentHost.setStepRecording (false);
-    stepKeysTimer.stopTimer();
+    updateKeyCapture();
     recordButton.setToggleState (false, juce::dontSendNotification);
 }
 
 void MainComponent::takeStepKeys()
 {
+    // With a note selected, a key moves it, rather than writing a step.
+    if (selectedNote.has_value())
+    {
+        if (instrumentHost.isRecording())
+            return;
+
+        for (const auto& key : instrumentHost.takeRecordedKeys())
+        {
+            if (key.isDown)
+                moveSelectedNoteTo (key.noteNumber);
+            else
+                stepKeysHeld.erase (key.noteNumber);
+        }
+
+        return;
+    }
+
+    if (! stepRecording)
+    {
+        instrumentHost.takeRecordedKeys();
+        return;
+    }
+
     const auto page = piece.getCurrentPage();
     const auto part = activePart;
     const auto beatsPerMeasure = score.getBeatsPerMeasure();
@@ -3482,6 +3676,7 @@ void MainComponent::toggleRecording()
     if (instrumentHost.getPlaybackPosition().has_value())
     {
         // Everything recorded is undone in one go.
+        selectNote ({});
         history.beginGesture();
         instrumentHost.takeRecordedKeys();
         instrumentHost.setRecording (true);
@@ -3934,8 +4129,7 @@ void MainComponent::scoreReplaced()
             history.endGesture();
 
         stepRecording = false;
-        instrumentHost.setStepRecording (false);
-        stepKeysTimer.stopTimer();
+        updateKeyCapture();
         recordButton.setToggleState (false, juce::dontSendNotification);
     }
 

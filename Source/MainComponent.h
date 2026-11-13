@@ -331,11 +331,33 @@ private:
     */
     void setErasing (bool);
 
-    /** Turns editing notes on, for moving notes by dragging them and changing their lengths or
-        taking them out by clicking them, or off. Clicks anywhere else go on adding notes or
-        marking as before. It turns the eraser off, and the eraser turns it off.
+    /** Selects a note, clicked on the staves, which shows in blue, its key on the piano too, or
+        none. While one's selected, a key played moves it to that key's note, a note length
+        chosen changes its length, staccato makes it staccato or not, and Delete or Backspace
+        takes it out. Choosing rests, tuplets, a mark, the eraser or selecting measures, or
+        recording as it plays, lets go of it, as does Esc.
     */
-    void setEditing (bool);
+    void selectNote (std::optional<Note>);
+
+    /** Lets go of the note selected if it's not in the score any more, as written. */
+    void checkSelectedNote();
+
+    /** Whether the note selected is one of a tuplet's, and if so, which. */
+    std::optional<std::pair<Tuplet, int>> getSelectedTupletNote() const;
+
+    /** Moves the note selected to a key's note, on the treble staff from middle C up and the bass
+        staff below it, as step recording would write it; a tuplet's note stays on the tuplet's staff.
+    */
+    void moveSelectedNoteTo (int midiNote);
+
+    /** Changes the note selected to a length, in beats, unless it's a tuplet's. */
+    void changeSelectedNoteLength (double beats);
+
+    /** Takes out the note selected, or for a tuplet's note, the tuplet. */
+    void deleteSelectedNote();
+
+    /** Notes the keys played while step recording or while a note's selected, and stops otherwise. */
+    void updateKeyCapture();
 
     //==============================================================================
     /** Turns selecting measures on, for dragging across the staves to select whole measures, and
@@ -771,6 +793,7 @@ private:
     std::set<int> stepKeysHeld;                      // the keys down for the step being recorded
     std::optional<StepChord> stepChord;              // and where its notes are going
     std::optional<StepTuplet> stepTuplet;            // the tuplet whose notes the steps are writing
+    std::optional<Note> selectedNote;                // clicked on the staves, for the keys and buttons to change
     juce::TimedCallback stepKeysTimer { [this] { takeStepKeys(); } };
 
     controls::DialLookAndFeel dialLookAndFeel;
@@ -793,7 +816,6 @@ private:
     */
     void showNotationGroup (NotationGroup);
     EraserButton eraserButton;          // at the top right of the score, over the staves: the eraser
-    controls::TileTextButton editButton { "Edit" };     // to its left: editing notes
     controls::TileTextButton selectButton { "Select" };     // between them: selecting measures
     juce::TextButton deleteMeasuresButton { "Delete" }, moveMeasuresButton { "Move" };     // over the selected measures
     std::optional<std::pair<int, int>> selectedMeasures;    // on the page being edited, from one measure to another

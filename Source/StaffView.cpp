@@ -355,8 +355,7 @@ StaffView::StaffView (Score& scoreToShow, int partToShow)
     : score (scoreToShow),
       partId (scoreToShow.getPartId (partToShow)),
       part (partToShow),
-      glyphs (staffSpace),
-      menuGlyphs (NoteLengthPicker::glyphStaffSpace)
+      glyphs (staffSpace)
 {
     setOpaque (true);
     score.addChangeListener (this);
@@ -823,20 +822,67 @@ std::optional<int> StaffView::getMoveTargetAt (float x) const
     return barline >= measureSelection->first && barline <= measureSelection->second + 1 ? std::nullopt : std::optional (barline);
 }
 
-void StaffView::setEditing (bool shouldEdit)
+bool StaffView::isAddingNotes() const noexcept
 {
-    endTuplet();
-    editing = shouldEdit;
-    editedNote.reset();
-    editedChain.clear();
-    movePlan.clear();
-    movedChordNote.reset();
-    chordNoteTarget.reset();
-    setEditHover ({});
-    setChordNoteHover ({});
+    return ! marking.has_value() && ! erasing && ! selecting && ! isPlacingNotes() && ! placingRests && ! isPlacingTuplets();
+}
 
-    if (! erasing && ! isPlacingNotes())
-        setMouseCursor (juce::MouseCursor::NormalCursor);
+void StaffView::setSelectedNote (std::optional<Note> note)
+{
+    if (note == selectedNote)
+        return;
+
+    selectedNote = note;
+    repaint();
+}
+
+std::optional<Note> StaffView::findTupletNoteAt (juce::Point<float> point) const
+{
+    const auto spot = getNoteAt (point);
+
+    if (! spot.has_value() || score.chordUsesStaff (part, spot->measure, spot->staff))
+        return {};
+
+    if (const auto onset = findTupletNoteOnset (*spot, point.x))
+        if (const auto tuplet = score.getTuplet (part, spot->staff, spot->measure, *onset))
+            for (int i = 0; i < tuplet->getNumNotes(); ++i)
+                if (std::abs (tuplet->getNoteOnset (i) - *onset) < 1.0e-9 && tuplet->pitches[(size_t) i].step == spot->pitch.step)
+                    return Note { spot->staff, spot->measure, *onset, tuplet->pitches[(size_t) i], part, tuplet->noteLength, tuplet->staccato };
+
+    return {};
+}
+
+std::optional<Note> StaffView::getTieTarget (const Note& from, juce::Point<float> point) const
+{
+    const auto to = getTieableNoteAt (point);
+
+    if (! to.has_value() || to->staff != from.staff || to->pitch != from.pitch)
+        return {};
+
+    using Point = std::optional<std::pair<int, double>>;
+
+    if (score.getFollowingBeat (part, from.staff, from.measure, from.beat) == Point ({ to->measure, to->beat })
+        || score.getFollowingBeat (part, to->staff, to->measure, to->beat) == Point ({ from.measure, from.beat }))
+        return to;
+
+    return {};
+}
+
+void StaffView::deleteAt (juce::Point<float> point)
+{
+    // A note of its own, a tuplet, all together, a rest written in, or a chord's note, as a click takes it out
+    if (const auto note = findEditableNoteAt (point))
+        score.removeNotesAt (part, note->staff, note->measure, note->beat, note->pitch.step);
+    else if (const auto tupletNote = findTupletNoteAt (point))
+        score.removeTuplet (part, tupletNote->staff, tupletNote->measure, tupletNote->beat);
+    else if (const auto spot = getNoteAt (point); spot.has_value() && findWrittenRestAt (spot->staff, spot->measure, point.x).has_value())
+    {
+        const auto rest = findWrittenRestAt (spot->staff, spot->measure, point.x);
+        score.removeRest (part, rest->staff, rest->measure, rest->beat);
+    }
+    else if (const auto chordNote = getNoteToClickAt (point);
+             chordNote.has_value() && score.chordUsesStaff (part, chordNote->measure, chordNote->staff) && findNoteUnder (*chordNote).has_value())
+        clickNote (*chordNote);
 }
 
 void StaffView::setEditHover (std::optional<Note> note)
@@ -1177,102 +1223,6 @@ void StaffView::moveNotes (const std::vector<Note>& from, const std::vector<Note
     }
 
     hoverHintHidden = true;
-}
-
-juce::PopupMenu StaffView::createNoteMenu (const Note& note) const
-{
-    juce::PopupMenu menu;
-    const auto room = score.getBeatsPerMeasure() * Score::slotsPerBeat - (int) std::lround (note.beat * Score::slotsPerBeat);
-    const auto length = (int) std::lround (note.length * Score::slotsPerBeat);
-
-    // Each with what its button shows: its note, or the staccato dot
-    const auto createImage = [] (const std::function<void (juce::Graphics&, juce::Rectangle<float>)>& draw)
-    {
-        juce::Image image (juce::Image::ARGB, 2 * NoteLengthPicker::buttonSize, 2 * NoteLengthPicker::buttonSize, true);
-
-        {
-            juce::Graphics g (image);
-            g.addTransform (juce::AffineTransform::scale (2.0f));
-            g.setColour (inkColour);
-            draw (g, juce::Rectangle<float> ((float) NoteLengthPicker::buttonSize, (float) NoteLengthPicker::buttonSize));
-        }
-
-        return std::make_unique<juce::DrawableImage> (image);
-    };
-
-    constexpr auto beat = Score::slotsPerBeat;
-
-    for (auto [slots, name] : { std::pair { 4 * beat, "Whole note" }, { 3 * beat, "Dotted half note" }, { 2 * beat, "Half note" },
-                                { 3 * beat / 2, "Dotted quarter note" }, { beat, "Quarter note" }, { 3 * beat / 4, "Dotted eighth note" },
-                                { beat / 2, "Eighth note" }, { beat / 4, "16th note" }, { beat / 8, "32nd note" }, { beat / 16, "64th note" } })
-    {
-        juce::PopupMenu::Item item (name);
-        item.itemID = slots;
-        item.isEnabled = slots <= room;
-        item.isTicked = slots == length;
-        item.image = createImage ([this, beats = (double) slots / Score::slotsPerBeat] (juce::Graphics& g, juce::Rectangle<float> area)
-        {
-            NoteLengthPicker::drawNote (g, menuGlyphs, beats, area);
-        });
-        menu.addItem (std::move (item));
-    }
-
-    menu.addSeparator();
-
-    juce::PopupMenu::Item staccatoItem ("Staccato");
-    staccatoItem.itemID = staccatoItemId;
-    staccatoItem.isTicked = score.isStaccato (part, note.staff, note.measure, note.beat);
-    staccatoItem.image = createImage (NoteLengthPicker::drawStaccato);
-    menu.addItem (std::move (staccatoItem));
-
-    menu.addSeparator();
-    menu.addItem (deleteNoteItemId, "Delete");
-    return menu;
-}
-
-void StaffView::showNoteMenu (const Note& note)
-{
-    const auto head = getBeatArea (note.measure, note.beat).withY (juce::roundToInt (getY (note.staff, note.pitch.step - getBottomLineStep (note.staff)) - staffSpace))
-                                                          .withHeight (juce::roundToInt (2.0f * staffSpace));
-
-    createNoteMenu (note).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (head)),
-                                         [safeThis = juce::Component::SafePointer (this), note] (int result)
-                                         {
-                                             if (safeThis != nullptr && result != 0)
-                                                 safeThis->applyNoteMenuChoice (note, result);
-                                         });
-}
-
-void StaffView::applyNoteMenuChoice (const Note& note, int itemId)
-{
-    if (part < 0 || ! juce::isPositiveAndBelow (note.measure, score.getNumMeasures()))
-        return;
-
-    // The score may have changed while the menu was open.
-    const auto& pitches = score.getNotes (part, note.staff, note.measure, note.beat);
-
-    if (std::find (pitches.begin(), pitches.end(), note.pitch) == pitches.end())
-        return;
-
-    if (itemId == deleteNoteItemId)
-    {
-        score.removeNotesAt (part, note.staff, note.measure, note.beat, note.pitch.step);
-    }
-    else if (itemId == staccatoItemId)
-    {
-        score.setStaccato (part, note.staff, note.measure, note.beat, ! score.isStaccato (part, note.staff, note.measure, note.beat));
-    }
-    else
-    {
-        // A new length, staccato or not as it is
-        auto changed = note;
-        changed.length = (double) itemId / Score::slotsPerBeat;
-        changed.staccato = score.isStaccato (part, note.staff, note.measure, note.beat);
-        score.addNote (changed);
-    }
-
-    hoverHintHidden = true;
-    repaint();
 }
 
 std::optional<music::Dynamic> StaffView::getChosenDynamic() const
@@ -2482,8 +2432,26 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
         // The notes of the tuplet being placed that haven't been yet are faint.
         const auto inProgress = getTupletInProgress();
 
+        // The note selected is blue.
+        const auto selectedPosition = [&] (size_t i) -> std::optional<int>
+        {
+            if (selectedNote.has_value() && selectedNote->part == part && selectedNote->staff == staff && selectedNote->measure == measure
+                && content.source == StaffContent::Source::notes && std::abs (notes[i].onset - selectedNote->beat) < 1.0e-9)
+                if (const auto position = selectedNote->pitch.step - getBottomLineStep (staff);
+                    std::find (notes[i].positions.begin(), notes[i].positions.end(), position) != notes[i].positions.end())
+                    return position;
+
+            return {};
+        };
+
         for (size_t i = 0; i < notes.size(); ++i)
         {
+            if (const auto selected = selectedPosition (i))
+            {
+                drawNote (g, staff, notes[i], rolled[i], selected, editColour);
+                continue;
+            }
+
             if (const auto start = noteEvents[i]->tupletStart)
             {
                 const auto pending = inProgress.has_value() && inProgress->staff == staff && inProgress->measure == measure
@@ -3505,25 +3473,20 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
-    // While editing, a note of its own under the pointer can be dragged or clicked, and an
-    // arpeggio's or Random chord's note dragged to another of the chord's notes.
-    if (editing)
+    // Adding notes, a note of its own under the pointer can be clicked to select it or dragged
+    // to move it, as can a tuplet's note be clicked, so nothing faint shows over them. An
+    // arpeggio's or Random chord's note can be dragged to another of the chord's notes, and is
+    // red, as a click takes it out.
+    if (isAddingNotes())
     {
-        const auto editable = findEditableNoteAt (e.position);
-        const auto chordNote = editable.has_value() ? std::nullopt : findMovableChordNoteAt (e.position);
-        setEditHover (editable);
-        setChordNoteHover (chordNote);
-
-        if (editable.has_value() || chordNote.has_value())
+        if (findEditableNoteAt (e.position).has_value() || findTupletNoteAt (e.position).has_value())
         {
             setHoverNote ({});
-            setHoverMarkPoint ({});
-            hoverHairpin.reset();
-            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
             return;
         }
 
-        setMouseCursor (juce::MouseCursor::NormalCursor);
+        setMouseCursor (findMovableChordNoteAt (e.position).has_value() ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
     }
 
     if (! marking.has_value() && placingRests)
@@ -3628,9 +3591,23 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
     movePlan.clear();
     movedChordNote.reset();
     chordNoteTarget.reset();
+    pressedTupletNote.reset();
 
+    // A right click takes out the note or rest under it, while clicks add notes or rests.
     if (e.mods.isPopupMenu())
+    {
+        if (! marking.has_value() && ! erasing && ! selecting && ! isPlacingNotes())
+        {
+            if (onClicked != nullptr)
+                onClicked();
+
+            deleteAt (e.position);
+            hoverHintHidden = true;
+            repaint();
+        }
+
         return;
+    }
 
     if (onClicked != nullptr)
         onClicked();
@@ -3684,15 +3661,21 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // While editing, a note of its own is moved by dragging it, or clicked for its menu, when
-    // the mouse is let go. A chord's note is moved by dragging it, and a click takes it out, as it
-    // would without editing.
-    if (editing)
+    // Adding notes, a note of its own is moved by dragging it, or tied by dragging it to the
+    // next of its pitch, or selected by clicking it, when the mouse is let go; a tuplet's note
+    // is selected by clicking it. A chord's note is moved by dragging it, and a click takes it out.
+    if (isAddingNotes())
     {
         if (const auto note = findEditableNoteAt (e.position))
         {
             editedNote = note;
             editedChain = getTiedNotes (*note);
+            return;
+        }
+
+        if (const auto tupletNote = findTupletNoteAt (e.position))
+        {
+            pressedTupletNote = tupletNote;
             return;
         }
 
@@ -3764,7 +3747,6 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
     // Nothing changes until the mouse is let go: a click adds or takes out a note, and a drag
     // from a note can tie it to the next one of the same pitch.
     pressedNote = getNoteToClickAt (e.position);
-    tieFrom = getTieableNoteAt (e.position);
 }
 
 void StaffView::mouseDrag (const juce::MouseEvent& e)
@@ -3829,17 +3811,26 @@ void StaffView::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
-    // A note being moved shows where it would go.
+    // A note being moved shows where it would go, or over the note before or after it of the
+    // same pitch, the tie that would join them.
     if (editedNote.has_value())
     {
         if (e.mouseWasDraggedSinceMouseDown())
         {
-            if (auto plan = planMove (*editedNote, e.position); plan != movePlan)
+            if (getTieTarget (*editedNote, e.position).has_value())
             {
-                movePlan = std::move (plan);
-                hoverHintHidden = true;
-                repaint();
+                tieFrom = editedNote;
+                dragPoint = e.position;
+                movePlan.clear();
             }
+            else
+            {
+                tieFrom.reset();
+                movePlan = planMove (*editedNote, e.position);
+            }
+
+            hoverHintHidden = true;
+            repaint();
         }
 
         return;
@@ -3944,28 +3935,46 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
         return;
     }
 
-    // A note dragged while editing moves to where it's let go, and one clicked shows its menu.
+    // A note dragged moves to where it's let go, or let go over the note before or after it of
+    // the same pitch, ties them, or unties them. One clicked is selected, or if it is already,
+    // isn't any more.
     if (const auto edited = std::exchange (editedNote, std::nullopt))
     {
         const auto chain = std::exchange (editedChain, {});
         movePlan.clear();
+        tieFrom.reset();
         repaint();
 
         if (e.mods.isPopupMenu())
             return;
 
         if (! e.mouseWasDraggedSinceMouseDown())
-            showNoteMenu (*edited);
+        {
+            if (onNoteSelected != nullptr)
+                onNoteSelected (selectedNote == edited ? std::nullopt : edited);
+        }
+        else if (const auto to = getTieTarget (*edited, e.position))
+        {
+            score.toggleTie (part, edited->staff, edited->measure, edited->beat, to->measure, to->beat, edited->pitch);
+        }
         else
+        {
             moveNotes (chain, planMove (*edited, e.position));
+        }
 
-        setEditHover (findEditableNoteAt (e.position));
+        return;
+    }
+
+    if (const auto tupletNote = std::exchange (pressedTupletNote, std::nullopt))
+    {
+        if (! e.mods.isPopupMenu() && ! e.mouseWasDraggedSinceMouseDown() && onNoteSelected != nullptr)
+            onNoteSelected (selectedNote == tupletNote ? std::nullopt : tupletNote);
+
         return;
     }
 
     const auto pressed = pressedNote;
     const auto restSpot = std::exchange (pressedRest, std::nullopt);
-    const auto from = tieFrom;
     const auto pressedPoint = pressedDynamic;
     const auto pedalPoint = pressedPedal;
     const auto repeatMeasure = pressedRepeat;
@@ -4062,15 +4071,17 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
             return;
         }
 
+        // Adding a note lets go of the one selected; selecting one keeps it.
+        const auto selectedBefore = selectedNote;
+        const auto hadNote = score.hasNoteAt (part, pressed->staff, pressed->measure, pressed->beat, pressed->pitch.step)
+                          || score.getTuplet (part, pressed->staff, pressed->measure, pressed->beat).has_value();
         clickNote (*pressed);
+
+        if (! hadNote && selectedBefore.has_value() && onNoteSelected != nullptr)
+            onNoteSelected ({});
+
         return;
     }
-
-    // Let go over the next note of the same pitch, the drag ties them, or unties them. Anywhere
-    // else, nothing happens.
-    if (const auto to = getTieableNoteAt (e.position); from.has_value() && to.has_value() && to->staff == from->staff
-                                                       && to->pitch == from->pitch && (to->measure != from->measure || ! juce::exactlyEqual (to->beat, from->beat)))
-        score.toggleTie (part, from->staff, from->measure, from->beat, to->measure, to->beat, from->pitch);
 }
 
 bool StaffView::hasRandomChord (int measure) const
@@ -4333,42 +4344,27 @@ void StaffView::clickNote (const Note& note)
                 score.toggleAlternateNote (part, note.measure, changed);
         }
     }
-    // Clicking one of a tuplet's notes takes the tuplet out, or with another sharp or flat,
-    // changes that note to it.
+    // Clicking one of a tuplet's notes selects it.
     else if (const auto tuplet = score.getTuplet (part, note.staff, note.measure, note.beat))
     {
         for (int i = 0; i < tuplet->getNumNotes(); ++i)
-        {
-            if (std::abs (tuplet->getNoteOnset (i) - note.beat) > 1.0e-9 || tuplet->pitches[(size_t) i].step != note.pitch.step)
-                continue;
+            if (std::abs (tuplet->getNoteOnset (i) - note.beat) < 1.0e-9 && tuplet->pitches[(size_t) i].step == note.pitch.step && onNoteSelected != nullptr)
+                onNoteSelected (Note { note.staff, note.measure, note.beat, tuplet->pitches[(size_t) i], part, tuplet->noteLength, tuplet->staccato });
 
-            if (tuplet->pitches[(size_t) i].alter == note.pitch.alter)
-            {
-                score.removeTuplet (part, note.staff, note.measure, note.beat);
-            }
-            else
-            {
-                auto changed = *tuplet;
-                changed.pitches[(size_t) i] = note.pitch;
-                score.addTuplet (changed);
-            }
-        }
+        hoverHintHidden = true;
+        return;
     }
-    // Clicking a note takes it out, or with another sharp or flat, changes it to that one, keeping
-    // its length; clicking anywhere else adds one.
+    // Clicking a note selects it; clicking anywhere else adds one.
     else if (score.hasNoteAt (part, note.staff, note.measure, note.beat, note.pitch.step))
     {
-        const auto& written = score.getNotes (part, note.staff, note.measure, note.beat);
-        const auto sameStep = std::find_if (written.begin(), written.end(), [&] (const music::Pitch& p) { return p.step == note.pitch.step; });
-        const auto changed = sameStep != written.end() && sameStep->alter != note.pitch.alter;
-        auto replacement = note;
-        replacement.length = score.getNoteLength (part, note.staff, note.measure, note.beat);
-        replacement.staccato = score.isStaccato (part, note.staff, note.measure, note.beat);
+        for (const auto& pitch : score.getNotes (part, note.staff, note.measure, note.beat))
+            if (pitch.step == note.pitch.step && onNoteSelected != nullptr)
+                onNoteSelected (Note { note.staff, note.measure, note.beat, pitch, part,
+                                       score.getNoteLength (part, note.staff, note.measure, note.beat),
+                                       score.isStaccato (part, note.staff, note.measure, note.beat) });
 
-        score.removeNotesAt (part, note.staff, note.measure, note.beat, note.pitch.step);
-
-        if (changed)
-            score.addNote (replacement);
+        hoverHintHidden = true;
+        return;
     }
     else if (score.addNote (note))
         notifyPlaced (note.staff, note.measure, note.beat);
