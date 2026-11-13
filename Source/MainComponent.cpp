@@ -643,7 +643,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     addAndMakeVisible (viewButton);
 
     // A tab for each page, choosing which is edited, with a + for adding another
-    pageTabs.onPageChosen = [this] (int page) { piece.choosePage (page); };
+    pageTabs.onPageChosen = [this] (int page) { clearItemSelection(); piece.choosePage (page); };
     pageTabs.onAddPage = [this] { piece.addPage(); };
     pageTabs.onCopyPage = [this] (int page) { copyPage (page); };
     pageTabs.onDeletePage = [this] (int page) { deletePage (page); };
@@ -937,6 +937,29 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         return true;
     }
 
+    // Esc stops pasting.
+    if (pasting && key == juce::KeyPress::escapeKey)
+    {
+        stopPasting();
+        return true;
+    }
+
+    // Delete or Backspace takes out the notes selected together, and Esc lets go of them.
+    if (itemSelection.has_value() && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr)
+    {
+        if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
+        {
+            deleteSelectedItems();
+            return true;
+        }
+
+        if (key == juce::KeyPress::escapeKey)
+        {
+            clearItemSelection();
+            return true;
+        }
+    }
+
     // Delete or Backspace takes out the note selected, and Esc lets go of it.
     if (selectedNote.has_value() && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr)
     {
@@ -1002,8 +1025,9 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 
 void MainComponent::scoreChanged()
 {
-    // The note selected may have gone.
+    // The note selected may have gone, as may the notes selected together.
     checkSelectedNote();
+    checkItemSelection();
 
     // Parts may have been added or taken out, or a whole new score loaded.
     updateTracks();
@@ -1375,7 +1399,14 @@ void MainComponent::configureView (StaffView& view)
     view.setChordControlsShown (chordControlsShown);
 
     // Clicking the part's staff, or its chord buttons, makes it the active part.
-    view.onClicked = [this, &view] { setActivePart (view.getPart()); };
+    view.onClicked = [this, &view]
+    {
+        setActivePart (view.getPart());
+
+        // Notes selected together are let go of by clicking another part's staves.
+        if (itemSelection.has_value() && itemSelection->part != view.getPart() && ! pasting)
+            clearItemSelection();
+    };
     view.onChordButtonClicked = [this, &view] (int measure) { editChord (view.getPart(), measure); };
 
     // An eraser stroke is undone in one go, however much it takes out.
@@ -1412,6 +1443,19 @@ void MainComponent::configureView (StaffView& view)
 
     view.setSelectedNote (selectedNote);
     view.onNoteSelected = [this] (std::optional<Note> note) { selectNote (note); };
+
+    // Notes selected together can be repeated, or copied or cut, and pasted with a click.
+    view.setItemSelection (itemSelection.has_value() && itemSelection->part == view.getPart() ? itemSelection->items : std::vector<WrittenItem>());
+    view.onItemsSelected = [this, &view] (std::vector<WrittenItem> items) { selectItems (view.getPart(), std::move (items)); };
+    view.onSelectionAction = [this] (StaffView::SelectionAction action)
+    {
+        if (action == StaffView::SelectionAction::repeat)
+            repeatSelection();
+        else
+            copySelection (action == StaffView::SelectionAction::cut);
+    };
+    view.setPasting (pasting ? clipboard : std::nullopt);
+    view.onPasteClicked = [this, &view] (int measure, double beat) { pasteAt (view.getPart(), measure, beat); };
 
     // Selecting measures in any part selects them in all of them, and moves them in all of them.
     view.onMeasuresSelected = [this] (std::optional<std::pair<int, int>> measures, bool finished) { selectMeasures (measures, finished); };
@@ -2204,6 +2248,11 @@ void MainComponent::setErasing (bool shouldErase)
 
 void MainComponent::selectNote (std::optional<Note> note)
 {
+    // Selecting a note on its own, or none, as when choosing something else to do, lets go of
+    // the notes selected together, and of pasting.
+    clearItemSelection();
+    stopPasting();
+
     if (note == selectedNote)
         return;
 
@@ -2219,6 +2268,129 @@ void MainComponent::selectNote (std::optional<Note> note)
         instrumentHost.takeRecordedKeys();
 
     updateKeyCapture();
+}
+
+void MainComponent::selectItems (int part, std::vector<WrittenItem> items)
+{
+    if (items.empty())
+    {
+        clearItemSelection();
+        return;
+    }
+
+    selectNote ({});
+    stopPasting();
+    itemSelection = ItemSelection { part, std::move (items) };
+
+    for (auto* view : getViews())
+        view->setItemSelection (view->getPart() == part ? itemSelection->items : std::vector<WrittenItem>());
+}
+
+void MainComponent::clearItemSelection()
+{
+    if (! itemSelection.has_value())
+        return;
+
+    itemSelection.reset();
+
+    for (auto* view : getViews())
+        view->setItemSelection ({});
+}
+
+void MainComponent::checkItemSelection()
+{
+    if (! itemSelection.has_value())
+        return;
+
+    auto items = itemSelection->items;
+    std::erase_if (items, [this] (const WrittenItem& item) { return ! score.hasItem (itemSelection->part, item); });
+
+    if (items != itemSelection->items)
+        selectItems (itemSelection->part, std::move (items));
+}
+
+void MainComponent::repeatSelection()
+{
+    checkItemSelection();
+
+    if (! itemSelection.has_value())
+        return;
+
+    const auto part = itemSelection->part;
+    const auto passage = score.getPassage (part, itemSelection->items);
+
+    if (passage.isEmpty())
+        return;
+
+    // Straight after the last of it ends
+    const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+    const auto at = passage.origin + passage.length;
+    selectItems (part, score.writePassage (part, passage, at / slotsPerMeasure, (double) (at % slotsPerMeasure) / Score::slotsPerBeat));
+}
+
+void MainComponent::copySelection (bool cut)
+{
+    checkItemSelection();
+
+    if (! itemSelection.has_value())
+        return;
+
+    auto passage = score.getPassage (itemSelection->part, itemSelection->items);
+
+    if (passage.isEmpty())
+        return;
+
+    clipboard = std::move (passage);
+    const auto selection = *itemSelection;
+    clearItemSelection();
+
+    if (cut)
+        score.removeItems (selection.part, selection.items);
+
+    startPasting();
+}
+
+void MainComponent::startPasting()
+{
+    if (! clipboard.has_value())
+        return;
+
+    selectNote ({});
+    pasting = true;
+
+    for (auto* view : getViews())
+        view->setPasting (clipboard);
+}
+
+void MainComponent::stopPasting()
+{
+    if (! pasting)
+        return;
+
+    pasting = false;
+
+    for (auto* view : getViews())
+        view->setPasting ({});
+}
+
+void MainComponent::pasteAt (int part, int measure, double beat)
+{
+    if (! pasting || ! clipboard.has_value())
+        return;
+
+    const auto passage = *clipboard;
+    stopPasting();
+    selectItems (part, score.writePassage (part, passage, measure, beat));
+}
+
+void MainComponent::deleteSelectedItems()
+{
+    if (! itemSelection.has_value())
+        return;
+
+    const auto selection = *itemSelection;
+    clearItemSelection();
+    score.removeItems (selection.part, selection.items);
 }
 
 void MainComponent::updateKeyCapture()
@@ -3923,6 +4095,11 @@ juce::PopupMenu MainComponent::getMenuForIndex (int menuIndex, const juce::Strin
     {
         menu.addCommandItem (&commandManager, undoChange);
         menu.addCommandItem (&commandManager, redoChange);
+        menu.addSeparator();
+        menu.addCommandItem (&commandManager, cutNotes);
+        menu.addCommandItem (&commandManager, copyNotes);
+        menu.addCommandItem (&commandManager, pasteNotes);
+        menu.addCommandItem (&commandManager, repeatNotes);
         return menu;
     }
 
@@ -4031,7 +4208,8 @@ juce::ApplicationCommandTarget* MainComponent::getNextCommandTarget()
 
 void MainComponent::getAllCommands (juce::Array<juce::CommandID>& commands)
 {
-    commands.addArray ({ newScore, openScore, saveScore, saveScoreAs, undoChange, redoChange, showInstrumentsView, showScoreView, toggleChordControls });
+    commands.addArray ({ newScore, openScore, saveScore, saveScoreAs, undoChange, redoChange, showInstrumentsView, showScoreView, toggleChordControls,
+                         cutNotes, copyNotes, pasteNotes, repeatNotes });
 }
 
 void MainComponent::getCommandInfo (juce::CommandID command, juce::ApplicationCommandInfo& info)
@@ -4054,6 +4232,18 @@ void MainComponent::getCommandInfo (juce::CommandID command, juce::ApplicationCo
         case redoChange:   info.setInfo ("Redo", "Makes the last change undone again", "Edit", 0);
                            info.setActive (history.canRedo());
                            info.addDefaultKeypress ('z', cmd | juce::ModifierKeys::shiftModifier); break;
+        case cutNotes:     info.setInfo ("Cut", "Cuts the notes selected, to paste with a click", "Edit", 0);
+                           info.setActive (itemSelection.has_value());
+                           info.addDefaultKeypress ('x', cmd); break;
+        case copyNotes:    info.setInfo ("Copy", "Copies the notes selected, to paste with a click", "Edit", 0);
+                           info.setActive (itemSelection.has_value());
+                           info.addDefaultKeypress ('c', cmd); break;
+        case pasteNotes:   info.setInfo ("Paste", "Pastes the notes copied or cut last where the staves are clicked next", "Edit", 0);
+                           info.setActive (clipboard.has_value());
+                           info.addDefaultKeypress ('v', cmd); break;
+        case repeatNotes:  info.setInfo ("Repeat", "Writes the notes selected again straight after them", "Edit", 0);
+                           info.setActive (itemSelection.has_value());
+                           info.addDefaultKeypress ('r', cmd); break;
         case showInstrumentsView:
                            info.setInfo ("Instruments", "Shows every instrument's staves, one under another", "View", 0);
                            info.setTicked (! showingScorePage);
@@ -4105,6 +4295,19 @@ bool MainComponent::perform (const InvocationInfo& invocation)
         case redoChange:
             selectMeasures ({}, true);
             history.redo();
+            return true;
+
+        case cutNotes:
+        case copyNotes:
+            copySelection (invocation.commandID == cutNotes);
+            return true;
+
+        case pasteNotes:
+            startPasting();
+            return true;
+
+        case repeatNotes:
+            repeatSelection();
             return true;
 
         case showInstrumentsView:

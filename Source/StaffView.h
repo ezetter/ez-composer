@@ -112,6 +112,38 @@ public:
     */
     std::function<void (std::optional<Note>)> onNoteSelected;
 
+    /** Shows notes, rests written in and tuplets of this view's part as selected, in blue, with
+        buttons over them to repeat, copy or cut them, or none. Holding Cmd and dragging across
+        the staves selects what's in the box it draws, calling onItemsSelected; Cmd-clicking a
+        note, rest or tuplet adds it or takes it out. A click anywhere else selects none, and
+        does nothing more.
+    */
+    void setItemSelection (std::vector<WrittenItem>);
+    const std::vector<WrittenItem>& getItemSelection() const noexcept { return itemSelection; }
+    std::function<void (std::vector<WrittenItem>)> onItemsSelected;
+
+    /** What the buttons over the notes selected do. */
+    enum class SelectionAction { repeat, copy, cut };
+    std::function<void (SelectionAction)> onSelectionAction;
+
+    /** The notes, rests written in and tuplets with a notehead or rest in an area: a chord's
+        notes are left out. Selecting them as well as these would add them, unless they're
+        there already; with toggle, those would be taken out.
+    */
+    std::vector<WrittenItem> getItemsIn (juce::Rectangle<float>) const;
+
+    /** Turns pasting on, with what's to be pasted, or off. While it's on, the passage shows
+        faintly where a click would paste it, its first note at the nearest step of the note
+        length chosen, or where a note starts, and a click calls onPasteClicked with that
+        point. Each note stays on its own staff and pitch.
+    */
+    void setPasting (std::optional<Passage>);
+    bool isPasting() const noexcept { return pastePassage.has_value(); }
+    std::function<void (int measure, double beat)> onPasteClicked;
+
+    /** Where a click to paste at a point would paste: the measure and beat. */
+    std::optional<std::pair<int, double>> getPastePointAt (juce::Point<float>) const;
+
     /** Turns selecting measures on or off. While it's on, dragging along the staves selects the
         whole measures it goes over, and a click selects the one clicked, calling
         onMeasuresSelected as it goes, and once more when the mouse is let go; a click past the
@@ -478,6 +510,7 @@ private:
     static std::vector<std::vector<size_t>> groupBeams (const std::vector<const StaffEvent*>& notes);
     void drawNote (juce::Graphics&, Staff, const NoteLayout&, bool rolled, std::optional<int> highlightedPosition,
                    juce::Colour highlightColour, std::optional<int> highlightedAlter = {}) const;
+    void drawNote (juce::Graphics&, Staff, const NoteLayout&, bool rolled, const std::vector<bool>& highlightedHeads, juce::Colour highlightColour) const;
     void drawStem (juce::Graphics&, Staff, const NoteLayout&) const;
     void drawBeams (juce::Graphics&, Staff, std::vector<NoteLayout*>&) const;
     void drawLedgerLines (juce::Graphics&, Staff, const std::vector<int>& staffPositions,
@@ -772,6 +805,19 @@ private:
 
     void setHoverNote (std::optional<Note>);
 
+    /** Each note, rest written in and tuplet in the measures shown, with where its notehead's
+        middle is, or the rest's; a tuplet with each of its noteheads'.
+    */
+    std::vector<std::pair<WrittenItem, juce::Point<float>>> getItemPoints() const;
+
+    /** Puts the buttons for what's selected over it, if its first is shown here, or hides them. */
+    void updateSelectionActions();
+
+    /** Whether something's selected, or would be by the box being dragged. */
+    bool isItemSelected (const WrittenItem&) const;
+
+    void drawPasteHint (juce::Graphics&) const;
+
     Score& score;
     const int partId;
     int part;
@@ -814,6 +860,14 @@ private:
     std::optional<Note> pressedTupletNote;          // the tuplet's note the mouse went down on
     std::optional<std::pair<Note, music::Pitch>> pressedNeighbour;  // a semitone from a note, where the mouse went down
     juce::Point<float> lastErasePoint;
+    std::vector<WrittenItem> itemSelection;          // shown in blue, with the buttons over them
+    std::optional<juce::Rectangle<float>> selectionBox;     // being dragged out with Cmd held
+    std::vector<WrittenItem> boxItems;               // what's in it
+    juce::Point<float> boxStart;
+    bool pressedToDeselect = false;                  // the mouse went down to let go of what's selected
+    juce::TextButton repeatButton { "Repeat" }, copyButton { "Copy" }, cutButton { "Cut" };
+    std::optional<Passage> pastePassage;             // pasted by a click
+    std::optional<std::pair<int, double>> pasteHover, pressedPaste;
     Erasable hoverErasable;
     juce::String title;
     std::optional<Note> hoverNote;

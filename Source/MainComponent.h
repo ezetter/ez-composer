@@ -215,7 +215,11 @@ private:
         redoChange,
         showInstrumentsView,
         showScoreView,
-        toggleChordControls
+        toggleChordControls,
+        cutNotes,
+        copyNotes,
+        pasteNotes,
+        repeatNotes
     };
 
     juce::StringArray getMenuBarNames() override;
@@ -341,6 +345,37 @@ private:
 
     /** Lets go of the note selected if it's not in the score any more, as written. */
     void checkSelectedNote();
+
+    /** Selects notes, rests written in and tuplets of a part together, held Cmd and dragged
+        around, or Cmd-clicked, on the staves. They show in blue, with buttons over them to
+        repeat, copy or cut them. Selecting them lets go of the note selected on its own, and
+        selecting that, or none, lets go of them.
+    */
+    void selectItems (int part, std::vector<WrittenItem>);
+    void clearItemSelection();
+
+    /** Lets go of what's selected together that's not in the score any more. */
+    void checkItemSelection();
+
+    /** Writes what's selected together again straight after the last of it ends, and selects that. */
+    void repeatSelection();
+
+    /** Copies what's selected together, or cuts it, taking it out, and then waits for a click
+        on the staves, where it's pasted.
+    */
+    void copySelection (bool cut);
+
+    /** Waits for a click on the staves to paste what was copied or cut last, if anything was;
+        or stops waiting.
+    */
+    void startPasting();
+    void stopPasting();
+
+    /** Pastes what was copied or cut into a part, from a point, and selects it. */
+    void pasteAt (int part, int measure, double beat);
+
+    /** Takes out what's selected together. */
+    void deleteSelectedItems();
 
     /** Whether the note selected is one of a tuplet's, and if so, which. */
     std::optional<std::pair<Tuplet, int>> getSelectedTupletNote() const;
@@ -800,6 +835,16 @@ private:
     std::optional<StepChord> stepChord;              // and where its notes are going
     std::optional<StepTuplet> stepTuplet;            // the tuplet whose notes the steps are writing
     std::optional<Note> selectedNote;                // clicked on the staves, for the keys and buttons to change
+
+    struct ItemSelection
+    {
+        int part = 0;
+        std::vector<WrittenItem> items;
+    };
+
+    std::optional<ItemSelection> itemSelection;      // selected together, to repeat, copy or cut
+    std::optional<Passage> clipboard;                // copied or cut last
+    bool pasting = false;                            // a click on the staves pastes it
     std::vector<Note> lastStepNotes, stepNotes;      // the notes the step before wrote, for tying to, and this one's
     juce::TimedCallback stepKeysTimer { [this] { takeStepKeys(); } };
 

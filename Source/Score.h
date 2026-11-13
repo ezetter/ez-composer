@@ -83,6 +83,63 @@ struct Tuplet
     }
 };
 
+/** Something written on one staff of a part that can be selected: a note, a rest written in, or
+    a tuplet, all its notes together, by where it starts.
+*/
+struct WrittenItem
+{
+    enum class Kind { note, rest, tuplet };
+
+    Kind kind = Kind::note;
+    Staff staff = Staff::treble;
+    int measure = 0;
+    double beat = 0.0;          // from the start of the measure, on a 64th note
+    music::Pitch pitch {};      // a note's
+
+    bool operator== (const WrittenItem& other) const
+    {
+        return kind == other.kind && staff == other.staff && measure == other.measure && juce::exactlyEqual (beat, other.beat)
+            && (kind != Kind::note || pitch == other.pitch);
+    }
+};
+
+/** Notes, rests and tuplets taken from a part's staves, to be written again somewhere else, by
+    when they start, in 64ths from when the first starts.
+*/
+struct Passage
+{
+    struct NoteItem
+    {
+        Staff staff;
+        int start, length;
+        music::Pitch pitch;
+        bool staccato = false;
+        bool tiedToNext = false;    // to the next of the passage's notes of its pitch
+    };
+
+    struct RestItem
+    {
+        Staff staff;
+        int start, length;
+    };
+
+    struct TupletItem
+    {
+        Staff staff;
+        int start, noteLength;
+        std::vector<music::Pitch> pitches;
+        bool staccato = false;
+    };
+
+    std::vector<NoteItem> notes;
+    std::vector<RestItem> rests;
+    std::vector<TupletItem> tuplets;
+    int origin = 0;     // where it was taken from, in 64ths from the start of the score
+    int length = 0;     // in 64ths, from when the first starts to when the last ends
+
+    bool isEmpty() const noexcept { return notes.empty() && rests.empty() && tuplets.empty(); }
+};
+
 /** A crescendo or decrescendo in one of a score's parts, starting on a beat or halfway through one. */
 struct HairpinMark
 {
@@ -561,6 +618,26 @@ public:
     bool removeNote (int part, Staff, int measure, double beat, music::Pitch);
 
     //==============================================================================
+    /** Whether something selectable is written in a part, as it was selected. */
+    bool hasItem (int part, const WrittenItem&) const;
+
+    /** What's written of a part's selected notes, rests and tuplets, to write again elsewhere:
+        each as long as it's shown, and notes tied to others of them still tied.
+    */
+    Passage getPassage (int part, const std::vector<WrittenItem>&) const;
+
+    /** Takes out a part's selected notes, rests and tuplets. */
+    void removeItems (int part, const std::vector<WrittenItem>&);
+
+    /** Writes a passage into a part, starting at a point, in place of whatever's on each of the
+        staves it has anything on for as long as it lasts. A note going over a barline goes on
+        into the next measure, tied; a tuplet that would has to be left out. Measures are added
+        at the end, in every part, for any of it that goes past it, and measures where a chord
+        has the staff are left alone. Returns what it wrote, to select.
+    */
+    std::vector<WrittenItem> writePassage (int part, const Passage&, int measure, double beat);
+
+    //==============================================================================
     /** The dynamic marked at a point of a part, if there's one there. Each part has its own
         dynamics, written between its staves, on a beat or halfway through one.
     */
@@ -942,6 +1019,12 @@ private:
     static int toSlot (double beat) { return (int) std::lround (beat * slotsPerBeat); }
     static double toBeats (int slots) { return (double) slots / slotsPerBeat; }
     std::optional<std::pair<int, int>> getFollowingSlot (int part, Staff, int measure, int slot) const;
+
+    /** Clears a stretch of a staff, in 64ths from the start of the score, for something to be
+        written there: what starts in it is taken out, and a note, rest or tuplet held over into
+        it ends where it starts, or goes.
+    */
+    void clearStretch (int part, Staff, juce::Range<int>);
 
     std::vector<Part> parts;
     std::vector<RepeatSigns> repeats = std::vector<RepeatSigns> (initialMeasures);     // for each measure

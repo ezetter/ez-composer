@@ -890,6 +890,207 @@ void StaffView::setSelectedNote (std::optional<Note> note)
     repaint();
 }
 
+void StaffView::setItemSelection (std::vector<WrittenItem> items)
+{
+    if (items == itemSelection)
+        return;
+
+    itemSelection = std::move (items);
+    updateSelectionActions();
+    repaint();
+}
+
+bool StaffView::isItemSelected (const WrittenItem& item) const
+{
+    return std::find (itemSelection.begin(), itemSelection.end(), item) != itemSelection.end()
+        || std::find (boxItems.begin(), boxItems.end(), item) != boxItems.end();
+}
+
+std::vector<std::pair<WrittenItem, juce::Point<float>>> StaffView::getItemPoints() const
+{
+    std::vector<std::pair<WrittenItem, juce::Point<float>>> points;
+
+    if (part < 0)
+        return points;
+
+    const auto keyAlterations = music::getKeyAlterations (score.getKey());
+    const auto shown = getShownMeasures();
+
+    for (auto measure = shown.getStart(); measure < juce::jmin (shown.getEnd(), score.getNumMeasures()); ++measure)
+    {
+        for (auto staff : { Staff::treble, Staff::bass })
+        {
+            const auto& content = measureLayouts[(size_t) measure].content.staves[(size_t) staff];
+
+            // A chord's notes are the chord's, not to be selected one by one.
+            if (content.source != StaffContent::Source::notes)
+                continue;
+
+            for (const auto& event : content.events)
+            {
+                if (event.isRest())
+                {
+                    if (event.writtenRest)
+                        points.push_back ({ { WrittenItem::Kind::rest, staff, measure, event.onset }, { getEventX (measure, event), getY (staff, middleLine) } });
+
+                    continue;
+                }
+
+                std::map<int, int> alterations;
+                const NoteLayout layout (event, staff, getEventX (measure, event), alterations, keyAlterations);
+
+                for (size_t i = 0; i < layout.positions.size(); ++i)
+                {
+                    const juce::Point<float> head { layout.headLefts[i] + layout.headWidth / 2.0f, getY (staff, layout.positions[i]) };
+
+                    if (event.tupletStart.has_value())
+                        points.push_back ({ { WrittenItem::Kind::tuplet, staff, measure, *event.tupletStart }, head });
+                    else
+                        points.push_back ({ { WrittenItem::Kind::note, staff, measure, event.onset,
+                                              { layout.positions[i] + getBottomLineStep (staff), layout.alters[i] } }, head });
+                }
+            }
+        }
+    }
+
+    return points;
+}
+
+std::vector<WrittenItem> StaffView::getItemsIn (juce::Rectangle<float> area) const
+{
+    std::vector<WrittenItem> items;
+
+    for (const auto& [item, point] : getItemPoints())
+        if (area.contains (point) && std::find (items.begin(), items.end(), item) == items.end())
+            items.push_back (item);
+
+    return items;
+}
+
+void StaffView::updateSelectionActions()
+{
+    // Only one line shows them: the one with the first of what's selected.
+    std::optional<juce::Rectangle<float>> bounds;
+    std::optional<std::pair<int, double>> first;
+
+    for (const auto& item : itemSelection)
+        if (! first.has_value() || std::pair { item.measure, item.beat } < *first)
+            first = std::pair { item.measure, item.beat };
+
+    if (first.has_value() && getShownMeasures().contains (first->first))
+        for (const auto& [item, point] : getItemPoints())
+            if (std::find (itemSelection.begin(), itemSelection.end(), item) != itemSelection.end())
+                bounds = bounds.has_value() ? bounds->getUnion ({ point, point }) : juce::Rectangle<float> { point, point };
+
+    for (auto* button : { &repeatButton, &copyButton, &cutButton })
+    {
+        if (button->getParentComponent() == nullptr)
+        {
+            button->setWantsKeyboardFocus (false);
+            button->setColour (juce::TextButton::buttonColourId, paperColour);
+            button->setColour (juce::TextButton::textColourOffId, editColour);
+            addChildComponent (button);
+        }
+
+        button->setVisible (bounds.has_value());
+    }
+
+    repeatButton.setTooltip ("Repeat the notes selected straight after them");
+    copyButton.setTooltip ("Copy the notes selected, then click where to paste them");
+    cutButton.setTooltip ("Cut the notes selected, then click where to paste them");
+    repeatButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::repeat); };
+    copyButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::copy); };
+    cutButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::cut); };
+
+    if (! bounds.has_value())
+        return;
+
+    // Side by side, over the highest of them, or under the lowest if there isn't room.
+    constexpr int buttonWidth = 64, buttonHeight = 24, gap = 4;
+    const auto width = 3 * buttonWidth + 2 * gap;
+    auto x = juce::jlimit (0, juce::jmax (0, getWidth() - width), juce::roundToInt (bounds->getCentreX()) - width / 2);
+    auto y = juce::roundToInt (bounds->getY() - 1.5f * staffSpace) - buttonHeight;
+
+    if (y < 0)
+        y = juce::roundToInt (bounds->getBottom() + 1.5f * staffSpace);
+
+    y = juce::jlimit (0, juce::jmax (0, getHeight() - buttonHeight), y);
+
+    for (auto* button : { &repeatButton, &copyButton, &cutButton })
+    {
+        button->setBounds (x, y, buttonWidth, buttonHeight);
+        button->toFront (false);
+        x += buttonWidth + gap;
+    }
+}
+
+void StaffView::setPasting (std::optional<Passage> passage)
+{
+    pastePassage = std::move (passage);
+    pasteHover.reset();
+    pressedPaste.reset();
+    setMouseCursor (pastePassage.has_value() ? juce::MouseCursor::CopyingCursor : juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+std::optional<std::pair<int, double>> StaffView::getPastePointAt (juce::Point<float> point) const
+{
+    if (const auto spot = getNoteAt (point, noteLength, false))
+        return std::pair { spot->measure, spot->beat };
+
+    return {};
+}
+
+void StaffView::drawPasteHint (juce::Graphics& g) const
+{
+    if (! pastePassage.has_value() || ! pasteHover.has_value())
+        return;
+
+    const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+    const auto start = pasteHover->first * slotsPerMeasure + (int) std::lround (pasteHover->second * Score::slotsPerBeat);
+    const auto shown = getShownMeasures();
+    const auto locate = [&] (int at) -> std::optional<std::pair<int, double>>
+    {
+        if (const auto measure = at / slotsPerMeasure; shown.contains (measure) && measure < score.getNumMeasures())
+            return std::pair { measure, (double) (at % slotsPerMeasure) / Score::slotsPerBeat };
+
+        return {};
+    };
+
+    // A line where it starts, and its notes and rests faintly where they'd go
+    if (const auto at = locate (start))
+    {
+        const auto x = getOnsetX (at->first, at->second);
+        const auto top = getStaffTop (Staff::treble) - 2.0f * staffSpace, bottom = getStaffTop (Staff::bass) + (staffHeight + 2.0f) * staffSpace;
+        g.setColour (hoverColour);
+        g.fillRect (juce::Rectangle<float> (x - 0.75f, top, 1.5f, bottom - top));
+    }
+
+    for (const auto& note : pastePassage->notes)
+        if (const auto at = locate (start + note.start))
+            drawGhostNote (g, { note.staff, at->first, at->second, note.pitch, part, (double) note.length / Score::slotsPerBeat, note.staccato });
+
+    for (const auto& tuplet : pastePassage->tuplets)
+        for (int i = 0; i < (int) tuplet.pitches.size(); ++i)
+        {
+            const auto length = Tuplet::getNormalCount ((int) tuplet.pitches.size()) * tuplet.noteLength;
+
+            if (const auto at = locate (start + tuplet.start + i * length / (int) tuplet.pitches.size()))
+                drawGhostNote (g, { tuplet.staff, at->first, at->second, tuplet.pitches[(size_t) i], part,
+                                    (double) tuplet.noteLength / Score::slotsPerBeat, tuplet.staccato });
+        }
+
+    for (const auto& rest : pastePassage->rests)
+        if (const auto at = locate (start + rest.start))
+        {
+            g.setColour (hoverColour);
+            drawRest (g, rest.staff, getOnsetX (at->first, at->second),
+                      getDurationForBeats ((double) Score::fitNoteLength (rest.length, slotsPerMeasure - (start + rest.start) % slotsPerMeasure) / Score::slotsPerBeat));
+        }
+
+    g.setColour (inkColour);
+}
+
 std::optional<Note> StaffView::findTupletNoteAt (juce::Point<float> point) const
 {
     const auto spot = getNoteAt (point);
@@ -2039,6 +2240,16 @@ void StaffView::paint (juce::Graphics& g)
     drawHoverDynamic (g);
     drawScaleHint (g);
     drawRhythmHint (g);
+    drawPasteHint (g);
+
+    // The box being dragged out to select notes
+    if (selectionBox.has_value())
+    {
+        g.setColour (editColour.withAlpha (0.08f));
+        g.fillRect (*selectionBox);
+        g.setColour (editColour.withAlpha (0.7f));
+        g.drawRect (*selectionBox, 1.0f);
+    }
 
     drawEndings (g);
 
@@ -2347,6 +2558,9 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
 
             if (event.writtenRest && (underEraser || clickRemoves))
                 g.setColour (removalColour);
+            else if (event.writtenRest && content.source == StaffContent::Source::notes
+                     && isItemSelected ({ WrittenItem::Kind::rest, staff, measure, event.onset }))
+                g.setColour (editColour);
 
             drawRest (g, staff, getEventX (measure, event), event.duration);
             g.setColour (inkColour);
@@ -2538,8 +2752,34 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
             return {};
         };
 
+        // So are the notes, rests and tuplets selected together, or in the box being dragged.
+        const auto selectedHeads = [&] (size_t i)
+        {
+            std::vector<bool> heads (notes[i].positions.size());
+
+            if (content.source != StaffContent::Source::notes)
+                return heads;
+
+            const auto wholeTuplet = noteEvents[i]->tupletStart.has_value()
+                                  && isItemSelected ({ WrittenItem::Kind::tuplet, staff, measure, *noteEvents[i]->tupletStart });
+
+            for (size_t head = 0; head < heads.size(); ++head)
+                heads[head] = wholeTuplet
+                           || (! noteEvents[i]->tupletStart.has_value()
+                               && isItemSelected ({ WrittenItem::Kind::note, staff, measure, notes[i].onset,
+                                                    { notes[i].positions[head] + getBottomLineStep (staff), notes[i].alters[head] } }));
+
+            return heads;
+        };
+
         for (size_t i = 0; i < notes.size(); ++i)
         {
+            if (const auto heads = selectedHeads (i); std::find (heads.begin(), heads.end(), true) != heads.end())
+            {
+                drawNote (g, staff, notes[i], rolled[i], heads, editColour);
+                continue;
+            }
+
             if (const auto selected = selectedPosition (i))
             {
                 drawNote (g, staff, notes[i], rolled[i], selected, editColour, selectedNote->pitch.alter);
@@ -2646,11 +2886,22 @@ void StaffView::drawTupletMark (juce::Graphics& g, Staff staff, const std::vecto
 void StaffView::drawNote (juce::Graphics& g, Staff staff, const NoteLayout& note, bool rolled,
                           std::optional<int> highlightedPosition, juce::Colour highlightColour, std::optional<int> highlightedAlter) const
 {
+    std::vector<bool> heads (note.positions.size());
+
+    for (size_t i = 0; i < note.positions.size(); ++i)
+        heads[i] = note.positions[i] == highlightedPosition && (! highlightedAlter.has_value() || note.alters[i] == *highlightedAlter);
+
+    drawNote (g, staff, note, rolled, heads, highlightColour);
+}
+
+void StaffView::drawNote (juce::Graphics& g, Staff staff, const NoteLayout& note, bool rolled,
+                          const std::vector<bool>& highlightedHeads, juce::Colour highlightColour) const
+{
     drawLedgerLines (g, staff, note.positions, note.headLefts, note.headWidth);
 
     for (size_t i = 0; i < note.positions.size(); ++i)
     {
-        const auto highlighted = note.positions[i] == highlightedPosition && (! highlightedAlter.has_value() || note.alters[i] == *highlightedAlter);
+        const auto highlighted = i < highlightedHeads.size() && highlightedHeads[i];
 
         if (highlighted)
             g.setColour (highlightColour);
@@ -2706,7 +2957,7 @@ void StaffView::drawNote (juce::Graphics& g, Staff staff, const NoteLayout& note
     // with it; with others, it stays for them.
     if (note.staccato)
     {
-        const auto highlighted = note.positions.size() == 1 && note.positions.front() == highlightedPosition;
+        const auto highlighted = note.positions.size() == 1 && ! highlightedHeads.empty() && highlightedHeads.front();
 
         if (highlighted)
             g.setColour (highlightColour);
@@ -3541,6 +3792,27 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
     if (part < 0)
         return;
 
+    // Pasting, what's pasted shows where a click would put it.
+    if (pastePassage.has_value())
+    {
+        if (const auto point = getPastePointAt (e.position); point != pasteHover)
+        {
+            pasteHover = point;
+            repaint();
+        }
+
+        return;
+    }
+
+    // With notes selected, a click off a note lets go of them, so nothing shows what it would add.
+    if (! itemSelection.empty() && ! selecting && ! findEditableNoteAt (e.position).has_value() && ! findTupletNoteAt (e.position).has_value())
+    {
+        setHoverNote ({});
+        setHoverRest ({});
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+        return;
+    }
+
     // Selecting measures, there's nothing to show but that the selection can be dragged, while it can be moved.
     if (selecting)
     {
@@ -3641,6 +3913,12 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
 
 void StaffView::mouseExit (const juce::MouseEvent&)
 {
+    if (pasteHover.has_value())
+    {
+        pasteHover.reset();
+        repaint();
+    }
+
     if (! erasingStroke)
         setHoverErasable ({});
 
@@ -3686,11 +3964,15 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
     movedChordNote.reset();
     chordNoteTarget.reset();
     pressedTupletNote.reset();
+    pressedPaste.reset();
+    pressedToDeselect = false;
+    selectionBox.reset();
+    boxItems.clear();
 
     // A right click takes out the note or rest under it, while clicks add notes or rests.
     if (e.mods.isPopupMenu())
     {
-        if (! marking.has_value() && ! erasing && ! selecting && ! isPlacingNotes())
+        if (! marking.has_value() && ! erasing && ! selecting && ! isPlacingNotes() && ! pastePassage.has_value())
         {
             if (onClicked != nullptr)
                 onClicked();
@@ -3705,6 +3987,30 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
 
     if (onClicked != nullptr)
         onClicked();
+
+    // Pasting, a click pastes, when the mouse is let go.
+    if (pastePassage.has_value())
+    {
+        pressedPaste = getPastePointAt (e.position);
+        return;
+    }
+
+    // With Cmd held, a drag draws a box around notes to select them, and a click selects one
+    // more, or one fewer.
+    if (e.mods.isCommandDown() && ! selecting && ! erasing && ! isPlacingNotes())
+    {
+        boxStart = e.position;
+        selectionBox = juce::Rectangle<float> (e.position, e.position);
+        return;
+    }
+
+    // With notes selected, a click on a note selects it alone, and anywhere else lets go of
+    // them, and does nothing more.
+    if (! itemSelection.empty() && ! selecting && ! findEditableNoteAt (e.position).has_value() && ! findTupletNoteAt (e.position).has_value())
+    {
+        pressedToDeselect = true;
+        return;
+    }
 
     // Selecting measures, a drag from the selection moves it, while it can be moved, and
     // otherwise starts selecting again, from the measure pressed on, if there is one.
@@ -3857,6 +4163,19 @@ void StaffView::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
+    // The box selecting notes stretches to the mouse, and what's in it shows as selected. Near
+    // the edge of what's in view, it scrolls, so it can go further.
+    if (selectionBox.has_value())
+    {
+        if (auto* viewport = findParentComponentOfClass<juce::Viewport>())
+            viewport->autoScroll (viewport->getLocalPoint (this, e.position).roundToInt().x, viewport->getLocalPoint (this, e.position).roundToInt().y, 40, 24);
+
+        selectionBox = juce::Rectangle<float> (boxStart, e.position);
+        boxItems = getItemsIn (*selectionBox);
+        repaint();
+        return;
+    }
+
     // The selected measures being moved show where they'd go, at the barline nearest the mouse,
     // unless they've been pushed on past the end, where they've gone already. Near the edge of
     // what's in view, it scrolls, so they can go further.
@@ -3968,6 +4287,68 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
 
     if (part < 0)
         return;
+
+    // The notes in the box are selected along with any already, or a Cmd-click selects the one
+    // clicked, or lets go of it if it's selected.
+    if (selectionBox.has_value())
+    {
+        auto items = itemSelection;
+
+        if (e.mouseWasDraggedSinceMouseDown())
+        {
+            for (const auto& item : boxItems)
+                if (std::find (items.begin(), items.end(), item) == items.end())
+                    items.push_back (item);
+        }
+        else
+        {
+            std::optional<WrittenItem> nearest;
+            auto nearestDistance = std::numeric_limits<float>::max();
+
+            for (const auto& [item, point] : getItemPoints())
+            {
+                const auto across = std::abs (e.position.x - point.x), upOrDown = std::abs (e.position.y - point.y);
+                const auto reach = item.kind == WrittenItem::Kind::rest ? 2.0f * staffSpace : noteheadReach * staffSpace / 2.0f;
+
+                if (across <= noteheadReachAcross * staffSpace && upOrDown <= reach && across + upOrDown < nearestDistance)
+                {
+                    nearest = item;
+                    nearestDistance = across + upOrDown;
+                }
+            }
+
+            if (nearest.has_value())
+            {
+                if (std::erase (items, *nearest) == 0)
+                    items.push_back (*nearest);
+            }
+        }
+
+        selectionBox.reset();
+        boxItems.clear();
+        repaint();
+
+        if (onItemsSelected != nullptr)
+            onItemsSelected (items);
+
+        return;
+    }
+
+    if (std::exchange (pressedToDeselect, false))
+    {
+        if (! e.mods.isPopupMenu() && onItemsSelected != nullptr)
+            onItemsSelected ({});
+
+        return;
+    }
+
+    if (const auto paste = std::exchange (pressedPaste, std::nullopt))
+    {
+        if (! e.mods.isPopupMenu() && ! e.mouseWasDraggedSinceMouseDown() && onPasteClicked != nullptr)
+            onPasteClicked (paste->first, paste->second);
+
+        return;
+    }
 
     // The selected measures go where they were dragged, if it's somewhere else, unless they've
     // been pushed on past the end, where they are already.
@@ -5036,4 +5417,7 @@ void StaffView::updateChordButtons()
         button->setVisible (chordControlsShown && getShownMeasures().contains (measure));
         button->setBounds (juce::Rectangle<float> (layout.x + (layout.width - width) / 2.0f, top, width, 2.0f * staffSpace).toNearestInt());
     }
+
+    // The buttons for the notes selected follow them.
+    updateSelectionActions();
 }

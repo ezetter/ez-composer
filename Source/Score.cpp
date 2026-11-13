@@ -695,41 +695,8 @@ void Score::placeNotes (int part, const std::array<std::optional<juce::Range<int
 
     // Nothing left in the way on their staves
     for (auto staff : { Staff::treble, Staff::bass })
-    {
-        const auto& span = clearedByStaff[(size_t) staff];
-
-        if (! span.has_value() || span->isEmpty())
-            continue;
-
-        for (auto at = span->getStart(); at < span->getEnd(); ++at)
-        {
-            const auto measure = at / slotsPerMeasure, slot = at % slotsPerMeasure;
-
-            if (chordUsesStaff (part, measure, staff))
-                continue;
-
-            auto& m = getMeasure (part, measure);
-            m.notes[(size_t) staff][(size_t) slot].clear();
-            m.ties[(size_t) staff][(size_t) slot].clear();
-            m.lengths[(size_t) staff][(size_t) slot] = slotsPerBeat;
-            m.staccato[(size_t) staff][(size_t) slot] = false;
-            m.tuplets[(size_t) staff][(size_t) slot].reset();
-            m.rests[(size_t) staff][(size_t) slot] = 0;
-        }
-
-        // A note held over into it ends where it starts, as long as a note can be, and a tuplet
-        // playing as it starts is taken out.
-        if (const auto measure = span->getStart() / slotsPerMeasure, start = span->getStart() % slotsPerMeasure; ! chordUsesStaff (part, measure, staff))
-        {
-            auto& m = getMeasure (part, measure);
-            m.removeTuplets (staff, start, start + 1);
-            m.clearRests (staff, start, start + 1);
-
-            for (int earlier = 0; earlier < start; ++earlier)
-                if (! m.notes[(size_t) staff][(size_t) earlier].empty() && earlier + m.lengths[(size_t) staff][(size_t) earlier] > start)
-                    m.lengths[(size_t) staff][(size_t) earlier] = fitNoteLength (start - earlier, start - earlier);
-        }
-    }
+        if (const auto& span = clearedByStaff[(size_t) staff]; span.has_value() && ! span->isEmpty())
+            clearStretch (part, staff, *span);
 
     for (const auto& placed : notes)
     {
@@ -749,6 +716,275 @@ void Score::placeNotes (int part, const std::array<std::optional<juce::Range<int
 
     pruneTies();
     sendSynchronousChangeMessage();
+}
+
+void Score::clearStretch (int part, Staff staff, juce::Range<int> span)
+{
+    const auto slotsPerMeasure = getSlotsPerMeasure();
+
+    for (auto at = span.getStart(); at < span.getEnd(); ++at)
+    {
+        const auto measure = at / slotsPerMeasure, slot = at % slotsPerMeasure;
+
+        if (! juce::isPositiveAndBelow (measure, getNumMeasures()) || chordUsesStaff (part, measure, staff))
+            continue;
+
+        auto& m = getMeasure (part, measure);
+        m.notes[(size_t) staff][(size_t) slot].clear();
+        m.ties[(size_t) staff][(size_t) slot].clear();
+        m.lengths[(size_t) staff][(size_t) slot] = slotsPerBeat;
+        m.staccato[(size_t) staff][(size_t) slot] = false;
+        m.tuplets[(size_t) staff][(size_t) slot].reset();
+        m.rests[(size_t) staff][(size_t) slot] = 0;
+    }
+
+    // A note held over into it ends where it starts, as long as a note can be, and a tuplet
+    // playing as it starts is taken out.
+    if (const auto measure = span.getStart() / slotsPerMeasure, start = span.getStart() % slotsPerMeasure;
+        juce::isPositiveAndBelow (measure, getNumMeasures()) && ! chordUsesStaff (part, measure, staff))
+    {
+        auto& m = getMeasure (part, measure);
+        m.removeTuplets (staff, start, start + 1);
+        m.clearRests (staff, start, start + 1);
+
+        for (int earlier = 0; earlier < start; ++earlier)
+            if (! m.notes[(size_t) staff][(size_t) earlier].empty() && earlier + m.lengths[(size_t) staff][(size_t) earlier] > start)
+                m.lengths[(size_t) staff][(size_t) earlier] = fitNoteLength (start - earlier, start - earlier);
+    }
+}
+
+//==============================================================================
+bool Score::hasItem (int part, const WrittenItem& item) const
+{
+    const auto slot = toSlot (item.beat);
+
+    if (! juce::isPositiveAndBelow (part, getNumParts()) || ! juce::isPositiveAndBelow (item.measure, getNumMeasures())
+        || ! juce::isPositiveAndBelow (slot, getSlotsPerMeasure()) || chordUsesStaff (part, item.measure, item.staff))
+        return false;
+
+    const auto& measure = getMeasure (part, item.measure);
+    const auto s = (size_t) item.staff;
+
+    switch (item.kind)
+    {
+        case WrittenItem::Kind::note:
+        {
+            const auto& notes = measure.notes[s][(size_t) slot];
+            return std::find (notes.begin(), notes.end(), item.pitch) != notes.end();
+        }
+
+        case WrittenItem::Kind::rest:
+            return measure.rests[s][(size_t) slot] > 0;
+
+        case WrittenItem::Kind::tuplet:
+            return measure.tuplets[s][(size_t) slot].has_value() && slot + measure.tuplets[s][(size_t) slot]->getLength() <= getSlotsPerMeasure();
+    }
+
+    return false;
+}
+
+Passage Score::getPassage (int part, const std::vector<WrittenItem>& items) const
+{
+    Passage passage;
+    const auto slotsPerMeasure = getSlotsPerMeasure();
+    auto first = std::numeric_limits<int>::max(), last = 0;
+
+    for (auto item = items.begin(); item != items.end(); ++item)
+    {
+        if (! hasItem (part, *item) || std::find (items.begin(), item, *item) != item)
+            continue;
+
+        const auto& measure = getMeasure (part, item->measure);
+        const auto slot = toSlot (item->beat);
+        const auto s = (size_t) item->staff;
+        const auto at = item->measure * slotsPerMeasure + slot;
+        auto length = 0;
+
+        switch (item->kind)
+        {
+            case WrittenItem::Kind::note:
+            {
+                // As long as it's shown, and tied to the next note of its pitch if that's selected too
+                length = fitNoteLength (measure.lengths[s][(size_t) slot], slotsPerMeasure - slot);
+                auto tied = false;
+
+                if (isTied (part, item->staff, item->measure, item->beat, item->pitch))
+                    if (const auto next = getFollowingSlot (part, item->staff, item->measure, slot))
+                        tied = std::find (items.begin(), items.end(),
+                                          WrittenItem { WrittenItem::Kind::note, item->staff, next->first, toBeats (next->second), item->pitch }) != items.end();
+
+                passage.notes.push_back ({ item->staff, at, length, item->pitch, measure.staccato[s][(size_t) slot], tied });
+                break;
+            }
+
+            case WrittenItem::Kind::rest:
+                length = fitNoteLength (measure.rests[s][(size_t) slot], slotsPerMeasure - slot);
+                passage.rests.push_back ({ item->staff, at, length });
+                break;
+
+            case WrittenItem::Kind::tuplet:
+            {
+                const auto& tuplet = *measure.tuplets[s][(size_t) slot];
+                length = tuplet.getLength();
+                passage.tuplets.push_back ({ item->staff, at, tuplet.noteLength, tuplet.pitches, tuplet.staccato });
+                break;
+            }
+        }
+
+        first = juce::jmin (first, at);
+        last = juce::jmax (last, at + length);
+    }
+
+    if (passage.isEmpty())
+        return passage;
+
+    for (auto& note : passage.notes)
+        note.start -= first;
+
+    for (auto& rest : passage.rests)
+        rest.start -= first;
+
+    for (auto& tuplet : passage.tuplets)
+        tuplet.start -= first;
+
+    std::stable_sort (passage.notes.begin(), passage.notes.end(), [] (const auto& a, const auto& b) { return a.start < b.start; });
+    passage.origin = first;
+    passage.length = last - first;
+    return passage;
+}
+
+void Score::removeItems (int part, const std::vector<WrittenItem>& items)
+{
+    auto changed = false;
+
+    for (const auto& item : items)
+    {
+        if (! hasItem (part, item))
+            continue;
+
+        auto& measure = getMeasure (part, item.measure);
+        const auto slot = (size_t) toSlot (item.beat);
+        const auto s = (size_t) item.staff;
+
+        switch (item.kind)
+        {
+            case WrittenItem::Kind::note:
+                std::erase (measure.notes[s][slot], item.pitch);
+
+                if (measure.notes[s][slot].empty())
+                {
+                    measure.lengths[s][slot] = slotsPerBeat;
+                    measure.staccato[s][slot] = false;
+                }
+
+                break;
+
+            case WrittenItem::Kind::rest:   measure.rests[s][slot] = 0; break;
+            case WrittenItem::Kind::tuplet: measure.tuplets[s][slot].reset(); break;
+        }
+
+        changed = true;
+    }
+
+    if (! changed)
+        return;
+
+    pruneTies();
+    sendSynchronousChangeMessage();
+}
+
+std::vector<WrittenItem> Score::writePassage (int part, const Passage& passage, int measure, double beat)
+{
+    std::vector<WrittenItem> written;
+    const auto slotsPerMeasure = getSlotsPerMeasure();
+    const auto start = measure * slotsPerMeasure + toSlot (beat);
+
+    if (passage.isEmpty() || ! juce::isPositiveAndBelow (part, getNumParts()) || start < 0)
+        return written;
+
+    // Measures for all of it
+    while (getNumMeasures() * slotsPerMeasure < start + passage.length)
+    {
+        for (auto& eachPart : parts)
+            eachPart.measures.emplace_back();
+
+        repeats.emplace_back();
+    }
+
+    // Nothing left in the way on the staves it has anything on
+    std::array<bool, 2> used {};
+
+    for (const auto& note : passage.notes)   used[(size_t) note.staff] = true;
+    for (const auto& rest : passage.rests)   used[(size_t) rest.staff] = true;
+    for (const auto& tuplet : passage.tuplets) used[(size_t) tuplet.staff] = true;
+
+    for (auto staff : { Staff::treble, Staff::bass })
+        if (used[(size_t) staff])
+            clearStretch (part, staff, { start, start + passage.length });
+
+    const auto locate = [&] (int at) { return std::pair { at / slotsPerMeasure, at % slotsPerMeasure }; };
+
+    // A tuplet has to fit in its measure.
+    for (const auto& tuplet : passage.tuplets)
+    {
+        const auto [m, slot] = locate (start + tuplet.start);
+        const Measure::TupletNotes notes { tuplet.noteLength, tuplet.pitches, tuplet.staccato };
+
+        if (slot + notes.getLength() > slotsPerMeasure || chordUsesStaff (part, m, tuplet.staff))
+            continue;
+
+        getMeasure (part, m).tuplets[(size_t) tuplet.staff][(size_t) slot] = notes;
+        written.push_back ({ WrittenItem::Kind::tuplet, tuplet.staff, m, toBeats (slot) });
+    }
+
+    // Rests and notes going over a barline go on in the next measure, the notes tied.
+    for (const auto& rest : passage.rests)
+    {
+        for (auto at = start + rest.start, remaining = rest.length; remaining > 0;)
+        {
+            const auto [m, slot] = locate (at);
+            const auto piece = fitNoteLength (remaining, slotsPerMeasure - slot);
+
+            if (! chordUsesStaff (part, m, rest.staff))
+            {
+                getMeasure (part, m).rests[(size_t) rest.staff][(size_t) slot] = piece;
+                written.push_back ({ WrittenItem::Kind::rest, rest.staff, m, toBeats (slot) });
+            }
+
+            at += piece;
+            remaining -= piece;
+        }
+    }
+
+    for (const auto& note : passage.notes)
+    {
+        for (auto at = start + note.start, remaining = note.length; remaining > 0;)
+        {
+            const auto [m, slot] = locate (at);
+            const auto piece = fitNoteLength (remaining, slotsPerMeasure - slot);
+
+            if (putNote ({ note.staff, m, toBeats (slot), note.pitch, part, toBeats (piece), note.staccato })
+                || hasNoteAt (part, note.staff, m, toBeats (slot), note.pitch.step))
+            {
+                if (remaining > piece || note.tiedToNext)
+                {
+                    auto& ties = getMeasure (part, m).ties[(size_t) note.staff][(size_t) slot];
+
+                    if (std::find (ties.begin(), ties.end(), note.pitch) == ties.end())
+                        ties.push_back (note.pitch);
+                }
+
+                written.push_back ({ WrittenItem::Kind::note, note.staff, m, toBeats (slot), note.pitch });
+            }
+
+            at += piece;
+            remaining -= piece;
+        }
+    }
+
+    pruneTies();
+    sendSynchronousChangeMessage();
+    return written;
 }
 
 int Score::fitNoteLength (int slots, int room)

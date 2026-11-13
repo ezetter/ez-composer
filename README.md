@@ -275,6 +275,20 @@ There's no separate editing mode: while clicks add notes, notes on the staves ca
 
 Choosing rests, tuplets, a dynamic, hairpin, pedal, repeat sign or the eraser, selecting measures, or recording as it plays lets go of the note selected. Each move or change is undone in one go, tied notes and all.
 
+### Selecting several notes: Repeat, Copy and Cut
+
+Hold **⌘** and drag across the staves to draw a box: every note, rest you added and tuplet with a notehead or rest inside it is selected, on both staves, and turns blue. Notes already selected stay selected, so several boxes add up, and the staves scroll along at the edge of what's in view. **⌘-click** a note, rest or tuplet to add it to what's selected, or take it out again. A tuplet is always selected whole, and a chord's notes aren't selected. What's selected is in one instrument at a time; selecting in another lets go of it.
+
+Three buttons show over what's selected:
+
+- **Repeat** (⌘R) writes it all again straight after the last of it ends, on the same staves and pitches, and selects the copy, so pressing it again goes on repeating it.
+- **Copy** (⌘C) copies it, lets go of it, and waits for you to click where it should go: as you move over the staves, it shows faintly where a click would put it, with a line where it would start. Click to paste it there. Its start goes to the nearest step of the note length chosen, or where something already starts, as clicks add notes, and everything else keeps its distance from that; each note stays on its own staff and pitch. Click any instrument's staves to paste it into that instrument. The pasted notes are selected, and **Paste** (⌘V) waits for a click to paste the same again. Esc stops waiting.
+- **Cut** (⌘X) does the same, but takes what's selected out first.
+
+Pasted or repeated notes take the place of whatever was on their staves for as long as they last, on the staves they have anything on; a staff they leave empty is left alone. Notes tied to each other stay tied, and lengths are as they're shown. A note that runs over a barline goes on into the next measure, tied; a rest does too, as two rests; a tuplet that would can't, and is left out. Measures are added at the end for any of it that goes past it. Measures whose chord has the staff are left alone.
+
+**Delete** or **Backspace** takes out everything selected. A click anywhere but on a note, or Esc, lets go of it, and adds nothing; a plain click on a note selects that note on its own. The **Edit** menu has Cut, Copy, Paste and Repeat too. Each Repeat, Cut, paste or Delete is undone in one go.
+
 ### Selecting measures
 
 The **Select** button, just left of the eraser, turns selecting measures on, and is blue while it's on. While it's on, clicks and drags on the staves select whole measures instead of adding notes, and no note length shows as chosen:
