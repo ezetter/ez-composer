@@ -83,8 +83,8 @@ struct Tuplet
     }
 };
 
-/** Something written on one staff of a part that can be selected: a note, a rest written in, or
-    a tuplet, all its notes together, by where it starts.
+/** Something written on one staff of a part that can be selected: a note, a rest, written in or
+    filling a gap between notes, or a tuplet, all its notes together, by where it starts.
 */
 struct WrittenItem
 {
@@ -95,6 +95,7 @@ struct WrittenItem
     int measure = 0;
     double beat = 0.0;          // from the start of the measure, on a 64th note
     music::Pitch pitch {};      // a note's
+    double length = 0.0;        // a rest's, in beats, for one filling a gap
 
     bool operator== (const WrittenItem& other) const
     {
@@ -121,6 +122,7 @@ struct Passage
     {
         Staff staff;
         int start, length;
+        bool written = true;    // or just a gap between notes, left empty
     };
 
     struct TupletItem

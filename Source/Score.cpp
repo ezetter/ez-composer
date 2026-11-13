@@ -774,7 +774,29 @@ bool Score::hasItem (int part, const WrittenItem& item) const
         }
 
         case WrittenItem::Kind::rest:
-            return measure.rests[s][(size_t) slot] > 0;
+        {
+            if (measure.rests[s][(size_t) slot] > 0)
+                return true;
+
+            // A gap between notes: nothing written on the staff while it lasts
+            const auto end = slot + toSlot (item.length);
+
+            if (end <= slot || end > getSlotsPerMeasure())
+                return false;
+
+            for (int other = 0; other < end; ++other)
+            {
+                const auto& tuplet = measure.tuplets[s][(size_t) other];
+                const auto otherEnd = juce::jmax (measure.notes[s][(size_t) other].empty() ? 0 : other + measure.lengths[s][(size_t) other],
+                                                  tuplet.has_value() ? other + tuplet->getLength() : 0,
+                                                  measure.rests[s][(size_t) other] > 0 ? other + measure.rests[s][(size_t) other] : 0);
+
+                if (otherEnd > slot)
+                    return false;
+            }
+
+            return true;
+        }
 
         case WrittenItem::Kind::tuplet:
             return measure.tuplets[s][(size_t) slot].has_value() && slot + measure.tuplets[s][(size_t) slot]->getLength() <= getSlotsPerMeasure();
@@ -818,8 +840,18 @@ Passage Score::getPassage (int part, const std::vector<WrittenItem>& items) cons
             }
 
             case WrittenItem::Kind::rest:
-                length = fitNoteLength (measure.rests[s][(size_t) slot], slotsPerMeasure - slot);
-                passage.rests.push_back ({ item->staff, at, length });
+                // One written in is written again; a gap between notes is left empty again.
+                if (measure.rests[s][(size_t) slot] > 0)
+                {
+                    length = fitNoteLength (measure.rests[s][(size_t) slot], slotsPerMeasure - slot);
+                    passage.rests.push_back ({ item->staff, at, length });
+                }
+                else
+                {
+                    length = toSlot (item->length);
+                    passage.rests.push_back ({ item->staff, at, length, false });
+                }
+
                 break;
 
             case WrittenItem::Kind::tuplet:
@@ -947,8 +979,10 @@ std::vector<WrittenItem> Score::writePassage (int part, const Passage& passage, 
 
             if (! chordUsesStaff (part, m, rest.staff))
             {
-                getMeasure (part, m).rests[(size_t) rest.staff][(size_t) slot] = piece;
-                written.push_back ({ WrittenItem::Kind::rest, rest.staff, m, toBeats (slot) });
+                if (rest.written)
+                    getMeasure (part, m).rests[(size_t) rest.staff][(size_t) slot] = piece;
+
+                written.push_back ({ WrittenItem::Kind::rest, rest.staff, m, toBeats (slot), {}, rest.written ? 0.0 : toBeats (piece) });
             }
 
             at += piece;

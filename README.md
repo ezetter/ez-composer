@@ -277,7 +277,7 @@ Choosing rests, tuplets, a dynamic, hairpin, pedal, repeat sign or the eraser, s
 
 ### Selecting several notes: Repeat, Copy and Cut
 
-Hold **⌘** and drag across the staves to draw a box: every note, rest you added and tuplet with a notehead or rest inside it is selected, on both staves, and turns blue. Notes already selected stay selected, so several boxes add up, and the staves scroll along at the edge of what's in view. **⌘-click** a note, rest or tuplet to add it to what's selected, or take it out again. A tuplet is always selected whole, and a chord's notes aren't selected. What's selected is in one instrument at a time; selecting in another lets go of it.
+Hold **⌘** and drag across the staves to draw a box: every note, rest and tuplet with a notehead or rest inside it is selected, on both staves, and turns blue. Rests count whether you added them or they just fill the gaps between notes, so a passage that starts or ends with a rest keeps it. Notes already selected stay selected, so several boxes add up, and the staves scroll along at the edge of what's in view. **⌘-click** a note, rest or tuplet to add it to what's selected, or take it out again. A tuplet is always selected whole, and a chord's notes aren't selected. What's selected is in one instrument at a time; selecting in another lets go of it.
 
 Three buttons show over what's selected:
 
@@ -285,7 +285,7 @@ Three buttons show over what's selected:
 - **Copy** (⌘C) copies it, lets go of it, and waits for you to click where it should go: as you move over the staves, it shows faintly where a click would put it, with a line where it would start. Click to paste it there. Its start goes to the nearest step of the note length chosen, or where something already starts, as clicks add notes, and everything else keeps its distance from that; each note stays on its own staff and pitch. Click any instrument's staves to paste it into that instrument. The pasted notes are selected, and **Paste** (⌘V) waits for a click to paste the same again. Esc stops waiting.
 - **Cut** (⌘X) does the same, but takes what's selected out first.
 
-Pasted or repeated notes take the place of whatever was on their staves for as long as they last, on the staves they have anything on; a staff they leave empty is left alone. Notes tied to each other stay tied, and lengths are as they're shown. A note that runs over a barline goes on into the next measure, tied; a rest does too, as two rests; a tuplet that would can't, and is left out. Measures are added at the end for any of it that goes past it. Measures whose chord has the staff are left alone.
+Pasted or repeated notes take the place of whatever was on their staves for as long as they last, on the staves they have anything on; a staff they leave empty is left alone. Notes tied to each other stay tied, and lengths are as they're shown. A rest you added is written again as one; a rest filling a gap is pasted as an empty stretch, so a gap rest shows there again. A note that runs over a barline goes on into the next measure, tied; a rest does too, as two rests; a tuplet that would can't, and is left out. Measures are added at the end for any of it that goes past it. Measures whose chord has the staff are left alone.
 
 **Delete** or **Backspace** takes out everything selected. A click anywhere but on a note, or Esc, lets go of it, and adds nothing; a plain click on a note selects that note on its own. The **Edit** menu has Cut, Copy, Paste and Repeat too. Each Repeat, Cut, paste or Delete is undone in one go.
 

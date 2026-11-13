@@ -816,6 +816,9 @@ private:
     /** Whether something's selected, or would be by the box being dragged. */
     bool isItemSelected (const WrittenItem&) const;
 
+    /** Whether a rest shown at a point is, or is part of one that is. */
+    bool isRestSelected (Staff, int measure, double onset) const;
+
     void drawPasteHint (juce::Graphics&) const;
 
     Score& score;

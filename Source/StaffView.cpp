@@ -906,6 +906,17 @@ bool StaffView::isItemSelected (const WrittenItem& item) const
         || std::find (boxItems.begin(), boxItems.end(), item) != boxItems.end();
 }
 
+bool StaffView::isRestSelected (Staff staff, int measure, double onset) const
+{
+    const auto covers = [&] (const WrittenItem& item)
+    {
+        return item.kind == WrittenItem::Kind::rest && item.staff == staff && item.measure == measure
+            && (juce::exactlyEqual (item.beat, onset) || (onset > item.beat - 1.0e-9 && onset < item.beat + item.length - 1.0e-9));
+    };
+
+    return std::any_of (itemSelection.begin(), itemSelection.end(), covers) || std::any_of (boxItems.begin(), boxItems.end(), covers);
+}
+
 std::vector<std::pair<WrittenItem, juce::Point<float>>> StaffView::getItemPoints() const
 {
     std::vector<std::pair<WrittenItem, juce::Point<float>>> points;
@@ -928,11 +939,11 @@ std::vector<std::pair<WrittenItem, juce::Point<float>>> StaffView::getItemPoints
 
             for (const auto& event : content.events)
             {
+                // A rest filling a gap between notes, as long as it's shown, as well as one written in
                 if (event.isRest())
                 {
-                    if (event.writtenRest)
-                        points.push_back ({ { WrittenItem::Kind::rest, staff, measure, event.onset }, { getEventX (measure, event), getY (staff, middleLine) } });
-
+                    const auto length = event.writtenRest ? 0.0 : event.centred ? (double) score.getBeatsPerMeasure() : getBeats (event.duration);
+                    points.push_back ({ { WrittenItem::Kind::rest, staff, measure, event.onset, {}, length }, { getEventX (measure, event), getY (staff, middleLine) } });
                     continue;
                 }
 
@@ -2558,8 +2569,7 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
 
             if (event.writtenRest && (underEraser || clickRemoves))
                 g.setColour (removalColour);
-            else if (event.writtenRest && content.source == StaffContent::Source::notes
-                     && isItemSelected ({ WrittenItem::Kind::rest, staff, measure, event.onset }))
+            else if (content.source == StaffContent::Source::notes && isRestSelected (staff, measure, event.onset))
                 g.setColour (editColour);
 
             drawRest (g, staff, getEventX (measure, event), event.duration);
