@@ -1662,15 +1662,71 @@ void StaffView::setSelectedMeasure (std::optional<int> measure)
 }
 
 //==============================================================================
-void StaffView::updateLayout()
+namespace
+{
+    /** Where the time signature goes, in staff spaces, after the key signature's sharps or flats */
+    float getTimeSignatureLeft (music::Key key)
+    {
+        const auto keyAlterations = music::getKeyAlterations (key);
+        const auto numAccidentals = (int) std::count_if (keyAlterations.begin(), keyAlterations.end(), [] (int a) { return a != 0; });
+        const auto sharps = std::any_of (keyAlterations.begin(), keyAlterations.end(), [] (int a) { return a > 0; });
+        const auto keySignatureWidth = (float) numAccidentals * (sharps ? 1.05f : 0.95f);
+        return keySignatureLeft + (numAccidentals > 0 ? keySignatureWidth + 0.9f : 0.4f);
+    }
+
+    /** Where the first measure starts, in staff spaces, with or without the time signature */
+    float getFirstMeasureLeft (music::Key key, bool timeSignature)
+    {
+        return getTimeSignatureLeft (key) + (timeSignature ? 3.0f : 0.6f);
+    }
+}
+
+float StaffView::getLineMargins (const Score& score, bool timeSignature)
+{
+    return (getFirstMeasureLeft (score.getKey(), timeSignature) + rightMargin) * staffSpace;
+}
+
+StaffView::MeasureSpacing StaffView::getMeasureSpacing (const Score& score, int measure)
 {
     const auto keyAlterations = music::getKeyAlterations (score.getKey());
-    const auto numAccidentals = (int) std::count_if (keyAlterations.begin(), keyAlterations.end(), [] (int a) { return a != 0; });
-    const auto sharps = std::any_of (keyAlterations.begin(), keyAlterations.end(), [] (int a) { return a > 0; });
-    const auto keySignatureWidth = (float) numAccidentals * (sharps ? 1.05f : 0.95f);
+    MeasureSpacing spacing;
+    auto notesPerBeat = 1;
+    spacing.padding = measurePadding * staffSpace;
 
-    timeSignatureLeft = keySignatureLeft + (numAccidentals > 0 ? keySignatureWidth + 0.9f : 0.4f);
-    firstMeasureLeft = timeSignatureLeft + (pageLine.has_value() && ! pageLine->timeSignature ? 0.6f : 3.0f);
+    for (int part = 0; part < score.getNumParts(); ++part)
+    {
+        const auto content = getMeasureContent (score, part, measure);
+        notesPerBeat = juce::jmax (notesPerBeat, content.staves[0].notesPerBeat, content.staves[1].notesPerBeat);
+
+        // Leave room after the barline for the accidentals, displaced notes and rolls of the
+        // measure's first notes.
+        for (auto staff : { Staff::treble, Staff::bass })
+        {
+            const auto& events = content.staves[(size_t) staff].events;
+
+            if (! events.empty() && ! events.front().isRest() && ! events.front().centred)
+            {
+                std::map<int, int> alterationsInForce;
+                const NoteLayout first (events.front(), staff, 0.0f, alterationsInForce, keyAlterations);
+                spacing.padding = juce::jmax (spacing.padding, first.getLeftReach (events.front().rolled) + 0.9f * staffSpace);
+            }
+        }
+    }
+
+    spacing.beatWidth = getBeatWidth (notesPerBeat) * staffSpace;
+
+    // Repeat signs take room at the start or end.
+    const auto startRoom = score.hasRepeatStart (measure) ? repeatSignWidth * staffSpace : 0.0f;
+    const auto endRoom = score.hasRepeatEnd (measure) ? repeatSignWidth * staffSpace : 0.0f;
+    spacing.padding += startRoom;
+    spacing.width = getMeasureWidth (score.getBeatsPerMeasure(), notesPerBeat, spacing.padding, startRoom) + endRoom;
+    return spacing;
+}
+
+void StaffView::updateLayout()
+{
+    timeSignatureLeft = getTimeSignatureLeft (score.getKey());
+    firstMeasureLeft = getFirstMeasureLeft (score.getKey(), ! pageLine.has_value() || pageLine->timeSignature);
     const auto inLine = [this] (int measure) { return ! pageLine.has_value() || (measure >= pageLine->firstMeasure && measure < pageLine->firstMeasure + pageLine->numMeasures); };
 
     auto x = firstMeasureLeft * staffSpace;
@@ -1699,37 +1755,10 @@ void StaffView::updateLayout()
         layout.content = getMeasureContent (score, part, measure);
 
         // Every part's measure is spaced the same, to fit what's in all of them, so their beats line up.
-        auto notesPerBeat = 1;
-        layout.padding = measurePadding * staffSpace;
-
-        for (int spacedPart = 0; spacedPart < score.getNumParts(); ++spacedPart)
-        {
-            const auto content = spacedPart == part ? layout.content : getMeasureContent (score, spacedPart, measure);
-            notesPerBeat = juce::jmax (notesPerBeat, content.staves[0].notesPerBeat, content.staves[1].notesPerBeat);
-
-            // Leave room after the barline for the accidentals, displaced notes and rolls of the
-            // measure's first notes.
-            for (auto staff : { Staff::treble, Staff::bass })
-            {
-                const auto& events = content.staves[(size_t) staff].events;
-
-                if (! events.empty() && ! events.front().isRest() && ! events.front().centred)
-                {
-                    std::map<int, int> alterationsInForce;
-                    const NoteLayout first (events.front(), staff, 0.0f, alterationsInForce, keyAlterations);
-                    layout.padding = juce::jmax (layout.padding, first.getLeftReach (events.front().rolled) + 0.9f * staffSpace);
-                }
-            }
-        }
-
-        layout.beatWidth = getBeatWidth (notesPerBeat) * staffSpace;
-
-        // Repeat signs take room at the start or end.
-        const auto startRoom = score.hasRepeatStart (measure) ? repeatSignWidth * staffSpace : 0.0f;
-        const auto endRoom = score.hasRepeatEnd (measure) ? repeatSignWidth * staffSpace : 0.0f;
-        layout.padding += startRoom;
-
-        layout.width = getMeasureWidth (score.getBeatsPerMeasure(), notesPerBeat, layout.padding, startRoom) + endRoom;
+        const auto spacing = getMeasureSpacing (score, measure);
+        layout.padding = spacing.padding;
+        layout.beatWidth = spacing.beatWidth;
+        layout.width = spacing.width;
         layout.x = x;
         x += layout.width;
 

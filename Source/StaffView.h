@@ -470,6 +470,22 @@ public:
 
     inline static const juce::Colour paperColour { 0xffffffff };
 
+    /** How a measure's spaced, the same in every part, so their beats line up: room from its
+        barline to its first beat, how wide each beat is, and how wide it is, in pixels, before a
+        line stretches it.
+    */
+    struct MeasureSpacing
+    {
+        float padding = 0.0f, beatWidth = 0.0f, width = 0.0f;
+    };
+
+    static MeasureSpacing getMeasureSpacing (const Score&, int measure);
+
+    /** How much of a line's width isn't its measures': the clefs and key signature, the time
+        signature on the first line, and room after the last barline, in pixels.
+    */
+    static float getLineMargins (const Score&, bool timeSignature);
+
 private:
     struct MeasureLayout
     {

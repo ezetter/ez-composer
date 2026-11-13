@@ -108,10 +108,12 @@ private:
         juce::TextButton addPartButton { "+" };
     };
 
-    /** One part's music as a page of a score: a line of its measures at a time, four to a line,
-        one line under another, each a view of its own. A full line is stretched across the
-        page; the last may be shorter. It has room either side for the arrows that go to the
-        part before and after.
+    /** One part's music as a page of a score: a line of its measures at a time, one line under
+        another, each a view of its own. Each line has as many measures as fit across the page,
+        however wide they are, so a measure that no longer fits goes to the next line, and it
+        never needs scrolling sideways; a measure too wide for a line on its own has a line to
+        itself. Each line but the last is stretched across the page. It has room either side for
+        the arrows that go to the part before and after.
     */
     struct ScorePage final : public juce::Component,
                              private juce::ChangeListener,
@@ -119,8 +121,6 @@ private:
     {
         explicit ScorePage (Score&);
         ~ScorePage() override;
-
-        static constexpr int measuresPerLine = 4;
 
         /** Shows a part's lines, or with none, nothing, e.g. while the page isn't shown. */
         void showPart (std::optional<int> part);
@@ -140,7 +140,7 @@ private:
         /** The line a measure's on, if it's shown */
         StaffView* getLineOf (int measure) const;
 
-        /** Makes a line for each four measures, there being more or fewer, and lays them out. It's
+        /** Makes a line for each stretch of measures that fits across the page, and lays them out. It's
             done anyway once the score's changed; this is for anything that needs it sooner.
         */
         void update();
@@ -166,6 +166,10 @@ private:
         juce::String title;
         bool layingOut = false;
         bool compact = false;
+        std::vector<int> lineStarts;    // the first measure of each line
+
+        /** Where each line starts, fitting as many measures as there's room for across the page */
+        std::vector<int> getLineStarts() const;
     };
 
     /** What each part has besides its staves: its instrument, the volume dial to the left of its
@@ -257,7 +261,7 @@ private:
     */
     void configureView (StaffView&);
 
-    /** Shows the score page, one instrument's measures four to a line, or the instruments' staves, one under another. */
+    /** Shows the score page, one instrument's measures as many to a line as fit, or the instruments' staves, one under another. */
     void showScorePage (bool);
     void updatePartArrows();
 

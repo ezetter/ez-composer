@@ -264,8 +264,40 @@ void MainComponent::ScorePage::setTitle (const juce::String& newTitle)
 
 StaffView* MainComponent::ScorePage::getLineOf (int measure) const
 {
-    const auto index = measure / measuresPerLine;
-    return measure >= 0 && index < (int) lines.size() ? lines[(size_t) index].get() : nullptr;
+    if (measure < 0 || measure >= score.getNumMeasures())
+        return nullptr;
+
+    for (size_t index = lines.size(); index-- > 0;)
+        if (index < lineStarts.size() && lineStarts[index] <= measure)
+            return lines[index].get();
+
+    return nullptr;
+}
+
+std::vector<int> MainComponent::ScorePage::getLineStarts() const
+{
+    std::vector<int> starts { 0 };
+    const auto width = (float) juce::jmax (0, minimumWidth - 2 * sideMargin);
+    auto used = StaffView::getLineMargins (score, true);
+    auto inLine = 0;
+
+    for (int measure = 0; measure < score.getNumMeasures(); ++measure)
+    {
+        const auto measureWidth = StaffView::getMeasureSpacing (score, measure).width;
+
+        // Too wide for what's left of the line, it starts the next, unless it's the line's first.
+        if (inLine > 0 && used + measureWidth > width - 1.0f)
+        {
+            starts.push_back (measure);
+            used = StaffView::getLineMargins (score, false);
+            inLine = 0;
+        }
+
+        used += measureWidth;
+        ++inLine;
+    }
+
+    return starts;
 }
 
 void MainComponent::ScorePage::update()
@@ -281,7 +313,8 @@ void MainComponent::ScorePage::update()
     }
 
     const auto numMeasures = score.getNumMeasures();
-    const auto numLines = (size_t) juce::jmax (1, (numMeasures + measuresPerLine - 1) / measuresPerLine);
+    lineStarts = getLineStarts();
+    const auto numLines = lineStarts.size();
 
     while (lines.size() > numLines)
         lines.pop_back();
@@ -300,8 +333,9 @@ void MainComponent::ScorePage::update()
 
     for (size_t index = 0; index < lines.size(); ++index)
     {
-        const auto first = (int) index * measuresPerLine;
-        lines[index]->setLine (StaffView::Line { first, measuresPerLine, first + measuresPerLine <= numMeasures, width, index == 0 });
+        const auto first = lineStarts[index];
+        const auto last = index + 1 < lineStarts.size() ? lineStarts[index + 1] : numMeasures;
+        lines[index]->setLine (StaffView::Line { first, last - first, index + 1 < lineStarts.size(), width, index == 0 });
         lines[index]->setTitle (index == 0 ? title : juce::String());
         lines[index]->setActive (true);
     }
@@ -311,17 +345,15 @@ void MainComponent::ScorePage::update()
 
 void MainComponent::ScorePage::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // Measures may have been added or taken out. The lines catch up once the change is done,
-    // as one of them may be the one changing it.
+    // Measures may have been added or taken out, or grown or shrunk with what's in them, so they
+    // fit on the lines differently. The lines catch up once the change is done, as one of them
+    // may be the one changing it.
     if (! partId.has_value())
         return;
 
-    const auto numMeasures = score.getNumMeasures();
-    const auto numLines = (size_t) juce::jmax (1, (numMeasures + measuresPerLine - 1) / measuresPerLine);
-    const auto lastFull = numMeasures % measuresPerLine == 0;
-
-    if (lines.size() != numLines || score.findPart (*partId) < 0 || ! lines.back()->getLine().has_value()
-        || lines.back()->getLine()->full != lastFull)
+    if (score.findPart (*partId) < 0 || getLineStarts() != lineStarts
+        || lines.empty() || ! lines.back()->getLine().has_value()
+        || lines.back()->getLine()->firstMeasure + lines.back()->getLine()->numMeasures != score.getNumMeasures())
         triggerAsyncUpdate();
 }
 
@@ -1253,7 +1285,7 @@ void MainComponent::showScorePage (bool show)
     showingScorePage = show;
     settings.setValue (scorePageKey, show);
     viewButton.setButtonText (show ? "Score View" : "Instruments View");
-    viewButton.setTooltip (show ? "Score View: one instrument at a time, four measures to a line. Click to show every instrument's staves, one under another."
+    viewButton.setTooltip (show ? "Score View: one instrument at a time, as many measures to a line as fit. Click to show every instrument's staves, one under another."
                                 : "Instruments View: every instrument's staves, one under another. Click to show one instrument at a time, as a page of a score.");
 
     staffViewport.setVisible (! show);
@@ -4331,7 +4363,7 @@ void MainComponent::getCommandInfo (juce::CommandID command, juce::ApplicationCo
                            info.setTicked (! showingScorePage);
                            info.addDefaultKeypress ('1', cmd); break;
         case showScoreView:
-                           info.setInfo ("Score", "Shows one instrument at a time, as a page of a score, four measures to a line", "View", 0);
+                           info.setInfo ("Score", "Shows one instrument at a time, as a page of a score, as many measures to a line as fit", "View", 0);
                            info.setTicked (showingScorePage);
                            info.addDefaultKeypress ('2', cmd); break;
         case toggleChordControls:
