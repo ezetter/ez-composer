@@ -36,7 +36,7 @@ namespace
     constexpr int cloneButtonWidth = 56, cloneButtonHeight = 26;
     constexpr int rightMargin = measureButtonsGap + measureButtonsWidth + 12;      // after the final barline, for the measure buttons
     constexpr int scorePageLineGap = 4;         // between the score page's lines
-    constexpr int viewButtonWidth = 96;         // Instruments or Score, beside the instrument menu
+    constexpr int viewButtonWidth = 132;        // Instruments View or Score View, before the instrument menu
     constexpr int partArrowWidth = 26, partArrowHeight = 44;
     constexpr int scorePageBandHeight = 6;     // under the pages' tabs, where the ruler would be
     const char* const scorePageKey = "showScorePage";
@@ -817,9 +817,9 @@ void MainComponent::resized()
     tempoUpButton.setBounds (arrows.removeFromTop (arrows.getHeight() / 2));
     tempoDownButton.setBounds (arrows);
     toolbar.removeFromLeft (20);
-    partBox.setBounds (toolbar.removeFromLeft (150));
-    toolbar.removeFromLeft (6);
     viewButton.setBounds (toolbar.removeFromLeft (viewButtonWidth));
+    toolbar.removeFromLeft (6);
+    partBox.setBounds (toolbar.removeFromLeft (150));
     toolbar.removeFromLeft (20);
 
     effectsButton.setBounds (toolbar.removeFromRight (84));
@@ -1172,9 +1172,9 @@ void MainComponent::showScorePage (bool show)
 
     showingScorePage = show;
     settings.setValue (scorePageKey, show);
-    viewButton.setButtonText (show ? "Score" : "Instruments");
-    viewButton.setTooltip (show ? "Score: one instrument at a time, four measures to a line. Click to show every instrument's staves, one under another."
-                                : "Instruments: every instrument's staves, one under another. Click to show one instrument at a time, as a page of a score.");
+    viewButton.setButtonText (show ? "Score View" : "Instruments View");
+    viewButton.setTooltip (show ? "Score View: one instrument at a time, four measures to a line. Click to show every instrument's staves, one under another."
+                                : "Instruments View: every instrument's staves, one under another. Click to show one instrument at a time, as a page of a score.");
 
     staffViewport.setVisible (! show);
     volumeColumn.setVisible (! show);
