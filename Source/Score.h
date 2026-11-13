@@ -533,6 +533,22 @@ public:
     /** Takes out the tuplet playing at a point. Returns false if there isn't one. */
     bool removeTuplet (int part, Staff, int measure, double beat);
 
+    //==============================================================================
+    /** Writes a rest, as long as it asks, or as long as fits in what's left of the measure, the
+        same lengths a note can be. It takes the place of whatever's on its staff while it lasts:
+        notes and rests starting then, and tuplets it overlaps, are taken out, and a note or rest
+        held over into it ends where it starts. Gaps between notes show rests anyway; one written
+        this way shows as itself. Returns false, changing nothing, if it's there already, or the
+        measure's chord has the staff.
+    */
+    bool addRest (int part, Staff, int measure, double beat, double length);
+
+    /** How many beats the rest written at a point lasts, as it was added, if one starts there. */
+    std::optional<double> getRestLength (int part, Staff, int measure, double beat) const;
+
+    /** Takes out the rest written at a point. Returns false if there isn't one. */
+    bool removeRest (int part, Staff, int measure, double beat);
+
     /** Whether a staff has a note starting at a point on this line or space, whatever its sharp or flat. */
     bool hasNoteAt (int part, Staff, int measure, double beat, int step) const;
 
@@ -800,6 +816,7 @@ private:
         std::array<std::array<int, maxSlotsPerMeasure>, 2> lengths;
         std::array<std::array<std::vector<music::Pitch>, maxSlotsPerMeasure>, 2> ties;
         std::array<std::array<bool, maxSlotsPerMeasure>, 2> staccato {};
+        std::array<std::array<int, maxSlotsPerMeasure>, 2> rests {};      // how many 64ths a rest written there lasts, or 0
         std::array<std::optional<music::Dynamic>, maxSlotsPerMeasure> dynamics;      // by 64th note, for both staves
         std::array<std::optional<HairpinStart>, maxSlotsPerMeasure> hairpins;      // starting at each 64th
         std::array<juce::uint8, maxSlotsPerMeasure> pedalMarks {};                 // at each 64th: pedalUp, then pedalDown, or neither
@@ -841,9 +858,29 @@ private:
 
             lengths[(size_t) staff].fill (slotsPerBeat);
             staccato[(size_t) staff].fill (false);
+            rests[(size_t) staff].fill (0);
 
             for (auto& tuplet : tuplets[(size_t) staff])
                 tuplet.reset();
+        }
+
+        /** Makes room on a staff for something lasting from one 64th to another: rests starting
+            then go, and one held over into it ends where it starts.
+        */
+        void clearRests (Staff staff, int from, int to)
+        {
+            auto& staffRests = rests[(size_t) staff];
+
+            for (int slot = 0; slot < juce::jmin (to, maxSlotsPerMeasure); ++slot)
+            {
+                if (staffRests[(size_t) slot] == 0)
+                    continue;
+
+                if (slot >= from)
+                    staffRests[(size_t) slot] = 0;
+                else if (slot + staffRests[(size_t) slot] > from)
+                    staffRests[(size_t) slot] = fitNoteLength (from - slot, from - slot);
+            }
         }
     };
 

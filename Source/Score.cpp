@@ -642,8 +642,9 @@ bool Score::putNote (const Note& note)
     if (alreadyThere && lengths[(size_t) slot] == length && staccato[(size_t) slot] == note.staccato)
         return false;
 
-    // It takes the place of tuplets it plays during.
+    // It takes the place of tuplets it plays during, and rests.
     measure.removeTuplets (note.staff, slot, slot + length);
+    measure.clearRests (note.staff, slot, slot + length);
 
     // A longer note held over this point is cut short to end here, as long as a note can be.
     for (int earlier = 0; earlier < slot; ++earlier)
@@ -713,6 +714,7 @@ void Score::placeNotes (int part, const std::array<std::optional<juce::Range<int
             m.lengths[(size_t) staff][(size_t) slot] = slotsPerBeat;
             m.staccato[(size_t) staff][(size_t) slot] = false;
             m.tuplets[(size_t) staff][(size_t) slot].reset();
+            m.rests[(size_t) staff][(size_t) slot] = 0;
         }
 
         // A note held over into it ends where it starts, as long as a note can be, and a tuplet
@@ -721,6 +723,7 @@ void Score::placeNotes (int part, const std::array<std::optional<juce::Range<int
         {
             auto& m = getMeasure (part, measure);
             m.removeTuplets (staff, start, start + 1);
+            m.clearRests (staff, start, start + 1);
 
             for (int earlier = 0; earlier < start; ++earlier)
                 if (! m.notes[(size_t) staff][(size_t) earlier].empty() && earlier + m.lengths[(size_t) staff][(size_t) earlier] > start)
@@ -915,6 +918,7 @@ bool Score::addTuplet (const Tuplet& tuplet)
             measure.lengths[staff][(size_t) earlier] = fitNoteLength (slot - earlier, slot - earlier);
 
     measure.removeTuplets (tuplet.staff, slot, slot + length);
+    measure.clearRests (tuplet.staff, slot, slot + length);
     measure.tuplets[staff][(size_t) slot] = written;
 
     pruneTies();
@@ -955,6 +959,69 @@ bool Score::removeTuplet (int part, Staff staff, int measure, double beat)
         return false;
 
     getMeasure (part, measure).tuplets[(size_t) staff][(size_t) toSlot (tuplet->beat)].reset();
+    sendSynchronousChangeMessage();
+    return true;
+}
+
+bool Score::addRest (int part, Staff staff, int measure, double beat, double restLength)
+{
+    const auto slot = toSlot (beat);
+    const auto slots = getSlotsPerMeasure();
+
+    if (! juce::isPositiveAndBelow (part, getNumParts()) || ! juce::isPositiveAndBelow (measure, getNumMeasures())
+        || ! juce::isPositiveAndBelow (slot, slots) || chordUsesStaff (part, measure, staff))
+        return false;
+
+    auto& target = getMeasure (part, measure);
+    const auto s = (size_t) staff;
+    const auto length = fitNoteLength (toSlot (restLength), slots - slot);
+
+    if (target.rests[s][(size_t) slot] == length)
+        return false;
+
+    // The notes starting while it lasts go, and one held over into it ends where it starts, as
+    // do tuplets and other rests.
+    for (auto covered = slot; covered < slot + length; ++covered)
+    {
+        target.notes[s][(size_t) covered].clear();
+        target.ties[s][(size_t) covered].clear();
+        target.lengths[s][(size_t) covered] = slotsPerBeat;
+        target.staccato[s][(size_t) covered] = false;
+    }
+
+    for (int earlier = 0; earlier < slot; ++earlier)
+        if (! target.notes[s][(size_t) earlier].empty() && earlier + target.lengths[s][(size_t) earlier] > slot)
+            target.lengths[s][(size_t) earlier] = fitNoteLength (slot - earlier, slot - earlier);
+
+    target.removeTuplets (staff, slot, slot + length);
+    target.clearRests (staff, slot, slot + length);
+    target.rests[s][(size_t) slot] = length;
+
+    pruneTies();
+    sendSynchronousChangeMessage();
+    return true;
+}
+
+std::optional<double> Score::getRestLength (int part, Staff staff, int measure, double beat) const
+{
+    const auto slot = toSlot (beat);
+
+    if (! juce::isPositiveAndBelow (part, getNumParts()) || ! juce::isPositiveAndBelow (measure, getNumMeasures())
+        || ! juce::isPositiveAndBelow (slot, maxSlotsPerMeasure))
+        return {};
+
+    if (const auto length = getMeasure (part, measure).rests[(size_t) staff][(size_t) slot]; length > 0)
+        return toBeats (length);
+
+    return {};
+}
+
+bool Score::removeRest (int part, Staff staff, int measure, double beat)
+{
+    if (! getRestLength (part, staff, measure, beat).has_value())
+        return false;
+
+    getMeasure (part, measure).rests[(size_t) staff][(size_t) toSlot (beat)] = 0;
     sendSynchronousChangeMessage();
     return true;
 }
@@ -1722,7 +1789,7 @@ namespace
     // 24: triplets
     // 25: tuplets of 2 to 10 notes
     // 26: everything by 64th note, rather than by 32nd, so notes can be 64ths
-    constexpr int formatVersion = 26;
+    constexpr int formatVersion = 27;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -2098,6 +2165,16 @@ juce::var Score::toJSON (bool withPartIds) const
 
             if (! tuplets.isEmpty())
                 measureObject->setProperty (staff == Staff::treble ? "trebleTriplets" : "bassTriplets", tuplets);
+
+            // The rests written, if there are any: at which 64th, and how many 64ths they last
+            juce::Array<juce::var> rests;
+
+            for (int slot = 0; slot < maxSlotsPerMeasure; ++slot)
+                if (const auto length = measure.rests[(size_t) staff][(size_t) slot]; length > 0)
+                    rests.add (juce::Array<juce::var> { slot, length });
+
+            if (! rests.isEmpty())
+                measureObject->setProperty (staff == Staff::treble ? "trebleRests" : "bassRests", rests);
         }
 
         // The dynamic marked at each 64th, or "" for none, if there are any
@@ -2344,6 +2421,36 @@ juce::Result Score::loadJSON (const juce::var& json)
 
                         measure.removeTuplets (staff, slot, slot + written.getLength());
                         measure.tuplets[(size_t) staff][(size_t) slot] = written;
+                    }
+                }
+
+                // Rests written in, in scores from version 27, where nothing else is
+                if (const auto* rests = item.getProperty (staff == Staff::treble ? "trebleRests" : "bassRests", {}).getArray())
+                {
+                    for (const auto& r : *rests)
+                    {
+                        const auto slot = readInt (r[0], 0, maxSlotsPerMeasure - 1, -1);
+                        const auto length = readInt (r[1], 1, maxSlotsPerMeasure, 0);
+
+                        if (slot < 0 || length == 0)
+                            continue;
+
+                        const auto fitted = fitNoteLength (length, maxSlotsPerMeasure - slot);
+                        auto clear = true;
+
+                        for (auto covered = slot; covered < slot + fitted; ++covered)
+                            clear = clear && measure.notes[(size_t) staff][(size_t) covered].empty();
+
+                        for (int earlier = 0; earlier < slot + fitted; ++earlier)
+                            if (const auto& tuplet = measure.tuplets[(size_t) staff][(size_t) earlier];
+                                tuplet.has_value() && earlier + tuplet->getLength() > slot)
+                                clear = false;
+
+                        if (clear)
+                        {
+                            measure.clearRests (staff, slot, slot + fitted);
+                            measure.rests[(size_t) staff][(size_t) slot] = fitted;
+                        }
                     }
                 }
             }

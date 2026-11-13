@@ -527,11 +527,16 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     noteLengthPicker.onChange = [this] (double beats) { setNoteLength (beats); };
     noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
     noteLengthPicker.onTupletClicked = [this] { chooseTupletLength(); };
+    restLengthPicker.onChange = [this] (double beats) { setRestLength (beats); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
 
     // Which notation controls show, as last time: the box's ids are the groups', from 1.
-    notationGroupBox.addItemList ({ "Notes", "Dynamics", "Flow", "Pedal" }, 1);
-    notationGroupBox.setTooltip ("Which notation controls show: note lengths, staccato and tuplets; dynamics and hairpins; repeats and endings; or the pedal");
+    notationGroupBox.addItem ("Notes", (int) NotationGroup::notes + 1);
+    notationGroupBox.addItem ("Rests", (int) NotationGroup::rests + 1);
+    notationGroupBox.addItem ("Dynamics", (int) NotationGroup::dynamics + 1);
+    notationGroupBox.addItem ("Flow", (int) NotationGroup::flow + 1);
+    notationGroupBox.addItem ("Pedal", (int) NotationGroup::pedal + 1);
+    notationGroupBox.setTooltip ("Which notation controls show: note lengths, staccato and tuplets; rests; dynamics and hairpins; repeats and endings; or the pedal");
     notationGroupBox.setWantsKeyboardFocus (false);
     notationGroupBox.setLookAndFeel (&tileComboBoxLookAndFeel);
     notationGroupBox.setColour (juce::ComboBox::textColourId, juce::Colour (0xff1b1b1b));
@@ -594,10 +599,11 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     addAndMakeVisible (volumeColumn);
     addAndMakeVisible (notationGroupBox);
     addAndMakeVisible (noteLengthPicker);
+    addChildComponent (restLengthPicker);
     addAndMakeVisible (dynamicPicker);
 
     // Only the notation controls shown last are visible.
-    showNotationGroup ((NotationGroup) juce::jlimit (0, 3, settings.getIntValue (notationGroupKey, 0)));
+    showNotationGroup ((NotationGroup) juce::jlimit (0, (int) NotationGroup::rests, settings.getIntValue (notationGroupKey, 0)));
     addAndMakeVisible (eraserButton);
     addAndMakeVisible (editButton);
     addAndMakeVisible (selectButton);
@@ -865,6 +871,7 @@ void MainComponent::resized()
     // The box choosing which notation controls show comes first, then the controls.
     notationGroupBox.setBounds (pageArea.getX() + 10, pageArea.getY() + toolButtonsTop, notationGroupBoxWidth, toolButtonsHeight);
     noteLengthPicker.setTopLeftPosition (notationGroupBox.getRight() + 12, pageArea.getY() + toolButtonsTop);
+    restLengthPicker.setTopLeftPosition (noteLengthPicker.getX(), noteLengthPicker.getY());
     dynamicPicker.setTopLeftPosition (noteLengthPicker.getX(), noteLengthPicker.getY());
     eraserButton.setBounds (staffViewport.getRight() - staffViewport.getScrollBarThickness() - eraserMargin - EraserButton::buttonWidth,
                             noteLengthPicker.getY(), EraserButton::buttonWidth, EraserButton::buttonHeight);
@@ -1351,9 +1358,10 @@ void MainComponent::configureView (StaffView& view)
     view.onRhythmPlaced = [this] { stopPlacingRhythm(); };
 
     // It does what clicks on the other parts do.
-    view.setNoteLength (noteLengthPicker.getLength());
-    view.setTuplet (noteLengthPicker.isTuplet() ? std::optional (noteLengthPicker.getTupletLength()) : std::nullopt, noteLengthPicker.getTupletNotes());
+    view.setNoteLength (addingRests ? restLengthPicker.getLength() : noteLengthPicker.getLength());
+    view.setTuplet (noteLengthPicker.isTuplet() && ! addingRests ? std::optional (noteLengthPicker.getTupletLength()) : std::nullopt, noteLengthPicker.getTupletNotes());
     view.setStaccato (noteLengthPicker.isStaccato());
+    view.setRests (addingRests);
 
     if (eraserButton.getToggleState())
         view.setErasing (true);
@@ -1938,6 +1946,8 @@ void MainComponent::setNoteLength (double beats)
 
     stopSelecting();
 
+    addingRests = false;
+    restLengthPicker.setChoiceShown (false);
     noteLengthPicker.setLength (beats);
     dynamicPicker.setChoice ({});
     eraserButton.setToggleState (false, juce::dontSendNotification);
@@ -1946,8 +1956,39 @@ void MainComponent::setNoteLength (double beats)
     {
         view->setNoteLength (beats);
         view->setMarking ({});
+        view->setRests (false);
         view->setTuplet ({});
     }
+}
+
+void MainComponent::setRestLength (double beats)
+{
+    stopPlacingNotes();
+    stopSelecting();
+
+    addingRests = true;
+    restLengthPicker.setLength (beats);
+    noteLengthPicker.setChoiceShown (false);
+    dynamicPicker.setChoice ({});
+    eraserButton.setToggleState (false, juce::dontSendNotification);
+
+    // The rests show, if they don't already.
+    if (notationGroup != NotationGroup::rests)
+        showNotationGroup (NotationGroup::rests);
+
+    for (auto* view : getViews())
+    {
+        view->setMarking ({});
+        view->setTuplet ({});
+        view->setNoteLength (beats);
+        view->setRests (true);
+    }
+}
+
+void MainComponent::showLengthChoice (bool shown)
+{
+    noteLengthPicker.setChoiceShown (shown && ! addingRests);
+    restLengthPicker.setChoiceShown (shown && addingRests);
 }
 
 void MainComponent::setTuplet (double noteBeats, int numNotes)
@@ -1955,6 +1996,8 @@ void MainComponent::setTuplet (double noteBeats, int numNotes)
     stopPlacingNotes();
     stopSelecting();
 
+    addingRests = false;
+    restLengthPicker.setChoiceShown (false);
     noteLengthPicker.setTuplet (noteBeats, numNotes);
     dynamicPicker.setChoice ({});
     eraserButton.setToggleState (false, juce::dontSendNotification);
@@ -1962,6 +2005,7 @@ void MainComponent::setTuplet (double noteBeats, int numNotes)
     for (auto* view : getViews())
     {
         view->setMarking ({});
+        view->setRests (false);
         view->setTuplet (noteBeats, noteLengthPicker.getTupletNotes());
     }
 }
@@ -1990,7 +2034,9 @@ void MainComponent::chooseTupletLength()
 
 void MainComponent::resumeAddingNotes()
 {
-    if (noteLengthPicker.isTuplet())
+    if (addingRests)
+        setRestLength (restLengthPicker.getLength());
+    else if (noteLengthPicker.isTuplet())
         setTuplet (noteLengthPicker.getTupletLength(), noteLengthPicker.getTupletNotes());
     else
         setNoteLength (noteLengthPicker.getLength());
@@ -2004,6 +2050,7 @@ void MainComponent::setStaccato (bool staccato)
         view->setStaccato (staccato);
 
     // Back to adding notes, with the length chosen
+    addingRests = false;
     resumeAddingNotes();
 }
 
@@ -2024,7 +2071,7 @@ void MainComponent::setMarking (std::optional<music::Marking> marking)
     showNotationGroup (DynamicPicker::getGroup (*marking) == DynamicPicker::Group::flow    ? NotationGroup::flow
                      : DynamicPicker::getGroup (*marking) == DynamicPicker::Group::pedal   ? NotationGroup::pedal
                                                                                             : NotationGroup::dynamics);
-    noteLengthPicker.setChoiceShown (false);
+    showLengthChoice (false);
     eraserButton.setToggleState (false, juce::dontSendNotification);
 
     for (auto* view : getViews())
@@ -2045,7 +2092,7 @@ void MainComponent::setErasing (bool shouldErase)
     stopSelecting();
     eraserButton.setToggleState (true, juce::dontSendNotification);
     dynamicPicker.setChoice ({});
-    noteLengthPicker.setChoiceShown (false);
+    showLengthChoice (false);
 
     for (auto* view : getViews())
         view->setErasing (true);
@@ -2083,7 +2130,7 @@ void MainComponent::setSelecting (bool shouldSelect)
     setEditing (false);
     eraserButton.setToggleState (false, juce::dontSendNotification);
     dynamicPicker.setChoice ({});
-    noteLengthPicker.setChoiceShown (false);
+    showLengthChoice (false);
     selectButton.setToggleState (true, juce::dontSendNotification);
 
     for (auto* view : getViews())
@@ -2100,7 +2147,7 @@ void MainComponent::stopSelecting()
 
     selectMeasures ({}, true);
     selectButton.setToggleState (false, juce::dontSendNotification);
-    noteLengthPicker.setChoiceShown (true);
+    showLengthChoice (true);
 
     for (auto* view : getViews())
         view->setSelecting (false);
@@ -2682,7 +2729,7 @@ void MainComponent::takeStepKeys()
                 const auto pitch = music::spellMidiNote (score.getKey(), key.noteNumber);
                 const auto staff = key.noteNumber >= 60 ? Staff::treble : Staff::bass;
 
-                if (noteLengthPicker.isTuplet() && pitch.step >= 0 && startTupletStep (page, start, staff, pitch))
+                if (noteLengthPicker.isTuplet() && ! addingRests && pitch.step >= 0 && startTupletStep (page, start, staff, pitch))
                 {
                     stepKeysHeld.insert (key.noteNumber);
                     continue;
@@ -2690,7 +2737,9 @@ void MainComponent::takeStepKeys()
 
                 stepTuplet.reset();
                 const auto room = (int) std::lround ((beatsPerMeasure - beat) * Score::slotsPerBeat);
-                const auto chosen = noteLengthPicker.isTuplet() ? noteLengthPicker.getTupletLength() : noteLengthPicker.getLength();
+                const auto chosen = addingRests                 ? restLengthPicker.getLength()
+                                  : noteLengthPicker.isTuplet() ? noteLengthPicker.getTupletLength()
+                                                                : noteLengthPicker.getLength();
                 const auto slots = Score::fitNoteLength ((int) std::lround (chosen * Score::slotsPerBeat), room);
                 stepChord = StepChord { measure, beat, (double) slots / Score::slotsPerBeat };
             }
@@ -2701,9 +2750,15 @@ void MainComponent::takeStepKeys()
             const auto pitch = music::spellMidiNote (score.getKey(), key.noteNumber);
             const auto staff = key.noteNumber >= 60 ? Staff::treble : Staff::bass;
 
+            // With rests chosen, a rest goes on the staff each note would have gone on, in place of it.
             if (pitch.step >= 0 && stepChord.has_value() && ! stepChord->tupletNote
                 && juce::isPositiveAndBelow (part, score.getNumParts()) && ! score.chordUsesStaff (part, stepChord->measure, staff))
-                score.addNote ({ staff, stepChord->measure, stepChord->beat, pitch, part, stepChord->length, noteLengthPicker.isStaccato() });
+            {
+                if (addingRests)
+                    score.addRest (part, staff, stepChord->measure, stepChord->beat, stepChord->length);
+                else
+                    score.addNote ({ staff, stepChord->measure, stepChord->beat, pitch, part, stepChord->length, noteLengthPicker.isStaccato() });
+            }
         }
         else
         {
@@ -2741,7 +2796,7 @@ void MainComponent::takeStepKeys()
 
 bool MainComponent::isTupletStepContinuing (int page) const
 {
-    if (! stepTuplet.has_value() || stepTuplet->page != page || ! noteLengthPicker.isTuplet()
+    if (! stepTuplet.has_value() || stepTuplet->page != page || ! noteLengthPicker.isTuplet() || addingRests
         || stepTuplet->placed >= stepTuplet->tuplet.getNumNotes()
         || stepTuplet->tuplet.part != activePart
         || noteLengthPicker.getTupletNotes() != stepTuplet->tuplet.getNumNotes()
@@ -3856,15 +3911,30 @@ void MainComponent::showNotationGroup (NotationGroup group)
     notationGroupBox.setSelectedId ((int) group + 1, juce::dontSendNotification);
 
     noteLengthPicker.setVisible (group == NotationGroup::notes);
-    dynamicPicker.setVisible (group != NotationGroup::notes);
+    restLengthPicker.setVisible (group == NotationGroup::rests);
+    dynamicPicker.setVisible (group != NotationGroup::notes && group != NotationGroup::rests);
 
-    if (group != NotationGroup::notes)
+    // Showing the rests, clicks add them; showing the notes again, clicks add notes.
+    if (group == NotationGroup::rests && ! addingRests)
+    {
+        setRestLength (restLengthPicker.getLength());
+        return;
+    }
+
+    if (group == NotationGroup::notes && addingRests)
+    {
+        addingRests = false;
+        resumeAddingNotes();
+        return;
+    }
+
+    if (group != NotationGroup::notes && group != NotationGroup::rests)
         dynamicPicker.showGroup (group == NotationGroup::dynamics ? DynamicPicker::Group::dynamics
                                : group == NotationGroup::flow     ? DynamicPicker::Group::flow
                                                                   : DynamicPicker::Group::pedal);
 
     // A dynamic, repeat sign or pedal chosen from a group that's hidden goes, and clicks add notes again.
     if (const auto chosen = dynamicPicker.getChoice();
-        chosen.has_value() && (group == NotationGroup::notes || DynamicPicker::getGroup (*chosen) != dynamicPicker.getShownGroup()))
+        chosen.has_value() && (group == NotationGroup::notes || group == NotationGroup::rests || DynamicPicker::getGroup (*chosen) != dynamicPicker.getShownGroup()))
         resumeAddingNotes();
 }

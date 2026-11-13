@@ -18,6 +18,7 @@ struct StaffEvent
     bool staccato = false;              // played short and detached, with a dot over or under it
     std::optional<double> tupletStart; // for one of a tuplet's notes, when the tuplet starts, in beats
     int tupletNotes = 0;                // and how many notes it has
+    bool writtenRest = false;           // a rest written in, rather than one filling a gap between notes
 
     bool isRest() const noexcept { return tones.empty(); }
 

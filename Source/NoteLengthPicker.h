@@ -127,6 +127,53 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NoteLengthPicker)
 };
 
+/** Small buttons, side by side, showing a whole, a dotted half, a half, a dotted quarter, a
+    quarter, a dotted eighth, an eighth, a 16th, a 32nd and a 64th rest, for choosing how long the
+    rests that clicks add are. One is chosen at a time.
+*/
+class RestLengthPicker final : public juce::Component
+{
+public:
+    RestLengthPicker();
+
+    /** The length chosen, in beats: 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25, 0.125 or 0.0625. */
+    double getLength() const noexcept { return length; }
+
+    /** Chooses a length, in beats, without calling onChange. */
+    void setLength (double beats);
+
+    /** Shows which length is chosen, or none while clicks are doing something else. */
+    void setChoiceShown (bool);
+
+    /** Called when a button's clicked, with the length it chooses. */
+    std::function<void (double beats)> onChange;
+
+    /** The size the buttons need, side by side. */
+    juce::Rectangle<int> getIdealBounds() const;
+
+    void resized() override;
+
+    /** Draws a rest of a length, in beats, in the current colour, centred in an area the size of a button. */
+    static void drawRest (juce::Graphics&, const MusicGlyphs&, double beats, juce::Rectangle<float> area);
+
+private:
+    struct RestButton final : public juce::Button
+    {
+        RestButton (const MusicGlyphs&, double beats);
+
+        void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+
+        const MusicGlyphs& glyphs;
+        const double beats;
+    };
+
+    MusicGlyphs glyphs;
+    std::array<std::unique_ptr<RestButton>, 10> buttons;
+    double length = 1.0;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RestLengthPicker)
+};
+
 /** How many notes tuplets have, from 2 to 10, as a row of numbered buttons, and the lengths their
     notes can be, as buttons under them: half notes, quarters, eighths, 16ths and 32nds, each with the
     number over it. One of each is chosen. Lengths whose tuplets would be longer than a 4/4

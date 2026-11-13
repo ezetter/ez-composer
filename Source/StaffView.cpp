@@ -469,6 +469,7 @@ void StaffView::setNoteLength (double beats)
 {
     noteLength = juce::jlimit (1.0 / Score::slotsPerBeat, Score::maxNoteLength, beats);
     setHoverNote ({});
+    setHoverRest ({});
 }
 
 void StaffView::setStaccato (bool shouldBeStaccato)
@@ -484,6 +485,14 @@ void StaffView::setTuplet (std::optional<double> noteBeats, int numNotes)
     tupletNotes = juce::jlimit (Tuplet::minNotes, Tuplet::maxNotes, numNotes);
     endTuplet();
     setHoverNote ({});
+}
+
+void StaffView::setRests (bool shouldPlaceRests)
+{
+    endTuplet();
+    placingRests = shouldPlaceRests;
+    setHoverNote ({});
+    setHoverRest ({});
 }
 
 void StaffView::endTuplet()
@@ -505,6 +514,7 @@ void StaffView::setMarking (std::optional<music::Marking> newMarking)
     hoverRepeat.reset();
     setMouseCursor (juce::MouseCursor::NormalCursor);
     setHoverNote ({});
+    setHoverRest ({});
     setHoverMarkPoint ({});
     repaint();
 }
@@ -1955,6 +1965,7 @@ void StaffView::paint (juce::Graphics& g)
     drawTies (g, juce::jmax (0, firstMeasure - 1), lastMeasure);
     drawTieDrag (g);
     drawHoverNote (g);
+    drawHoverRest (g);
     drawMoveHint (g);
     drawHairpins (g);
     drawPedals (g);
@@ -2260,8 +2271,18 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
     {
         if (event.isRest())
         {
-            drawCentred (g, getRestGlyph (event.duration), getEventX (measure, event),
-                         getY (staff, event.duration == Duration::whole ? middleLine + 2 : middleLine));
+            // A rest written in is red when the eraser or a click would take it out.
+            const auto underEraser = erasing && hoverErasable.rest.has_value() && hoverErasable.rest->staff == staff
+                                  && hoverErasable.rest->measure == measure && juce::exactlyEqual (hoverErasable.rest->beat, event.onset);
+            const auto clickRemoves = placingRests && ! hoverHintHidden && hoverRest.has_value() && event.writtenRest
+                                   && hoverRest->staff == staff && hoverRest->measure == measure && juce::exactlyEqual (hoverRest->beat, event.onset)
+                                   && score.getRestLength (part, staff, measure, event.onset) == std::optional (hoverRest->length);
+
+            if (event.writtenRest && (underEraser || clickRemoves))
+                g.setColour (removalColour);
+
+            drawRest (g, staff, getEventX (measure, event), event.duration);
+            g.setColour (inkColour);
             continue;
         }
 
@@ -2956,6 +2977,95 @@ void StaffView::drawGhostNote (juce::Graphics& g, const Note& note) const
     g.setColour (inkColour);
 }
 
+void StaffView::drawRest (juce::Graphics& g, Staff staff, float centreX, Duration duration) const
+{
+    // A whole rest hangs from the line above the middle one; the others sit across the middle.
+    const auto glyph = getRestGlyph (duration);
+    const auto y = getY (staff, duration == Duration::whole ? middleLine + 2 : middleLine);
+    drawCentred (g, glyph, centreX, y);
+
+    // A dotted rest has its dot in the space above the middle line, after it.
+    if (isDotted (duration))
+    {
+        const auto bounds = glyphs.getPath (glyph).getBounds();
+        glyphs.draw (g, Smufl::augmentationDot, { centreX + bounds.getWidth() / 2.0f + 0.3f * staffSpace, getY (staff, middleLine + 1) });
+    }
+}
+
+std::optional<StaffView::RestSpot> StaffView::findWrittenRestAt (Staff staff, int measure, float x) const
+{
+    if (! juce::isPositiveAndBelow (measure, (int) measureLayouts.size()))
+        return {};
+
+    std::optional<RestSpot> nearest;
+    auto nearestDistance = 1.4f * staffSpace;
+
+    for (const auto& event : measureLayouts[(size_t) measure].content.staves[(size_t) staff].events)
+        if (event.writtenRest)
+            if (const auto distance = std::abs (x - getEventX (measure, event)); distance <= nearestDistance)
+            {
+                nearest = RestSpot { staff, measure, event.onset, score.getRestLength (part, staff, measure, event.onset).value_or (getBeats (event.duration)) };
+                nearestDistance = distance;
+            }
+
+    return nearest;
+}
+
+std::optional<StaffView::RestSpot> StaffView::getRestAt (juce::Point<float> point) const
+{
+    const auto spot = getNoteAt (point, noteLength, false);
+
+    if (! spot.has_value())
+        return {};
+
+    // Over a rest written in, it's that one, if it's as long, which a click takes out.
+    if (const auto written = findWrittenRestAt (spot->staff, spot->measure, point.x); written.has_value() && juce::exactlyEqual (written->length, noteLength))
+        return written;
+
+    return RestSpot { spot->staff, spot->measure, spot->beat, noteLength };
+}
+
+void StaffView::clickRest (const RestSpot& spot)
+{
+    if (score.getRestLength (part, spot.staff, spot.measure, spot.beat) == std::optional (spot.length))
+        score.removeRest (part, spot.staff, spot.measure, spot.beat);
+    else
+        score.addRest (part, spot.staff, spot.measure, spot.beat, spot.length);
+
+    // Show what the click did, rather than what another click would do.
+    hoverHintHidden = true;
+    repaint();
+}
+
+void StaffView::setHoverRest (std::optional<RestSpot> spot)
+{
+    if (spot == hoverRest)
+        return;
+
+    hoverRest = spot;
+    hoverHintHidden = false;
+    repaint();
+}
+
+void StaffView::drawHoverRest (juce::Graphics& g) const
+{
+    if (! placingRests || ! hoverRest.has_value() || hoverHintHidden
+        || hoverRest->measure >= score.getNumMeasures() || hoverRest->beat >= score.getBeatsPerMeasure()
+        || score.chordUsesStaff (part, hoverRest->measure, hoverRest->staff))
+        return;
+
+    // The rest that's there is red instead, when a click would take it out.
+    if (score.getRestLength (part, hoverRest->staff, hoverRest->measure, hoverRest->beat) == std::optional (hoverRest->length))
+        return;
+
+    // As long as it would be, fitted into what's left of the measure
+    const auto slots = Score::fitNoteLength ((int) std::lround (hoverRest->length * Score::slotsPerBeat),
+                                             (int) std::lround ((score.getBeatsPerMeasure() - hoverRest->beat) * Score::slotsPerBeat));
+    g.setColour (hoverColour);
+    drawRest (g, hoverRest->staff, getOnsetX (hoverRest->measure, hoverRest->beat), getDurationForBeats ((double) slots / Score::slotsPerBeat));
+    g.setColour (inkColour);
+}
+
 void StaffView::drawStaccatoDot (juce::Graphics& g, Staff staff, float centreX, int staffPosition) const
 {
     const auto bounds = glyphs.getPath (Smufl::articStaccatoAbove).getBounds();
@@ -3383,6 +3493,13 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
         setMouseCursor (juce::MouseCursor::NormalCursor);
     }
 
+    if (! marking.has_value() && placingRests)
+    {
+        setHoverNote ({});
+        setHoverRest (getRestAt (e.position));
+        return;
+    }
+
     if (! marking.has_value())
     {
         setHoverNote (isPlacingTuplets() ? getTupletNoteAt (e.position) : getNoteToClickAt (e.position));
@@ -3438,6 +3555,7 @@ void StaffView::mouseExit (const juce::MouseEvent&)
         setHoverErasable ({});
 
     setHoverNote ({});
+    setHoverRest ({});
     setHoverMarkPoint ({});
 
     if (hoverRepeat.has_value())
@@ -3465,6 +3583,7 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
         return;
 
     pressedNote.reset();
+    pressedRest.reset();
     pressedDynamic.reset();
     pressedPedal.reset();
     pressedRepeat.reset();
@@ -3592,6 +3711,13 @@ void StaffView::mouseDown (const juce::MouseEvent& e)
         if (const auto point = getDynamicPointAt (e.position))
             hairpinDrag = HairpinDrag { { point->first, point->second, *chosen, 1.0 }, toScoreBeats (point->first, point->second) + 1.0, std::nullopt };
 
+        return;
+    }
+
+    // Placing rests, a click adds one, or takes it out, when the mouse is let go.
+    if (placingRests)
+    {
+        pressedRest = getRestAt (e.position);
         return;
     }
 
@@ -3805,6 +3931,7 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
     }
 
     const auto pressed = pressedNote;
+    const auto restSpot = std::exchange (pressedRest, std::nullopt);
     const auto from = tieFrom;
     const auto pressedPoint = pressedDynamic;
     const auto pedalPoint = pressedPedal;
@@ -3878,6 +4005,12 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
         hairpin.length = drag->end - toScoreBeats (hairpin.measure, hairpin.beat);
         score.setHairpin (part, hairpin);
         hoverHairpin.reset();
+        return;
+    }
+
+    if (restSpot.has_value() && placingRests && ! e.mods.isPopupMenu() && ! e.mouseWasDraggedSinceMouseDown())
+    {
+        clickRest (*restSpot);
         return;
     }
 
@@ -4213,6 +4346,12 @@ StaffView::Erasable StaffView::findErasableAt (juce::Point<float> point) const
                 }
     }
 
+    // A rest written in, near its glyph
+    if (const auto spot = getNoteAt (point))
+        if (const auto rest = findWrittenRestAt (spot->staff, spot->measure, point.x);
+            rest.has_value() && std::abs (point.y - getY (spot->staff, middleLine)) <= 2.5f * staffSpace)
+            found.rest = rest;
+
     // A tie, near its curve
     const auto measure = findMeasure (point.x);
     const auto nearMeasure = measure >= 0 ? measure : score.getNumMeasures() - 1;
@@ -4287,6 +4426,9 @@ void StaffView::eraseAt (juce::Point<float> point)
 
     if (found.hairpin.has_value())
         score.removeHairpin (part, found.hairpin->measure, found.hairpin->beat);
+
+    if (found.rest.has_value())
+        score.removeRest (part, found.rest->staff, found.rest->measure, found.rest->beat);
 
     if (found.pedal.has_value())
     {

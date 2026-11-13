@@ -336,3 +336,95 @@ void TupletLengthPanel::LengthButton::paintButton (juce::Graphics& g, bool highl
 
     NoteLengthPicker::drawTuplet (g, glyphs, beats, numNotes, getLocalBounds().toFloat().reduced (3.5f));
 }
+
+//==============================================================================
+RestLengthPicker::RestLengthPicker()
+    : glyphs (NoteLengthPicker::glyphStaffSpace)
+{
+    // Whole, dotted half, half, dotted quarter, quarter, dotted eighth, eighth, 16th, 32nd and 64th, longest first
+    for (auto [index, beats, name] : { std::tuple { 0, 4.0, "Whole" }, { 1, 3.0, "Dotted half" }, { 2, 2.0, "Half" },
+                                       { 3, 1.5, "Dotted quarter" }, { 4, 1.0, "Quarter" }, { 5, 0.75, "Dotted eighth" },
+                                       { 6, 0.5, "Eighth" }, { 7, 0.25, "16th" }, { 8, 0.125, "32nd" }, { 9, 0.0625, "64th" } })
+    {
+        auto& button = buttons[(size_t) index];
+        button = std::make_unique<RestButton> (glyphs, beats);
+        button->setTooltip (juce::String (name) + " rests: click the staff to add " + juce::String (name).toLowerCase()
+                            + " rests, in place of what's there, or click one to take it out");
+        button->setClickingTogglesState (true);
+        button->setRadioGroupId (1);
+        button->setWantsKeyboardFocus (false);
+        button->onClick = [this, chosen = beats]
+        {
+            length = chosen;
+            setChoiceShown (true);
+
+            if (onChange != nullptr)
+                onChange (chosen);
+        };
+        addAndMakeVisible (*button);
+    }
+
+    setLength (1.0);
+    setSize (getIdealBounds().getWidth(), getIdealBounds().getHeight());
+}
+
+void RestLengthPicker::setLength (double beats)
+{
+    length = beats;
+    setChoiceShown (true);
+}
+
+void RestLengthPicker::setChoiceShown (bool shown)
+{
+    for (auto& button : buttons)
+        button->setToggleState (shown && juce::exactlyEqual (button->beats, length), juce::dontSendNotification);
+}
+
+juce::Rectangle<int> RestLengthPicker::getIdealBounds() const
+{
+    return { (int) buttons.size() * NoteLengthPicker::buttonSize + ((int) buttons.size() - 1) * gap, NoteLengthPicker::buttonSize };
+}
+
+void RestLengthPicker::resized()
+{
+    for (size_t i = 0; i < buttons.size(); ++i)
+        buttons[i]->setBounds ((int) i * (NoteLengthPicker::buttonSize + gap), 0, NoteLengthPicker::buttonSize, NoteLengthPicker::buttonSize);
+}
+
+void RestLengthPicker::drawRest (juce::Graphics& g, const MusicGlyphs& glyphs, double beats, juce::Rectangle<float> bounds)
+{
+    const auto glyph = beats >= 4.0 ? Smufl::restWhole : beats >= 2.0 ? Smufl::restHalf : beats >= 1.0 ? Smufl::restQuarter
+                     : beats >= 0.5 ? Smufl::rest8th : beats >= 0.25 ? Smufl::rest16th : beats >= 0.125 ? Smufl::rest32nd : Smufl::rest64th;
+    const auto dotted = juce::exactlyEqual (beats, 3.0) || juce::exactlyEqual (beats, 1.5) || juce::exactlyEqual (beats, 0.75);
+    const auto restBounds = glyphs.getPath (glyph).getBounds();
+    const auto staffSpace = NoteLengthPicker::glyphStaffSpace;
+
+    // Moved left a little, for a dotted one, to leave room for its dot; a whole or half rest
+    // with a staff line, to show which it is.
+    const auto centre = bounds.getCentre().translated (dotted ? -0.4f * staffSpace : 0.0f, 0.0f);
+    const juce::Point<float> origin { centre.x - restBounds.getCentreX(), centre.y - restBounds.getCentreY() };
+    glyphs.draw (g, glyph, origin);
+
+    if (beats >= 2.0)
+    {
+        const auto lineY = beats >= 4.0 ? origin.y + restBounds.getY() : origin.y + restBounds.getBottom();
+        const auto halfWidth = restBounds.getWidth() / 2.0f + 0.35f * staffSpace;
+        g.fillRect (juce::Rectangle<float>::leftTopRightBottom (centre.x - halfWidth, lineY - 0.6f, centre.x + halfWidth, lineY + 0.6f));
+    }
+
+    if (dotted)
+        glyphs.draw (g, Smufl::augmentationDot, { origin.x + restBounds.getRight() + 0.3f * staffSpace, centre.y - 0.5f * staffSpace });
+}
+
+RestLengthPicker::RestButton::RestButton (const MusicGlyphs& glyphsToUse, double beatsToShow)
+    : juce::Button ({}),
+      glyphs (glyphsToUse),
+      beats (beatsToShow)
+{
+}
+
+void RestLengthPicker::RestButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    g.setColour (controls::drawSymbolButtonTile (g, *this, highlighted, down));
+    drawRest (g, glyphs, beats, getLocalBounds().toFloat().reduced (0.5f));
+}

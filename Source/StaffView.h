@@ -26,6 +26,8 @@
     With editing on, dragging a note of its own moves it, and clicking one offers a menu of
     lengths to change it to, and Delete; anywhere else, clicks and drags do what they would anyway.
 
+    With rests chosen, clicks add a rest of the length chosen instead, and clicking one takes it out.
+
     With a dynamic chosen, clicks mark it instead, between the staves, at the beat clicked. With
     a crescendo or decrescendo chosen, dragging along the staves marks one as long as the drag,
     and dragging the end of one stretches it. With the eraser, whatever the mouse passes over
@@ -71,6 +73,14 @@ public:
         choosing anything else. Once all its notes are placed, the next click starts another.
     */
     void setTuplet (std::optional<double> noteBeats, int numNotes = 3);
+
+    /** Turns placing rests on or off. While it's on, clicks add rests of the length set with
+        setNoteLength(), on the staff clicked, at the nearest step of their length without its dot,
+        in place of whatever's there while they last; clicking a rest of that length already
+        written takes it out. Anything chosen to mark goes first.
+    */
+    void setRests (bool);
+    bool isPlacingRests() const noexcept { return placingRests; }
 
     /** What clicks mark, rather than adding notes, or none to go back to adding notes.
 
@@ -228,6 +238,26 @@ public:
     void setRhythmPlacement (std::optional<RhythmPlacement>);
     std::function<void()> onRhythmPlaced;
 
+    /** Where a rest goes, or is: its staff, measure and beat, and how long it is, in beats. */
+    struct RestSpot
+    {
+        Staff staff;
+        int measure;
+        double beat;
+        double length = 1.0;
+
+        bool operator== (const RestSpot& other) const
+        {
+            return staff == other.staff && measure == other.measure && juce::exactlyEqual (beat, other.beat) && juce::exactlyEqual (length, other.length);
+        }
+    };
+
+    /** Where a click at this point would add a rest of the length chosen, or take out the one
+        written there: on the staff there, at the nearest step of its length, or where a rest's
+        written near enough.
+    */
+    std::optional<RestSpot> getRestAt (juce::Point<float>) const;
+
     /** What the eraser would take out at a point. */
     struct Erasable
     {
@@ -239,13 +269,14 @@ public:
         std::optional<PedalSpan> pedal;
         std::optional<std::pair<int, music::Repeat>> repeat;    // the measure of a repeat sign there, and which it is
         std::optional<int> ending;                              // a measure of an ending whose bracket's there
+        std::optional<RestSpot> rest;                           // a rest written in, there
 
         bool isEmpty() const { return ! note.has_value() && ! tie.has_value() && ! dynamic.has_value() && ! hairpin.has_value() && ! pedal.has_value()
-                                      && ! repeat.has_value() && ! ending.has_value(); }
+                                      && ! repeat.has_value() && ! ending.has_value() && ! rest.has_value(); }
         bool operator== (const Erasable& other) const
         {
             return note == other.note && tie == other.tie && dynamic == other.dynamic && hairpin == other.hairpin && pedal == other.pedal
-                && repeat == other.repeat && ending == other.ending;
+                && repeat == other.repeat && ending == other.ending && rest == other.rest;
         }
     };
 
@@ -421,6 +452,19 @@ private:
 
     /** A faint notehead, for a note that a click or a drag would put there. */
     void drawGhostNote (juce::Graphics&, const Note&) const;
+
+    /** A rest, in the current colour, centred across on a point, with its dot if it's dotted. */
+    void drawRest (juce::Graphics&, Staff, float centreX, Duration) const;
+
+    /** Where a click would put a rest, faintly, unless the click would take out one there. */
+    void drawHoverRest (juce::Graphics&) const;
+    void setHoverRest (std::optional<RestSpot>);
+
+    /** The rest written on a staff near a point across a measure, if there is one: where it starts, as it's shown. */
+    std::optional<RestSpot> findWrittenRestAt (Staff, int measure, float x) const;
+
+    /** What a click with rests chosen does: adds one, or takes out the same one if it's there. */
+    void clickRest (const RestSpot&);
 
     /** A staccato dot, in the current colour, centred across on a point, on a line or space. */
     void drawStaccatoDot (juce::Graphics&, Staff, float centreX, int staffPosition) const;
@@ -689,6 +733,8 @@ private:
     std::optional<double> tupletNoteLength;        // placing tuplets of notes this long, in beats, rather than single notes
     int tupletNotes = 3;                            // with this many notes
     std::optional<TupletProgress> tupletProgress;
+    bool placingRests = false;                      // clicks add rests of the note length, rather than notes
+    std::optional<RestSpot> hoverRest, pressedRest; // where a click would put one, and where the mouse went down
     std::optional<ScaleSettings> scalePlacement;    // adding notes from the scale, at the next click
     std::optional<RhythmPlacement> rhythmPlacement; // writing a rhythm, at the next click
     std::optional<Note> scaleHover;                 // where either would go

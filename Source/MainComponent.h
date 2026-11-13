@@ -302,8 +302,16 @@ private:
     /** Shows the lengths a tuplet's notes can be, beside the tuplet button, and places tuplets meanwhile. */
     void chooseTupletLength();
 
-    /** Goes back to adding what the note length buttons have chosen: single notes, or tuplets. */
+    /** Makes clicks on the staff, and steps recorded, add rests this long, in beats, in place of notes. */
+    void setRestLength (double beats);
+
+    /** Goes back to adding what was chosen last: rests, or what the note length buttons have
+        chosen, single notes or tuplets.
+    */
     void resumeAddingNotes();
+
+    /** Shows which length is chosen, of the notes or the rests, whichever clicks add, or neither. */
+    void showLengthChoice (bool shown);
 
     /** Makes the notes that clicking the staff adds staccato, or not, whatever their length.
         Clicks add notes again, if they were marking something or erasing.
@@ -756,12 +764,15 @@ private:
 
     controls::DialLookAndFeel dialLookAndFeel;
     NoteLengthPicker noteLengthPicker;  // at the top left of the score, over the staves: the length of the notes that clicks add
+    RestLengthPicker restLengthPicker;  // in its place: the length of the rests clicks add, instead of notes
+    bool addingRests = false;           // clicks and steps add rests, rather than notes
     DynamicPicker dynamicPicker;        // beside it: a dynamic or hairpin to mark instead
 
     /** Which notation controls show, after the box choosing them: the note lengths, with
-        staccato and tuplets; the dynamics and hairpins; the repeat signs and endings; or the pedal.
+        staccato and tuplets; the dynamics and hairpins; the repeat signs and endings; the pedal;
+        or the rest lengths. They're listed with the rests after the notes.
     */
-    enum class NotationGroup { notes, dynamics, flow, pedal };
+    enum class NotationGroup { notes, dynamics, flow, pedal, rests };
     controls::TileComboBoxLookAndFeel tileComboBoxLookAndFeel;
     juce::ComboBox notationGroupBox;     // at the top left of the score, over the staves: which group shows
     NotationGroup notationGroup = NotationGroup::notes;

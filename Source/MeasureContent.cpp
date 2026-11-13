@@ -367,9 +367,11 @@ namespace
         for (const auto& tuplet : content.tuplets)
             tupletAt[(size_t) std::lround (tuplet.beat * Score::slotsPerBeat)] = &tuplet;
 
+        const auto restAt = [&] (int slot) { return score.getRestLength (part, staff, measure, beatOf (slot)); };
+
         const auto isEmpty = [&] (int slot)
         {
-            return score.getNotes (part, staff, measure, beatOf (slot)).empty() && tupletAt[(size_t) slot] == nullptr;
+            return score.getNotes (part, staff, measure, beatOf (slot)).empty() && tupletAt[(size_t) slot] == nullptr && ! restAt (slot).has_value();
         };
 
         bool allEmpty = true;
@@ -401,6 +403,18 @@ namespace
                 }
 
                 slot += (int) std::lround (tuplet->getLength() * Score::slotsPerBeat);
+                continue;
+            }
+
+            // A rest written in, as long as it was, or as fits: a whole rest in the middle of the measure, if it fills it
+            if (const auto rest = restAt (slot); rest.has_value() && score.getNotes (part, staff, measure, onset).empty())
+            {
+                const auto length = Score::fitNoteLength ((int) std::lround (*rest * Score::slotsPerBeat), slots - slot);
+                const auto fillsMeasure = slot == 0 && length == slots;
+                StaffEvent event { onset, fillsMeasure ? Duration::whole : getDurationForBeats (beatOf (length)), {}, false, fillsMeasure };
+                event.writtenRest = true;
+                content.events.push_back (event);
+                slot += length;
                 continue;
             }
 
