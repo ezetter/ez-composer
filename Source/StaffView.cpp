@@ -1723,10 +1723,32 @@ std::optional<Note> StaffView::getNoteAt (juce::Point<float> point, double lengt
 
     while (grid > 1 && grid > (int) std::lround (length * Score::slotsPerBeat))
         grid /= 2;
-    const auto slot = getSlotAt (measure, point.x, grid, [&] (double beat)
+    auto slot = getSlotAt (measure, point.x, grid, [&] (double beat)
     {
         return ! score.getNotes (part, staff, measure, beat).empty();
     });
+
+    // Or where anything on the staff starts, a note or a rest, if that's nearer: so a note can go
+    // just after a shorter one, or a rest, such as a dotted eighth after a 16th rest, off the
+    // grid of its own length.
+    if (juce::isPositiveAndBelow (measure, (int) measureLayouts.size()))
+    {
+        auto nearest = std::abs (point.x - getOnsetX (measure, (double) slot / Score::slotsPerBeat));
+
+        for (const auto& event : measureLayouts[(size_t) measure].content.staves[(size_t) staff].events)
+        {
+            const auto onsetSlot = event.onset * Score::slotsPerBeat;
+
+            if (event.tupletStart.has_value() || event.centred || std::abs (onsetSlot - std::round (onsetSlot)) > 1.0e-6)
+                continue;
+
+            if (const auto distance = std::abs (point.x - getOnsetX (measure, event.onset)); distance < nearest)
+            {
+                nearest = distance;
+                slot = (int) std::lround (onsetSlot);
+            }
+        }
+    }
 
     const auto beat = (double) slot / Score::slotsPerBeat;
     const auto lowerStep = getBottomLineStep (staff) + below;
