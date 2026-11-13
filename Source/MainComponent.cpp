@@ -40,6 +40,8 @@ namespace
     constexpr int partArrowWidth = 26, partArrowHeight = 44;
     constexpr int scorePageBandHeight = 6;     // under the pages' tabs, where the ruler would be
     const char* const scorePageKey = "showScorePage";
+    const char* const chordControlsKey = "showChordControls";
+    constexpr int compactLineGap = 2;           // between the score page's lines without the chord buttons
 
     // A full 88-key piano, A0 to C8
     constexpr int lowestKey = 21;
@@ -246,6 +248,12 @@ void MainComponent::ScorePage::setMinimumSize (int width, int height)
     update();
 }
 
+void MainComponent::ScorePage::setCompact (bool shouldBeCompact)
+{
+    compact = shouldBeCompact;
+    layOut();
+}
+
 void MainComponent::ScorePage::setTitle (const juce::String& newTitle)
 {
     title = newTitle;
@@ -344,7 +352,7 @@ void MainComponent::ScorePage::layOut()
         const auto height = line->getContentHeight();
         line->setBounds (sideMargin, y, line->getContentWidth(), height);
         right = juce::jmax (right, line->getRight() + sideMargin);
-        y += height + scorePageLineGap;
+        y += height + (compact ? compactLineGap : scorePageLineGap);
     }
 
     // With room for the measure buttons under the last line
@@ -633,6 +641,10 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     pageTabs.onRenamePage = [this] (int page, const juce::String& name) { piece.renamePage (page, name); };
     piece.onPagesChanged = [this] { pagesChanged(); };
     addAndMakeVisible (pageTabs);
+
+    // The chord buttons and numerals, shown or not as last time
+    chordControlsShown = settings.getBoolValue (chordControlsKey, true);
+    scorePage.setCompact (! chordControlsShown);
 
     // A track for each part of the new score, with the instruments, volumes and muting it had last time
     for (int part = 0; part < score.getNumParts(); ++part)
@@ -1188,6 +1200,19 @@ void MainComponent::showScorePage (bool show)
     resized();
     scrollToMeasure (shownMeasure, true);
     repaint();
+    commandManager.commandStatusChanged();     // the View menu's tick
+}
+
+void MainComponent::setChordControlsShown (bool shown)
+{
+    chordControlsShown = shown;
+    settings.setValue (chordControlsKey, shown);
+
+    for (auto* view : getViews())
+        view->setChordControlsShown (shown);
+
+    scorePage.setCompact (! shown);
+    commandManager.commandStatusChanged();
 }
 
 void MainComponent::updatePartArrows()
@@ -1309,6 +1334,8 @@ std::vector<StaffView*> MainComponent::getViews() const
 
 void MainComponent::configureView (StaffView& view)
 {
+    view.setChordControlsShown (chordControlsShown);
+
     // Clicking the part's staff, or its chord buttons, makes it the active part.
     view.onClicked = [this, &view] { setActivePart (view.getPart()); };
     view.onChordButtonClicked = [this, &view] (int measure) { editChord (view.getPart(), measure); };
@@ -3543,7 +3570,7 @@ void MainComponent::updateRemoveMeasureButton()
 //==============================================================================
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit", "MIDI" };
+    return { "File", "Edit", "View", "MIDI" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int menuIndex, const juce::String&)
@@ -3558,6 +3585,15 @@ juce::PopupMenu MainComponent::getMenuForIndex (int menuIndex, const juce::Strin
     }
 
     if (menuIndex == 2)
+    {
+        menu.addCommandItem (&commandManager, showInstrumentsView);
+        menu.addCommandItem (&commandManager, showScoreView);
+        menu.addSeparator();
+        menu.addCommandItem (&commandManager, toggleChordControls);
+        return menu;
+    }
+
+    if (menuIndex == 3)
     {
         // Each MIDI input, ticked when it's on.
         midiMenuDevices = midiInputs.getDevices();
@@ -3642,7 +3678,7 @@ void MainComponent::menuItemSelected (int menuItemID, int topLevelMenuIndex)
 
     const auto index = (size_t) (menuItemID - firstMidiInputItem);
 
-    if (topLevelMenuIndex == 2 && menuItemID >= firstMidiInputItem && index < midiMenuDevices.size())
+    if (topLevelMenuIndex == 3 && menuItemID >= firstMidiInputItem && index < midiMenuDevices.size())
         midiInputs.setEnabled (midiMenuDevices[index].info.identifier, ! midiMenuDevices[index].enabled);
 }
 
@@ -3653,7 +3689,7 @@ juce::ApplicationCommandTarget* MainComponent::getNextCommandTarget()
 
 void MainComponent::getAllCommands (juce::Array<juce::CommandID>& commands)
 {
-    commands.addArray ({ newScore, openScore, saveScore, saveScoreAs, undoChange, redoChange });
+    commands.addArray ({ newScore, openScore, saveScore, saveScoreAs, undoChange, redoChange, showInstrumentsView, showScoreView, toggleChordControls });
 }
 
 void MainComponent::getCommandInfo (juce::CommandID command, juce::ApplicationCommandInfo& info)
@@ -3676,6 +3712,17 @@ void MainComponent::getCommandInfo (juce::CommandID command, juce::ApplicationCo
         case redoChange:   info.setInfo ("Redo", "Makes the last change undone again", "Edit", 0);
                            info.setActive (history.canRedo());
                            info.addDefaultKeypress ('z', cmd | juce::ModifierKeys::shiftModifier); break;
+        case showInstrumentsView:
+                           info.setInfo ("Instruments", "Shows every instrument's staves, one under another", "View", 0);
+                           info.setTicked (! showingScorePage);
+                           info.addDefaultKeypress ('1', cmd); break;
+        case showScoreView:
+                           info.setInfo ("Score", "Shows one instrument at a time, as a page of a score, four measures to a line", "View", 0);
+                           info.setTicked (showingScorePage);
+                           info.addDefaultKeypress ('2', cmd); break;
+        case toggleChordControls:
+                           info.setInfo ("Show Chord Controls", "Shows the chord buttons over the measures and the Roman numerals under them", "View", 0);
+                           info.setTicked (chordControlsShown); break;
         default:           break;
     }
 }
@@ -3716,6 +3763,18 @@ bool MainComponent::perform (const InvocationInfo& invocation)
         case redoChange:
             selectMeasures ({}, true);
             history.redo();
+            return true;
+
+        case showInstrumentsView:
+            showScorePage (false);
+            return true;
+
+        case showScoreView:
+            showScorePage (true);
+            return true;
+
+        case toggleChordControls:
+            setChordControlsShown (! chordControlsShown);
             return true;
 
         default:

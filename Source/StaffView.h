@@ -276,6 +276,12 @@ public:
     /** The measures it shows: all of them, or its line's */
     juce::Range<int> getShownMeasures() const;
 
+    /** Shows or hides each measure's Add Chord or Edit Chord button, and the chords' Roman
+        numerals under the staves. Hidden, the chords' names still show over the measures, and
+        the music takes less room above and below the staves.
+    */
+    void setChordControlsShown (bool);
+
     /** Marks the view as showing the active part, whose instrument the keyboard plays. */
     void setActive (bool);
 
@@ -728,6 +734,7 @@ private:
     float reachAbove = 0.0f;            // how far the music goes above the treble staff, in staff spaces
     float reachBelow = 0.0f;            // and below the bass staff
     std::optional<Line> pageLine;       // showing just one line of measures
+    bool chordControlsShown = true;     // the chord buttons, and the numerals
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StaffView)
 };

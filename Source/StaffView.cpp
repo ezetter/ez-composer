@@ -34,6 +34,7 @@ namespace
     constexpr float minMarginBelow = noteRoom;
     constexpr float chordNameHeight = 1.2f;     // from the chord name's baseline to just over its top
     constexpr float chordButtonHeight = 2.0f;
+    constexpr float compactMargin = 4.5f;       // above and below the system without the chord buttons and numerals, still with room for notes on two ledger lines
 
     // Line thicknesses and notehead metrics, from Bravura's metadata
     constexpr float staffLineThickness = 0.13f;
@@ -423,23 +424,38 @@ float StaffView::getEndingOffset() const
 
 float StaffView::getChordButtonOffset() const
 {
-    return getSymbolOffset() + chordNameHeight + chordButtonHeight;
+    // Without the chord buttons, their row's only there for the title, if there is one.
+    const auto buttonRow = chordControlsShown || title.isNotEmpty() ? chordButtonHeight : 0.0f;
+    return getSymbolOffset() + chordNameHeight + buttonRow;
 }
 
 float StaffView::getNumeralOffset() const
 {
-    return juce::jmax (4.0f, reachBelow + 3.4f);
+    // Without the numerals, the pedal marks go just under the notes.
+    return chordControlsShown ? juce::jmax (4.0f, reachBelow + 3.4f)
+                              : juce::jmax (1.0f, reachBelow + 0.6f);
 }
 
 float StaffView::getMarginAbove() const
 {
-    return juce::jmax (minMarginAbove, getChordButtonOffset() + 0.4f);
+    return juce::jmax (chordControlsShown ? minMarginAbove : compactMargin, getChordButtonOffset() + 0.4f);
 }
 
 float StaffView::getMarginBelow() const
 {
     // Room for the numerals, and the pedal marks below them
-    return juce::jmax (minMarginBelow, getNumeralOffset() + 2.4f);
+    return juce::jmax (chordControlsShown ? minMarginBelow : compactMargin, getNumeralOffset() + 2.4f);
+}
+
+void StaffView::setChordControlsShown (bool shown)
+{
+    if (shown == chordControlsShown)
+        return;
+
+    chordControlsShown = shown;
+    setSize (getContentWidth(), getContentHeight());
+    updateChordButtons();
+    repaint();
 }
 
 void StaffView::setNoteLength (double beats)
@@ -1294,6 +1310,14 @@ void StaffView::setTitle (const juce::String& newTitle)
         return;
 
     title = newTitle;
+
+    // Without the chord buttons, a title takes a row of its own.
+    if (! chordControlsShown)
+    {
+        setSize (getContentWidth(), getContentHeight());
+        updateChordButtons();
+    }
+
     repaint();
 }
 
@@ -2743,7 +2767,7 @@ void StaffView::drawLabels (juce::Graphics& g, int measure) const
                               juce::Justification::horizontallyCentred);
     }
 
-    if (chord.numeral.isEmpty())
+    if (chord.numeral.isEmpty() || ! chordControlsShown)
         return;
 
     // The numeral, then any + or ° (or the M of a major 7th) at its top right, and its figures
@@ -4638,7 +4662,7 @@ void StaffView::updateChordButtons()
         button->setButtonText (hasChord ? "Edit Chord" : "Add Chord");
         button->setTooltip ((hasChord ? "Edit the chord in measure " : "Add a chord to measure ") + juce::String (measure + 1));
         button->setToggleState (measure == selectedMeasure, juce::dontSendNotification);
-        button->setVisible (getShownMeasures().contains (measure));
+        button->setVisible (chordControlsShown && getShownMeasures().contains (measure));
         button->setBounds (juce::Rectangle<float> (layout.x + (layout.width - width) / 2.0f, top, width, 2.0f * staffSpace).toNearestInt());
     }
 }

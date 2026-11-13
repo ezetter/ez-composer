@@ -151,6 +151,9 @@ private:
 
         static constexpr int sideMargin = 44;     // either side of the lines, for the arrows
 
+        /** Puts the lines closer together, e.g. without the chord buttons between them. */
+        void setCompact (bool);
+
     private:
         void changeListenerCallback (juce::ChangeBroadcaster*) override;
         void handleAsyncUpdate() override;
@@ -162,6 +165,7 @@ private:
         int minimumWidth = 0, minimumHeight = 0;
         juce::String title;
         bool layingOut = false;
+        bool compact = false;
     };
 
     /** What each part has besides its staves: its instrument, the volume dial to the left of its
@@ -208,7 +212,10 @@ private:
         saveScore,
         saveScoreAs,
         undoChange,
-        redoChange
+        redoChange,
+        showInstrumentsView,
+        showScoreView,
+        toggleChordControls
     };
 
     juce::StringArray getMenuBarNames() override;
@@ -249,6 +256,11 @@ private:
     /** Shows the score page, one instrument's measures four to a line, or the instruments' staves, one under another. */
     void showScorePage (bool);
     void updatePartArrows();
+
+    /** Shows or hides the chord buttons over the measures and the Roman numerals under them, in
+        every view, leaving the chords' names. Hidden, the staves take less room. It's remembered.
+    */
+    void setChordControlsShown (bool);
 
     /** Gives each of the score's parts a track, and takes away the tracks of parts that have
         gone, e.g. when a part's added or taken out, a score's opened, or a change is undone.
@@ -727,6 +739,7 @@ private:
     ScorePage scorePage { score };          // in place of them, one instrument at a time
     ScrollingViewport scorePageViewport;
     bool showingScorePage = false;
+    bool chordControlsShown = true;
     juce::TextButton viewButton;            // beside the instrument menu: Instruments or Score, which shows
     juce::ArrowButton previousPartButton { "Previous instrument", 0.5f, controls::accent };     // either side of the page
     juce::ArrowButton nextPartButton { "Next instrument", 0.0f, controls::accent };
