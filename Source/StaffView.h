@@ -96,6 +96,14 @@ public:
     */
     void setErasing (bool);
 
+    /** Turns tying on or off. While it's on, clicking a note and then the note of the same pitch
+        before or after it, on its staff, ties them, or unties them, and a note a click adds is
+        tied to the note clicked or added last, if it's the same pitch and the new one starts as
+        it ends. The note to tie from to start with can be given, such as the one selected.
+    */
+    void setTying (bool, std::optional<Note> from = {});
+    bool isTying() const noexcept { return tying; }
+
     /** Shows a note as selected, in blue, if it's in this view's part, or none. */
     void setSelectedNote (std::optional<Note>);
 
@@ -215,6 +223,17 @@ public:
         rest written in, or one of a chord's notes.
     */
     void deleteAt (juce::Point<float>);
+
+    /** What clicking a note already written does: selects it, or while tying, ties it to the
+        note clicked or added before it, and selects it.
+    */
+    void clickWrittenNote (const Note&);
+
+    /** While tying, ties the note clicked or added last to this one, if they're the same pitch
+        and one follows the other, or with toggle, unties them if they're tied, and goes on from
+        this one.
+    */
+    void tieFromLast (const Note&, bool toggle);
 
     /** Whether clicks add notes of the length chosen, rather than rests, tuplets, marks or anything else */
     bool isAddingNotes() const noexcept;
@@ -779,6 +798,8 @@ private:
     std::optional<ChordNote> movedChordNote;        // the chord's note the mouse went down on
     std::optional<music::Tone> chordNoteTarget;     // the chord's note a drag would move it to
     std::optional<Note> selectedNote;               // shown in blue
+    bool tying = false;                             // clicks tie notes
+    std::optional<Note> tieAnchor;                  // the note clicked or added last while tying
     std::optional<Note> pressedTupletNote;          // the tuplet's note the mouse went down on
     juce::Point<float> lastErasePoint;
     Erasable hoverErasable;

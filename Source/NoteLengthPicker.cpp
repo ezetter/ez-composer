@@ -45,6 +45,17 @@ NoteLengthPicker::NoteLengthPicker()
     };
     addAndMakeVisible (staccatoButton);
 
+    // Tying goes with whichever length's chosen too, and stays on until it's clicked again.
+    tieButton.setTooltip ("Tie: click two notes of the same pitch, one after the other, to tie them; notes you add, or record a step at a time, are tied to the one before of the same pitch. Click again to turn it off.");
+    tieButton.setClickingTogglesState (true);
+    tieButton.setWantsKeyboardFocus (false);
+    tieButton.onClick = [this]
+    {
+        if (onTieChange != nullptr)
+            onTieChange (tieButton.getToggleState());
+    };
+    addAndMakeVisible (tieButton);
+
     // Tuplets go in place of a length.
     tupletButton.setTooltip ("Tuplets: from 2 to 10 notes evenly in the time of others, e.g. 3 in the time of 2. Click to choose how many and their length,\nthen click the staff for each note.");
     tupletButton.setWantsKeyboardFocus (false);
@@ -60,6 +71,11 @@ NoteLengthPicker::NoteLengthPicker()
 
     setLength (1.0);
     setSize (getIdealBounds().getWidth(), getIdealBounds().getHeight());
+}
+
+void NoteLengthPicker::setTie (bool shouldTie)
+{
+    tieButton.setToggleState (shouldTie, juce::dontSendNotification);
 }
 
 void NoteLengthPicker::setStaccato (bool shouldBeStaccato)
@@ -95,7 +111,7 @@ void NoteLengthPicker::setChoiceShown (bool shown)
 
 juce::Rectangle<int> NoteLengthPicker::getIdealBounds() const
 {
-    return { (int) buttons.size() * buttonSize + ((int) buttons.size() - 1) * gap + 2 * (groupGap + buttonSize), buttonSize };
+    return { (int) buttons.size() * buttonSize + ((int) buttons.size() - 1) * gap + 2 * (groupGap + buttonSize) + gap + buttonSize, buttonSize };
 }
 
 void NoteLengthPicker::resized()
@@ -104,7 +120,8 @@ void NoteLengthPicker::resized()
         buttons[i]->setBounds ((int) i * (buttonSize + gap), 0, buttonSize, buttonSize);
 
     staccatoButton.setBounds (buttons.back()->getRight() + groupGap, 0, buttonSize, buttonSize);
-    tupletButton.setBounds (staccatoButton.getRight() + groupGap, 0, buttonSize, buttonSize);
+    tieButton.setBounds (staccatoButton.getRight() + gap, 0, buttonSize, buttonSize);
+    tupletButton.setBounds (tieButton.getRight() + groupGap, 0, buttonSize, buttonSize);
 }
 
 //==============================================================================
@@ -171,6 +188,30 @@ void NoteLengthPicker::drawStaccato (juce::Graphics& g, juce::Rectangle<float> b
 }
 
 //==============================================================================
+void NoteLengthPicker::drawTie (juce::Graphics& g, juce::Rectangle<float> bounds)
+{
+    // A curve, thick in the middle and thin at its ends, as a tie's drawn between notes
+    const auto area = bounds.reduced (bounds.getWidth() * 0.2f, 0.0f);
+    const auto left = area.getX(), right = area.getRight(), y = bounds.getCentreY() + 2.0f;
+    juce::Path tie;
+    tie.startNewSubPath (left, y);
+    tie.quadraticTo (area.getCentreX(), y - 9.0f, right, y);
+    tie.quadraticTo (area.getCentreX(), y - 6.0f, left, y);
+    tie.closeSubPath();
+    g.fillPath (tie);
+}
+
+NoteLengthPicker::TieButton::TieButton()
+    : juce::Button ("Tie")
+{
+}
+
+void NoteLengthPicker::TieButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    g.setColour (controls::drawSymbolButtonTile (g, *this, highlighted, down));
+    drawTie (g, getLocalBounds().toFloat().reduced (0.5f));
+}
+
 NoteLengthPicker::StaccatoButton::StaccatoButton()
     : juce::Button ("Staccato")
 {

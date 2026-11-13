@@ -350,6 +350,12 @@ private:
     */
     void moveSelectedNoteTo (int midiNote);
 
+    /** Turns tying notes on or off, for clicks and steps: clicking two notes of the same pitch,
+        one after the other, ties them, and notes added, or recorded a step at a time, are tied to
+        the one before them of the same pitch. It goes back to adding notes, as staccato does.
+    */
+    void setTie (bool);
+
     /** Changes the note selected to a length, in beats, unless it's a tuplet's. */
     void changeSelectedNoteLength (double beats);
 
@@ -794,6 +800,7 @@ private:
     std::optional<StepChord> stepChord;              // and where its notes are going
     std::optional<StepTuplet> stepTuplet;            // the tuplet whose notes the steps are writing
     std::optional<Note> selectedNote;                // clicked on the staves, for the keys and buttons to change
+    std::vector<Note> lastStepNotes, stepNotes;      // the notes the step before wrote, for tying to, and this one's
     juce::TimedCallback stepKeysTimer { [this] { takeStepKeys(); } };
 
     controls::DialLookAndFeel dialLookAndFeel;

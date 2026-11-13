@@ -11,7 +11,8 @@
 /** Small buttons, side by side, showing a whole, a dotted half, a half, a dotted quarter, a
     quarter, a dotted eighth, an eighth, a 16th, a 32nd and a 64th note, for choosing how long the notes
     that clicks add are. One is chosen at a time. After them, a little apart, a staccato dot turns
-    staccato on or off for the notes clicks add, whatever their length. After that, a little apart
+    staccato on or off for the notes clicks add, whatever their length, and beside it, a tie
+    turns tying notes on or off. After that, a little apart
     again, a tuplet button chooses tuplets in place of a length, from 2 to 10 notes, showing how
     many and the length of their notes.
 */
@@ -42,6 +43,15 @@ public:
 
     /** Called when the staccato button's clicked, with whether it's on now. */
     std::function<void (bool staccato)> onStaccatoChange;
+
+    /** Whether clicks and steps tie notes. It stays on until it's clicked again. */
+    bool isTie() const noexcept { return tieButton.getToggleState(); }
+
+    /** Turns tying on or off, without calling onTieChange. */
+    void setTie (bool);
+
+    /** Called when the tie button's clicked, with whether it's on now. */
+    std::function<void (bool tie)> onTieChange;
 
     /** Whether tuplets are chosen, in place of a length, their notes' length, in beats, and how many notes they have */
     bool isTuplet() const noexcept { return tuplet; }
@@ -77,6 +87,9 @@ public:
     /** Draws a staccato dot in the current colour, centred in an area the size of a button. */
     static void drawStaccato (juce::Graphics&, juce::Rectangle<float> area);
 
+    /** Draws a tie's curve in the current colour, centred in an area the size of a button. */
+    static void drawTie (juce::Graphics&, juce::Rectangle<float> area);
+
     /** Draws a tuplet's note of a length, in beats, with how many notes it has over it, in an area the size of a button. */
     static void drawTuplet (juce::Graphics&, const MusicGlyphs&, double beats, int numNotes, juce::Rectangle<float> area);
 
@@ -102,6 +115,14 @@ private:
         void paintButton (juce::Graphics&, bool highlighted, bool down) override;
     };
 
+    /** The button showing a tie, which goes on and off. */
+    struct TieButton final : public juce::Button
+    {
+        TieButton();
+
+        void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+    };
+
     /** The button showing how many notes the tuplets have, over a note of their notes' length. */
     struct TupletButton final : public juce::Button
     {
@@ -117,6 +138,7 @@ private:
     MusicGlyphs glyphs;
     std::array<std::unique_ptr<NoteButton>, 10> buttons;
     StaccatoButton staccatoButton;
+    TieButton tieButton;
     double length = 1.0;
     bool tuplet = false;
     double tupletLength = 0.5;

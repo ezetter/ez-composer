@@ -530,6 +530,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
         setNoteLength (beats);
     };
     noteLengthPicker.onStaccatoChange = [this] (bool staccato) { setStaccato (staccato); };
+    noteLengthPicker.onTieChange = [this] (bool tie) { setTie (tie); };
     noteLengthPicker.onTupletClicked = [this] { chooseTupletLength(); };
     restLengthPicker.onChange = [this] (double beats) { setRestLength (beats, true); };
     dynamicPicker.onChange = [this] (std::optional<music::Marking> marking) { setMarking (marking); };
@@ -1401,6 +1402,7 @@ void MainComponent::configureView (StaffView& view)
     view.setNoteLength (addingRests ? restLengthPicker.getLength() : noteLengthPicker.getLength());
     view.setTuplet (noteLengthPicker.isTuplet() && ! addingRests ? std::optional (noteLengthPicker.getTupletLength()) : std::nullopt, noteLengthPicker.getTupletNotes());
     view.setStaccato (noteLengthPicker.isStaccato());
+    view.setTying (noteLengthPicker.isTie(), selectedNote);
     view.setRests (addingRests);
 
     if (eraserButton.getToggleState())
@@ -2107,6 +2109,18 @@ void MainComponent::changeSelectedNoteLength (double beats)
     changed.length = beats;
     changed.staccato = score.isStaccato (changed.part, changed.staff, changed.measure, changed.beat);
     score.addNote (changed);
+}
+
+void MainComponent::setTie (bool tie)
+{
+    noteLengthPicker.setTie (tie);
+
+    // Back to adding notes, with the length chosen, tying from the note selected, if there is one
+    addingRests = false;
+    resumeAddingNotes();
+
+    for (auto* view : getViews())
+        view->setTying (tie, selectedNote);
 }
 
 void MainComponent::setStaccato (bool staccato)
@@ -2959,6 +2973,7 @@ void MainComponent::takeStepKeys()
                 }
 
                 stepTuplet.reset();
+                lastStepNotes = std::exchange (stepNotes, {});
                 const auto room = (int) std::lround ((beatsPerMeasure - beat) * Score::slotsPerBeat);
                 const auto chosen = addingRests                 ? restLengthPicker.getLength()
                                   : noteLengthPicker.isTuplet() ? noteLengthPicker.getTupletLength()
@@ -2980,7 +2995,19 @@ void MainComponent::takeStepKeys()
                 if (addingRests)
                     score.addRest (part, staff, stepChord->measure, stepChord->beat, stepChord->length);
                 else
-                    score.addNote ({ staff, stepChord->measure, stepChord->beat, pitch, part, stepChord->length, noteLengthPicker.isStaccato() });
+                {
+                    const Note note { staff, stepChord->measure, stepChord->beat, pitch, part, stepChord->length, noteLengthPicker.isStaccato() };
+                    score.addNote (note);
+                    stepNotes.push_back (note);
+
+                    // With the tie on, it's tied to the same note in the step before, if that ends as it starts.
+                    if (noteLengthPicker.isTie())
+                        for (const auto& before : lastStepNotes)
+                            if (before.staff == staff && before.pitch == pitch && before.part == part
+                                && score.getFollowingBeat (part, staff, before.measure, before.beat) == std::optional<std::pair<int, double>> ({ note.measure, note.beat })
+                                && ! score.isTied (part, staff, before.measure, before.beat, pitch))
+                                score.toggleTie (part, staff, before.measure, before.beat, note.measure, note.beat, pitch);
+                }
             }
         }
         else

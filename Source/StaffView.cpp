@@ -827,6 +827,46 @@ bool StaffView::isAddingNotes() const noexcept
     return ! marking.has_value() && ! erasing && ! selecting && ! isPlacingNotes() && ! placingRests && ! isPlacingTuplets();
 }
 
+void StaffView::setTying (bool shouldTie, std::optional<Note> from)
+{
+    tying = shouldTie;
+    tieAnchor = shouldTie && from.has_value() && from->part == part ? from : std::nullopt;
+}
+
+void StaffView::tieFromLast (const Note& note, bool toggle)
+{
+    if (! tying)
+        return;
+
+    if (const auto from = std::exchange (tieAnchor, note); from.has_value() && from->staff == note.staff && from->pitch == note.pitch
+                                                          && (from->measure != note.measure || ! juce::exactlyEqual (from->beat, note.beat)))
+    {
+        // The earlier of them, the one the other starts as it ends
+        using Point = std::optional<std::pair<int, double>>;
+        const auto follows = [&] (const Note& a, const Note& b) { return score.getFollowingBeat (part, a.staff, a.measure, a.beat) == Point ({ b.measure, b.beat }); };
+        const auto* first = follows (*from, note) ? &*from : follows (note, *from) ? &note : nullptr;
+        const auto* second = first == &note ? &*from : &note;
+
+        if (first != nullptr && (toggle || ! score.isTied (part, first->staff, first->measure, first->beat, first->pitch)))
+            score.toggleTie (part, first->staff, first->measure, first->beat, second->measure, second->beat, first->pitch);
+    }
+}
+
+void StaffView::clickWrittenNote (const Note& note)
+{
+    if (onNoteSelected == nullptr)
+        return;
+
+    if (tying)
+    {
+        tieFromLast (note, true);
+        onNoteSelected (note);
+        return;
+    }
+
+    onNoteSelected (selectedNote == note ? std::nullopt : std::optional (note));
+}
+
 void StaffView::setSelectedNote (std::optional<Note> note)
 {
     if (note == selectedNote)
@@ -3950,8 +3990,7 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
 
         if (! e.mouseWasDraggedSinceMouseDown())
         {
-            if (onNoteSelected != nullptr)
-                onNoteSelected (selectedNote == edited ? std::nullopt : edited);
+            clickWrittenNote (*edited);
         }
         else if (const auto to = getTieTarget (*edited, e.position))
         {
@@ -4358,16 +4397,20 @@ void StaffView::clickNote (const Note& note)
     else if (score.hasNoteAt (part, note.staff, note.measure, note.beat, note.pitch.step))
     {
         for (const auto& pitch : score.getNotes (part, note.staff, note.measure, note.beat))
-            if (pitch.step == note.pitch.step && onNoteSelected != nullptr)
-                onNoteSelected (Note { note.staff, note.measure, note.beat, pitch, part,
-                                       score.getNoteLength (part, note.staff, note.measure, note.beat),
-                                       score.isStaccato (part, note.staff, note.measure, note.beat) });
+            if (pitch.step == note.pitch.step)
+                clickWrittenNote (Note { note.staff, note.measure, note.beat, pitch, part,
+                                         score.getNoteLength (part, note.staff, note.measure, note.beat),
+                                         score.isStaccato (part, note.staff, note.measure, note.beat) });
 
         hoverHintHidden = true;
         return;
     }
     else if (score.addNote (note))
+    {
+        // While tying, it's tied to the note before it, if it's the same pitch.
+        tieFromLast (note, false);
         notifyPlaced (note.staff, note.measure, note.beat);
+    }
 
     // Show what the click did, rather than what another click would do.
     hoverHintHidden = true;
