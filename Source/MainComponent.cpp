@@ -3554,8 +3554,14 @@ void MainComponent::showPlaybackPosition()
                         : stepRecording ? std::optional (playbackStarts[(size_t) piece.getCurrentPage()])
                                         : std::nullopt;
 
+    // Recording a step at a time, a red line shows exactly where the next step goes.
+    const auto stepAt = stepRecording && ! played.has_value() ? std::optional (playbackStarts[(size_t) piece.getCurrentPage()]) : std::nullopt;
+
     for (auto* view : getViews())
+    {
         view->setPlaybackPosition (position);
+        view->setStepMarker (stepAt);
+    }
 
     // The ruler's marker is where it's playing, or where it'll start from.
     positionRuler.setMarker (played.has_value() ? position : std::optional (playbackStarts[(size_t) piece.getCurrentPage()]), played.has_value());

@@ -1878,10 +1878,28 @@ void StaffView::setPlaybackPosition (std::optional<double> beats)
     repaint (getPlaybackArea());
 }
 
+void StaffView::setStepMarker (std::optional<double> beats)
+{
+    if (beats.has_value() == stepMarker.has_value() && (! beats.has_value() || juce::exactlyEqual (*beats, *stepMarker)))
+        return;
+
+    stepMarker = beats;
+    repaint();
+}
+
 juce::Rectangle<int> StaffView::getPlaybackArea() const
 {
     if (! playingBeat.has_value())
         return {};
+
+    // Recording a step at a time, a beat's width centred where the next step goes, even part
+    // way through a beat
+    if (stepMarker.has_value() && ! measureLayouts.empty())
+    {
+        const auto measure = juce::jlimit (0, (int) measureLayouts.size() - 1, fromScoreBeats (*stepMarker).first);
+        const auto width = measureLayouts[(size_t) measure].beatWidth;
+        return juce::Rectangle<float> (getScoreBeatsX (*stepMarker) - width / 2.0f, 0.0f, width, (float) getHeight()).getSmallestIntegerContainer();
+    }
 
     const auto beats = score.getBeatsPerMeasure();
     return getBeatArea (*playingBeat / beats, *playingBeat % beats);
@@ -1943,6 +1961,14 @@ void StaffView::paint (juce::Graphics& g)
 
         g.setColour (playbackColour);
         g.fillRoundedRectangle (area.reduced (0.5f * staffSpace, 0.0f), 0.5f * staffSpace);
+
+        // Recording a step at a time, a thin red line down through it where the next step goes
+        if (stepMarker.has_value() && ! measureLayouts.empty())
+        {
+            const auto x = getScoreBeatsX (*stepMarker);
+            g.setColour (removalColour);
+            g.fillRect (juce::Rectangle<float> (1.5f, area.getHeight()).withCentre ({ x, area.getCentreY() }));
+        }
     }
 
     g.setColour (inkColour);

@@ -377,6 +377,13 @@ public:
     /** Highlights the beat that's playing, given in beats from the start of the score. */
     void setPlaybackPosition (std::optional<double> beats);
 
+    /** Shows where the next step recorded goes, in beats from the start of the score, as a thin
+        red line down through the highlighted beat, at the point the step's notes or rests start;
+        or with none, hides it.
+    */
+    void setStepMarker (std::optional<double> beats);
+    const std::optional<double>& getStepMarker() const noexcept { return stepMarker; }
+
     /** The area of the beat that's highlighted as playing, or an empty rectangle if none is. */
     juce::Rectangle<int> getPlaybackArea() const;
 
@@ -780,6 +787,7 @@ private:
     std::optional<int> selectedMeasure;
     juce::OwnedArray<juce::TextButton> chordButtons;    // one above each measure
     std::optional<int> playingBeat;     // counted from the start of the score
+    std::optional<double> stepMarker;   // where the next step recorded goes, in beats from the start of the score
 
     // Worked out whenever the score changes
     float timeSignatureLeft = 0.0f;
