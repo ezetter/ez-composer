@@ -988,7 +988,7 @@ void StaffView::updateSelectionActions()
         if (! first.has_value() || std::pair { item.measure, item.beat } < *first)
             first = std::pair { item.measure, item.beat };
 
-    if (first.has_value() && getShownMeasures().contains (first->first))
+    if (first.has_value() && getShownMeasures().contains (first->first) && ! movingItems)
         for (const auto& [item, point] : getItemPoints())
             if (std::find (itemSelection.begin(), itemSelection.end(), item) != itemSelection.end())
                 bounds = bounds.has_value() ? bounds->getUnion ({ point, point }) : juce::Rectangle<float> { point, point };
@@ -1062,7 +1062,38 @@ void StaffView::setMovingItems (bool shouldMove)
     movingItems = shouldMove;
     moveButton.setToggleState (shouldMove, juce::dontSendNotification);
     itemMovePassage.reset();
+    itemMoveHover.reset();
+    updateSelectionActions();
     repaint();
+}
+
+std::optional<std::pair<int, int>> StaffView::getItemMoveAt (juce::Point<float> point) const
+{
+    const auto spot = getNoteAt (point, noteLength, false);
+
+    if (! spot.has_value() || itemSelection.empty())
+        return {};
+
+    const auto passage = score.getPassage (part, itemSelection);
+
+    if (passage.isEmpty())
+        return {};
+
+    // Its start goes to the beat clicked, and its first note, the lowest of the first if
+    // they start together, to the line or space clicked. Without notes, it keeps its pitch.
+    const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+    const auto slots = spot->measure * slotsPerMeasure + (int) std::lround (spot->beat * Score::slotsPerBeat) - passage.origin;
+    std::optional<std::pair<int, int>> first;   // its start and line or space
+
+    for (const auto& note : passage.notes)
+        if (! first.has_value() || std::pair { note.start, note.pitch.step } < *first)
+            first = std::pair { note.start, note.pitch.step };
+
+    for (const auto& tuplet : passage.tuplets)
+        if (! tuplet.pitches.empty() && (! first.has_value() || std::pair { tuplet.start, tuplet.pitches.front().step } < *first))
+            first = std::pair { tuplet.start, tuplet.pitches.front().step };
+
+    return std::pair { slots, first.has_value() ? spot->pitch.step - first->second : 0 };
 }
 
 void StaffView::drawPasteHint (juce::Graphics& g) const
@@ -1076,11 +1107,29 @@ void StaffView::drawPasteHint (juce::Graphics& g) const
 
 void StaffView::drawItemMoveHint (juce::Graphics& g) const
 {
-    if (! itemMovePassage.has_value() || (itemMoveSlots == 0 && itemMoveSteps == 0))
+    // Being dragged, where it would go
+    if (itemMovePassage.has_value())
+    {
+        if (itemMoveSlots == 0 && itemMoveSteps == 0)
+            return;
+
+        if (const auto moved = Score::transpose (*itemMovePassage, itemMoveSteps, score.getKey()))
+            drawPassageHint (g, *moved, itemMovePassage->origin + itemMoveSlots);
+
+        return;
+    }
+
+    // Otherwise, where a click would put it
+    if (! movingItems || ! itemMoveHover.has_value())
         return;
 
-    if (const auto moved = Score::transpose (*itemMovePassage, itemMoveSteps, score.getKey()))
-        drawPassageHint (g, *moved, itemMovePassage->origin + itemMoveSlots);
+    if (const auto move = getItemMoveAt (*itemMoveHover))
+    {
+        const auto passage = score.getPassage (part, itemSelection);
+
+        if (const auto moved = Score::transpose (passage, move->second, score.getKey()); moved.has_value() && passage.origin + move->first >= 0)
+            drawPassageHint (g, *moved, passage.origin + move->first);
+    }
 }
 
 void StaffView::drawPassageHint (juce::Graphics& g, const Passage& passage, int start) const
@@ -3842,12 +3891,14 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
-    // Moving what's selected, a drag anywhere moves it.
+    // Moving what's selected, a drag anywhere moves it, and it shows where a click would put it.
     if (! itemSelection.empty() && movingItems && ! selecting)
     {
         setHoverNote ({});
         setHoverRest ({});
         setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        itemMoveHover = e.position;
+        repaint();
         return;
     }
 
@@ -3960,9 +4011,10 @@ void StaffView::mouseMove (const juce::MouseEvent& e)
 
 void StaffView::mouseExit (const juce::MouseEvent&)
 {
-    if (pasteHover.has_value())
+    if (pasteHover.has_value() || itemMoveHover.has_value())
     {
         pasteHover.reset();
+        itemMoveHover.reset();
         repaint();
     }
 
@@ -4422,15 +4474,30 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
         return;
     }
 
-    // Moved, it goes where it was let go. A click without moving it does nothing.
+    // Dragged, it goes where it was let go, and goes on moving. A click puts it where it was
+    // clicked, if it can go there, and that's the end of moving it.
     if (const auto moving = std::exchange (itemMovePassage, std::nullopt))
     {
         const auto slots = std::exchange (itemMoveSlots, 0), steps = std::exchange (itemMoveSteps, 0);
-        updateSelectionActions();
         repaint();
 
-        if (! e.mods.isPopupMenu() && e.mouseWasDraggedSinceMouseDown() && (slots != 0 || steps != 0) && onItemsMoved != nullptr)
-            onItemsMoved (slots, steps);
+        if (e.mods.isPopupMenu())
+            return;
+
+        if (e.mouseWasDraggedSinceMouseDown())
+        {
+            if ((slots != 0 || steps != 0) && onItemsMoved != nullptr)
+                onItemsMoved (slots, steps);
+
+            return;
+        }
+
+        if (const auto move = getItemMoveAt (e.position);
+            move.has_value() && moving->origin + move->first >= 0 && (move->first != 0 || move->second != 0) && onItemsMoved != nullptr)
+            onItemsMoved (move->first, move->second);
+
+        if (onMoveEnded != nullptr)
+            onMoveEnded();
 
         return;
     }

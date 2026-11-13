@@ -1478,6 +1478,7 @@ void MainComponent::configureView (StaffView& view)
     view.onPasteClicked = [this, &view] (int measure, double beat) { pasteAt (view.getPart(), measure, beat); };
     view.setMovingItems (movingItems);
     view.onItemsMoved = [this] (int slots, int steps) { moveSelection (slots, steps); };
+    view.onMoveEnded = [this] { clearItemSelection(); };
 
     // Selecting measures in any part selects them in all of them, and moves them in all of them.
     view.onMeasuresSelected = [this] (std::optional<std::pair<int, int>> measures, bool finished) { selectMeasures (measures, finished); };

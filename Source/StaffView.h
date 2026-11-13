@@ -126,15 +126,22 @@ public:
     enum class SelectionAction { repeat, copy, cut, move };
     std::function<void (SelectionAction)> onSelectionAction;
 
-    /** Turns moving what's selected on or off, shown by the Move button over it. While it's
-        on, dragging anywhere on the staves moves it all together: across, by steps of the note
-        length chosen, and up or down, by lines and spaces. It shows faintly where it would go,
-        and when the mouse is let go, onItemsMoved is called with how far, in 64ths and lines
-        and spaces up.
+    /** Turns moving what's selected on or off, with the Move button over it. While it's on,
+        the buttons are hidden and what's selected stays blue. Dragging anywhere on the staves
+        moves it all together: across, by steps of the note length chosen, and up or down, by
+        lines and spaces, calling onItemsMoved with how far, in 64ths and lines and spaces up,
+        when the mouse is let go; it goes on moving. Over the staves, it shows faintly where a
+        click would put it, and a click puts it there, as a paste would go, with its first note
+        on the line or space clicked, and calls onMoveEnded; a click anywhere else just calls
+        onMoveEnded.
     */
     void setMovingItems (bool);
     bool isMovingItems() const noexcept { return movingItems; }
     std::function<void (int slots, int steps)> onItemsMoved;
+    std::function<void()> onMoveEnded;
+
+    /** How far a click at a point would move what's selected, in 64ths and lines and spaces up, if it's somewhere it can go. */
+    std::optional<std::pair<int, int>> getItemMoveAt (juce::Point<float>) const;
 
     /** The notes, rests written in and tuplets with a notehead or rest in an area: a chord's
         notes are left out. Selecting them as well as these would add them, unless they're
@@ -888,6 +895,7 @@ private:
     juce::Point<float> itemMovePress;                // where the mouse went down
     std::optional<std::pair<int, double>> itemMovePressPoint;  // and the measure and beat there
     int itemMoveSlots = 0, itemMoveSteps = 0;        // how far it's been dragged
+    std::optional<juce::Point<float>> itemMoveHover; // where a click would move it to
     std::optional<Passage> pastePassage;             // pasted by a click
     std::optional<std::pair<int, double>> pasteHover, pressedPaste;
     Erasable hoverErasable;
