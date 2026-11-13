@@ -586,6 +586,11 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     staffViewport.setScrollBarsShown (true, true);
     addAndMakeVisible (staffViewport);
 
+    // Or in its place, the score page, under the notation controls added after it, which go over it
+    scorePageViewport.setViewedComponent (&scorePage, false);
+    scorePageViewport.setScrollBarsShown (true, true);
+    addChildComponent (scorePageViewport);
+
     addAndMakeVisible (volumeColumn);
     addAndMakeVisible (notationGroupBox);
     addAndMakeVisible (noteLengthPicker);
@@ -614,9 +619,6 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     // its lines scrolling down, with arrows either side going to the instruments before and after
     scorePage.onLineAdded = [this] (StaffView& line) { configureView (line); };
     scorePage.onLayoutChanged = [this] { positionMeasureButtons(); positionSelectionButtons(); };
-    scorePageViewport.setViewedComponent (&scorePage, false);
-    scorePageViewport.setScrollBarsShown (true, true);
-    addChildComponent (scorePageViewport);
 
     previousPartButton.onClick = [this] { if (activePart > 0) setActivePart (activePart - 1); };
     nextPartButton.onClick = [this] { if (activePart + 1 < score.getNumParts()) setActivePart (activePart + 1); };
