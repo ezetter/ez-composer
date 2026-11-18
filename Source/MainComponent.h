@@ -134,6 +134,12 @@ private:
         /** The part's name, over its first line */
         void setTitle (const juce::String&);
 
+        /** The piece's name, as the page's title, centred over the first line in a large serif
+            type, as a printed score has it. Clicking it edits it, calling onPieceRenamed.
+        */
+        void setPieceName (const juce::String&);
+        std::function<void (const juce::String&)> onPieceRenamed;
+
         /** Its lines, from the top: as many as its measures need, the first starting at measure 0 */
         std::vector<std::unique_ptr<StaffView>> lines;
 
@@ -167,6 +173,7 @@ private:
         bool layingOut = false;
         bool compact = false;
         std::vector<int> lineStarts;    // the first measure of each line
+        juce::Label pieceTitle;         // the piece's name, over the first line
 
         /** Where each line starts, fitting as many measures as there's room for across the page */
         std::vector<int> getLineStarts() const;

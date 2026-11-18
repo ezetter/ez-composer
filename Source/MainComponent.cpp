@@ -21,6 +21,7 @@ namespace
     constexpr int measureButtonSize = 28;
     // The note length, dynamic and eraser buttons, over the top of the staves
     constexpr int toolButtonsTop = 8, toolButtonsHeight = 28;
+    constexpr int scorePageTitleGap = 10, scorePageTitleHeight = 56;    // the piece's name over the score page's first line
 
     // Above the first system, so even when its chord buttons are as near its top as they go,
     // half a staff space below it, there's a gap between them and the buttons above
@@ -209,6 +210,33 @@ MainComponent::ScorePage::ScorePage (Score& scoreToShow)
     : score (scoreToShow)
 {
     score.addChangeListener (this);
+
+    // The piece's name, as a printed score's title: large, centred, in a serif type
+    pieceTitle.setFont (juce::FontOptions ("Baskerville", 38.0f, juce::Font::plain));
+    pieceTitle.setColour (juce::Label::textColourId, juce::Colour (0xff1b1b1b));
+    pieceTitle.setColour (juce::Label::textWhenEditingColourId, juce::Colour (0xff1b1b1b));
+    pieceTitle.setColour (juce::Label::backgroundWhenEditingColourId, juce::Colours::white);
+    pieceTitle.setColour (juce::Label::outlineWhenEditingColourId, controls::accent);
+    pieceTitle.setJustificationType (juce::Justification::centred);
+    pieceTitle.setEditable (true, false, true);
+    pieceTitle.setTooltip ("The piece's name. Click to rename it.");
+    pieceTitle.setMouseCursor (juce::MouseCursor::IBeamCursor);
+    pieceTitle.onEditorShow = [this]
+    {
+        if (auto* editor = pieceTitle.getCurrentTextEditor())
+            editor->setJustification (juce::Justification::centred);
+    };
+    pieceTitle.onTextChange = [this]
+    {
+        if (onPieceRenamed != nullptr)
+            onPieceRenamed (pieceTitle.getText());
+    };
+    addAndMakeVisible (pieceTitle);
+}
+
+void MainComponent::ScorePage::setPieceName (const juce::String& name)
+{
+    pieceTitle.setText (name, juce::dontSendNotification);
 }
 
 MainComponent::ScorePage::~ScorePage()
@@ -375,9 +403,11 @@ void MainComponent::ScorePage::layOut()
 
     const juce::ScopedValueSetter<bool> guard (layingOut, true);
 
-    // From the top, under the note length buttons, one line under another
+    // From the top, under the note length buttons: the piece's title, then one line under another
     auto y = stavesTopPadding;
     auto right = minimumWidth;
+    pieceTitle.setBounds (sideMargin, y + scorePageTitleGap, juce::jmax (0, minimumWidth - 2 * sideMargin), scorePageTitleHeight);
+    y = pieceTitle.getBottom();
 
     for (auto& line : lines)
     {
@@ -644,7 +674,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
     // The piece's name, after the notation controls. Clicking it edits it; Return or clicking
     // away renames the piece, and Esc, or leaving it empty, keeps the name it had.
-    pieceNameLabel.setFont (juce::FontOptions (19.0f, juce::Font::bold));
+    pieceNameLabel.setFont (juce::FontOptions ("Baskerville", 24.0f, juce::Font::plain));
     pieceNameLabel.setColour (juce::Label::textColourId, juce::Colour (0xff1b1b1b));
     pieceNameLabel.setColour (juce::Label::textWhenEditingColourId, juce::Colour (0xff1b1b1b));
     pieceNameLabel.setColour (juce::Label::backgroundWhenEditingColourId, juce::Colours::white);
@@ -666,9 +696,18 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     piece.onNameChanged = [this]
     {
         pieceNameLabel.setText (piece.getName(), juce::dontSendNotification);
+        scorePage.setPieceName (piece.getName());
         showDocumentTitle();
     };
     pieceNameLabel.setText (piece.getName(), juce::dontSendNotification);
+
+    // The score page has it as its title instead, which renames it too.
+    scorePage.setPieceName (piece.getName());
+    scorePage.onPieceRenamed = [this] (const juce::String& name)
+    {
+        piece.setName (name);
+        scorePage.setPieceName (piece.getName());
+    };
     addAndMakeVisible (pieceNameLabel);
 
     for (auto* component : std::initializer_list<juce::Component*> { &addMeasureButton, &removeMeasureButton, &cloneButton })
@@ -1323,6 +1362,7 @@ void MainComponent::showScorePage (bool show)
 
     staffViewport.setVisible (! show);
     volumeColumn.setVisible (! show);
+    pieceNameLabel.setVisible (! show);     // the page has it as its title
     positionRuler.setVisible (! show);
     scorePageViewport.setVisible (show);
 
