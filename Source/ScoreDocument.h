@@ -57,7 +57,11 @@ public:
     /** Mutes or unmutes a part from an opened score. Scores saved without it leave it as it is. */
     std::function<void (int part, bool muted)> loadMuted;
 
+    /** The file's name, or before it's been saved, the piece's name. */
     juce::String getDocumentTitle() override;
+
+    /** Saving as a new file suggests the piece's name for it, in the folder it was in, or was last used. */
+    juce::File getSuggestedSaveAsFile (const juce::File& defaultFile) override;
 
     //==============================================================================
     /** The scores opened or saved most recently, newest first. They're kept in the settings. */

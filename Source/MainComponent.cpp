@@ -642,6 +642,35 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     addAndMakeVisible (eraserButton);
     addAndMakeVisible (selectButton);
 
+    // The piece's name, after the notation controls. Clicking it edits it; Return or clicking
+    // away renames the piece, and Esc, or leaving it empty, keeps the name it had.
+    pieceNameLabel.setFont (juce::FontOptions (19.0f, juce::Font::bold));
+    pieceNameLabel.setColour (juce::Label::textColourId, juce::Colour (0xff1b1b1b));
+    pieceNameLabel.setColour (juce::Label::textWhenEditingColourId, juce::Colour (0xff1b1b1b));
+    pieceNameLabel.setColour (juce::Label::backgroundWhenEditingColourId, juce::Colours::white);
+    pieceNameLabel.setColour (juce::Label::outlineWhenEditingColourId, controls::accent);
+    pieceNameLabel.setJustificationType (juce::Justification::centredLeft);
+    pieceNameLabel.setEditable (true, false, true);
+    pieceNameLabel.setTooltip ("The piece's name. Click to rename it.");
+    pieceNameLabel.setMouseCursor (juce::MouseCursor::IBeamCursor);
+    pieceNameLabel.onTextChange = [this]
+    {
+        piece.setName (pieceNameLabel.getText());
+        pieceNameLabel.setText (piece.getName(), juce::dontSendNotification);
+    };
+    pieceNameLabel.onEditorShow = [this]
+    {
+        if (auto* editor = pieceNameLabel.getCurrentTextEditor())
+            editor->setJustification (juce::Justification::centredLeft);
+    };
+    piece.onNameChanged = [this]
+    {
+        pieceNameLabel.setText (piece.getName(), juce::dontSendNotification);
+        showDocumentTitle();
+    };
+    pieceNameLabel.setText (piece.getName(), juce::dontSendNotification);
+    addAndMakeVisible (pieceNameLabel);
+
     for (auto* component : std::initializer_list<juce::Component*> { &addMeasureButton, &removeMeasureButton, &cloneButton })
         staffSystems.addAndMakeVisible (component);
 
@@ -910,6 +939,10 @@ void MainComponent::resized()
     eraserButton.setBounds (staffViewport.getRight() - staffViewport.getScrollBarThickness() - eraserMargin - EraserButton::buttonWidth,
                             noteLengthPicker.getY(), EraserButton::buttonWidth, EraserButton::buttonHeight);
     selectButton.setBounds (eraserButton.getBounds().withWidth (selectButtonWidth).translated (-selectButtonWidth - toolButtonGap, 0));
+
+    // The piece's name just after the widest group of notation controls, so it stays put as they change
+    const auto controlsRight = juce::jmax (noteLengthPicker.getRight(), restLengthPicker.getRight(), dynamicPicker.getRight());
+    pieceNameLabel.setBounds (controlsRight + 20, noteLengthPicker.getY(), juce::jmax (0, selectButton.getX() - 16 - (controlsRight + 20)), toolButtonsHeight);
 
     staffSystems.setMinimumSize (staffViewport.getWidth() - staffViewport.getScrollBarThickness(),
                                  staffViewport.getHeight() - staffViewport.getScrollBarThickness());

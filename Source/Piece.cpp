@@ -190,6 +190,47 @@ void Piece::pagesChanged (bool changedPiece)
         onPagesChanged();
 }
 
+juce::String Piece::createRandomName()
+{
+    static const char* const firstWords[] {
+        "Amber", "Autumn", "Azure", "Bright", "Broken", "Calm", "Crimson", "Crystal", "Distant", "Dusky",
+        "Early", "Echoing", "Emerald", "Evening", "Faded", "Falling", "Floating", "Folded", "Frozen", "Gentle",
+        "Gilded", "Golden", "Hidden", "Hollow", "Hushed", "Indigo", "Ivory", "Last", "Late", "Lost",
+        "Lunar", "Midnight", "Misty", "Morning", "Northern", "Open", "Pale", "Quiet", "Rising", "Rolling",
+        "Rustling", "Scarlet", "Secret", "Silent", "Silver", "Sleeping", "Slow", "Solar", "Spring", "Still",
+        "Summer", "Sunlit", "Swift", "Tidal", "Velvet", "Wandering", "Warm", "Wild", "Winter", "Woven"
+    };
+
+    static const char* const secondWords[] {
+        "Anthem", "Avenue", "Ballad", "Bay", "Bells", "Birds", "Bridge", "Canyon", "Cathedral", "Clouds",
+        "Coast", "Dance", "Dawn", "Dreams", "Dunes", "Echoes", "Embers", "Field", "Fire", "Forest",
+        "Fountain", "Garden", "Glacier", "Harbour", "Harvest", "Horizon", "Island", "Journey", "Lake", "Lantern",
+        "Light", "Lullaby", "Meadow", "Mirror", "Moon", "Mountain", "Ocean", "Orchard", "Path", "Prairie",
+        "Rain", "River", "Road", "Shadows", "Shore", "Sky", "Snow", "Song", "Stars", "Stone",
+        "Storm", "Stream", "Sunrise", "Tide", "Valley", "Voyage", "Waltz", "Waves", "Wind", "Wings"
+    };
+
+    auto& random = juce::Random::getSystemRandom();
+    return juce::String (firstWords[random.nextInt ((int) std::size (firstWords))]) + " "
+         + secondWords[random.nextInt ((int) std::size (secondWords))];
+}
+
+void Piece::setName (const juce::String& newName)
+{
+    const auto trimmed = newName.trim();
+
+    if (trimmed.isEmpty() || trimmed == name)
+        return;
+
+    name = trimmed;
+
+    if (onNameChanged != nullptr)
+        onNameChanged();
+
+    // It's a change to save, though not to undo.
+    sendSynchronousChangeMessage();
+}
+
 bool Piece::isPartEmpty (int part) const
 {
     for (int page = 0; page < getNumPages(); ++page)
@@ -212,7 +253,11 @@ void Piece::clear()
         pages.push_back (createPage());
         captured.assign (1, {});
         current = 0;
+        name = createRandomName();
     }
+
+    if (onNameChanged != nullptr)
+        onNameChanged();
 
     pagesChanged (true);
 }
@@ -275,6 +320,7 @@ juce::var Piece::toJSON (bool withPartIds) const
         json.getDynamicObject()->setProperty ("morePages", morePages);
     }
 
+    json.getDynamicObject()->setProperty ("pieceName", name);
     return json;
 }
 
@@ -313,7 +359,16 @@ juce::Result Piece::loadJSON (const juce::var& json)
                 captured.emplace_back();
             }
         }
+
+        // One saved before pieces had names is given one at random.
+        name = json.getProperty ("pieceName", {}).toString().trim();
+
+        if (name.isEmpty())
+            name = createRandomName();
     }
+
+    if (onNameChanged != nullptr)
+        onNameChanged();
 
     pagesChanged (true);
     return juce::Result::ok();

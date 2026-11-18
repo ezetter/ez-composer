@@ -890,6 +890,7 @@ private:
     void showNotationGroup (NotationGroup);
     EraserButton eraserButton;          // at the top right of the score, over the staves: the eraser
     controls::TileTextButton selectButton { "Select" };     // between them: selecting measures
+    juce::Label pieceNameLabel;         // after the notation controls: the piece's name, renamed by clicking it
     juce::TextButton deleteMeasuresButton { "Delete" }, moveMeasuresButton { "Move" };     // over the selected measures
     std::optional<std::pair<int, int>> selectedMeasures;    // on the page being edited, from one measure to another
     bool selectionFinished = false;     // the mouse has been let go, so Delete and Move show

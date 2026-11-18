@@ -78,6 +78,20 @@ public:
     */
     std::function<void()> onPagesChanged;
 
+    /** The piece's name, shown over its staves and suggested as its file's name. A new piece,
+        or one saved without a name, has two words chosen at random, e.g. "Amber Harbour".
+    */
+    const juce::String& getName() const noexcept { return name; }
+
+    /** Renames the piece, without the spaces either side. An empty name leaves it as it was. */
+    void setName (const juce::String&);
+
+    /** Two words chosen at random, each with a capital, for a piece's name */
+    static juce::String createRandomName();
+
+    /** Called when the name changes, by being renamed, or by a piece being opened or started. */
+    std::function<void()> onNameChanged;
+
     /** Whether a part has nothing in it, on any page. */
     bool isPartEmpty (int part) const;
 
@@ -118,6 +132,7 @@ private:
     Score& editing;
     std::vector<std::unique_ptr<Score>> pages;      // every page's score; the edited page's is out of date, its music being in the editing score
     int current = 0;
+    juce::String name = createRandomName();
     bool quiet = false;                             // while pages are changed together, listeners hear once, at the end
     mutable std::vector<std::optional<juce::String>> captured;     // each other page's JSON, while it hasn't changed
 

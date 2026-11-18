@@ -41,7 +41,17 @@ void ScoreDocument::startNewScore()
 
 juce::String ScoreDocument::getDocumentTitle()
 {
-    return getFile() == juce::File() ? juce::String ("Untitled") : getFile().getFileNameWithoutExtension();
+    return getFile() == juce::File() ? piece.getName() : getFile().getFileNameWithoutExtension();
+}
+
+juce::File ScoreDocument::getSuggestedSaveAsFile (const juce::File& defaultFile)
+{
+    auto legalName = juce::File::createLegalFileName (piece.getName());
+
+    if (legalName.isEmpty())
+        legalName = "Untitled";
+
+    return defaultFile.getSiblingFile (legalName).withFileExtension (fileExtension);
 }
 
 //==============================================================================

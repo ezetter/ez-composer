@@ -80,6 +80,10 @@ An instrument's volume and muting apply before its effects. The effects play all
 
 The effects, their settings and where everything goes are saved with the score, and kept for the next time the app starts, as the instruments are. Changing them, or an effect's settings in its window, counts as a change to the score that needs saving, though not one Undo undoes. Instruments added or taken out keep where they go. An effect that can't be loaded, say because it's been uninstalled, is left out, and the app says which.
 
+### Piece name
+
+Every piece has a name, shown in bold at the top of the score, just to the right of the notation controls. A new piece is given two words chosen at random, such as *Wandering Forest*, and so is a score saved before pieces had names, when it's opened. **Click the name** to edit it: Return or clicking elsewhere renames the piece, and Esc, or leaving it empty, keeps the old name. The name is saved with the score; renaming counts as a change to save, but isn't undone by Undo. Until the score's been saved, the window's title is the piece's name, and the first time it's saved, or with **Save As…**, the file is named after the piece to start with (with any characters a file name can't have left out), which you can change.
+
 ### Saving and opening
 
 The **File** menu saves and opens scores:
@@ -89,7 +93,7 @@ The **File** menu saves and opens scores:
 | **New** | ⌘N | Starts an empty score: four measures of 4/4 in C major at 120 BPM. |
 | **Open…** | ⌘O | Opens a saved score. |
 | **Open Recent** | | Lists the 10 scores opened or saved most recently, newest first, and opens the one you choose. Scores that have been moved or deleted aren't listed, and two with the same name say which folder they're in. **Clear Menu** empties the list. The list is remembered from one run of the app to the next, and the scores also appear in the Mac's own recent documents. |
-| **Save** | ⌘S | Saves the score to its file, asking for a name the first time. |
+| **Save** | ⌘S | Saves the score to its file, asking for a name the first time, the piece's name to start with. |
 | **Save As…** | ⇧⌘S | Saves the score to a new file, which it then keeps using. |
 
 - Scores are saved as `.ezscore` files, which are JSON. The `.amscore` files saved when the app was called Anthropocene Music open just the same, and Open lists both. Saving one again, with Save or when asked before New, Open or quitting, moves it to `.ezscore`: it's saved as a file of the same name with the new extension, in the same folder, and the old file goes to the Trash, where it can still be got back; the recent scores list the new file instead. If there's already an `.ezscore` file of that name, it's saved in its own file instead, rather than over the other. Save As to another file saves it there, as `.ezscore` unless you give it `.amscore` on purpose. A file keeps everything about the score, and the plugins it's played on and their volumes: the key, time signature, tempo, and for each instrument its alternate staff, its measures and their notes, and each measure's chord with all its settings. That includes notes you've added to or taken out of a chord, a chord's notes moved with Edit, and the order a Random chord plays in. Notes on beats hidden by a shorter time signature are kept too.
