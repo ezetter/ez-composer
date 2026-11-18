@@ -21,7 +21,7 @@ namespace
     constexpr int measureButtonSize = 28;
     // The note length, dynamic and eraser buttons, over the top of the staves
     constexpr int toolButtonsTop = 8, toolButtonsHeight = 28;
-    constexpr int scorePageTitleGap = 10, scorePageTitleHeight = 56;    // the piece's name over the score page's first line
+    constexpr int scorePageTitleGap = 10, scorePageTitleHeight = 68;    // the piece's name over the score page's first line
 
     // Above the first system, so even when its chord buttons are as near its top as they go,
     // half a staff space below it, there's a gap between them and the buttons above
@@ -212,7 +212,7 @@ MainComponent::ScorePage::ScorePage (Score& scoreToShow)
     score.addChangeListener (this);
 
     // The piece's name, as a printed score's title: large, centred, in a serif type
-    pieceTitle.setFont (juce::FontOptions ("Baskerville", 38.0f, juce::Font::plain));
+    pieceTitle.setFont (juce::FontOptions ("Baskerville", 48.0f, juce::Font::plain));
     pieceTitle.setColour (juce::Label::textColourId, juce::Colour (0xff1b1b1b));
     pieceTitle.setColour (juce::Label::textWhenEditingColourId, juce::Colour (0xff1b1b1b));
     pieceTitle.setColour (juce::Label::backgroundWhenEditingColourId, juce::Colours::white);
