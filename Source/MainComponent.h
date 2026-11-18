@@ -139,6 +139,7 @@ private:
         */
         void setPieceName (const juce::String&);
         std::function<void (const juce::String&)> onPieceRenamed;
+        juce::Label& getPieceTitle() noexcept { return pieceTitle; }
 
         /** Its lines, from the top: as many as its measures need, the first starting at measure 0 */
         std::vector<std::unique_ptr<StaffView>> lines;
@@ -898,6 +899,17 @@ private:
     EraserButton eraserButton;          // at the top right of the score, over the staves: the eraser
     controls::TileTextButton selectButton { "Select" };     // between them: selecting measures
     juce::Label pieceNameLabel;         // after the notation controls: the piece's name, renamed by clicking it
+
+    /** Hears every click in the app, so a click anywhere but in the piece's name being edited
+        renames it, as Return does, though the click may not take the keyboard focus.
+    */
+    struct NameEditCommitter final : public juce::MouseListener
+    {
+        std::function<void (const juce::MouseEvent&)> onMouseDown;
+        void mouseDown (const juce::MouseEvent& e) override { if (onMouseDown != nullptr) onMouseDown (e); }
+    };
+
+    NameEditCommitter nameEditCommitter;
     juce::TextButton deleteMeasuresButton { "Delete" }, moveMeasuresButton { "Move" };     // over the selected measures
     std::optional<std::pair<int, int>> selectedMeasures;    // on the page being edited, from one measure to another
     bool selectionFinished = false;     // the mouse has been let go, so Delete and Move show

@@ -218,7 +218,7 @@ MainComponent::ScorePage::ScorePage (Score& scoreToShow)
     pieceTitle.setColour (juce::Label::backgroundWhenEditingColourId, juce::Colours::white);
     pieceTitle.setColour (juce::Label::outlineWhenEditingColourId, controls::accent);
     pieceTitle.setJustificationType (juce::Justification::centred);
-    pieceTitle.setEditable (true, false, true);
+    pieceTitle.setEditable (true, false, false);
     pieceTitle.setTooltip ("The piece's name. Click to rename it.");
     pieceTitle.setMouseCursor (juce::MouseCursor::IBeamCursor);
     pieceTitle.onEditorShow = [this]
@@ -680,7 +680,7 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     pieceNameLabel.setColour (juce::Label::backgroundWhenEditingColourId, juce::Colours::white);
     pieceNameLabel.setColour (juce::Label::outlineWhenEditingColourId, controls::accent);
     pieceNameLabel.setJustificationType (juce::Justification::centredLeft);
-    pieceNameLabel.setEditable (true, false, true);
+    pieceNameLabel.setEditable (true, false, false);
     pieceNameLabel.setTooltip ("The piece's name. Click to rename it.");
     pieceNameLabel.setMouseCursor (juce::MouseCursor::IBeamCursor);
     pieceNameLabel.onTextChange = [this]
@@ -709,6 +709,16 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
         scorePage.setPieceName (piece.getName());
     };
     addAndMakeVisible (pieceNameLabel);
+
+    // Clicking anywhere else while the name's being edited keeps what's been typed.
+    nameEditCommitter.onMouseDown = [this] (const juce::MouseEvent& e)
+    {
+        for (auto* label : { &pieceNameLabel, &scorePage.getPieceTitle() })
+            if (auto* editor = label->getCurrentTextEditor();
+                editor != nullptr && e.eventComponent != editor && ! editor->isParentOf (e.eventComponent))
+                label->hideEditor (false);
+    };
+    juce::Desktop::getInstance().addGlobalMouseListener (&nameEditCommitter);
 
     for (auto* component : std::initializer_list<juce::Component*> { &addMeasureButton, &removeMeasureButton, &cloneButton })
         staffSystems.addAndMakeVisible (component);
@@ -833,6 +843,8 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
 
 MainComponent::~MainComponent()
 {
+    juce::Desktop::getInstance().removeGlobalMouseListener (&nameEditCommitter);
+
     // The effects page goes, and the effects are kept, as they may have been changed in their editors.
     effectsWindow = nullptr;
     saveEffects();
