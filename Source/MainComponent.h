@@ -210,6 +210,16 @@ private:
     {
         std::function<void()> onScroll;
 
+        /** Given the keys pressed while something in it has the focus before it scrolls with
+            them, returning whether they've been used for something else.
+        */
+        std::function<bool (const juce::KeyPress&)> onKeyPressed;
+
+        bool keyPressed (const juce::KeyPress& key) override
+        {
+            return (onKeyPressed != nullptr && onKeyPressed (key)) || juce::Viewport::keyPressed (key);
+        }
+
         void visibleAreaChanged (const juce::Rectangle<int>&) override
         {
             if (onScroll != nullptr)
@@ -249,6 +259,11 @@ private:
 
     using juce::Component::keyPressed;
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
+
+    /** Whether the arrow keys move something rather than scrolling: the step-recording marker,
+        or the notes selected together.
+    */
+    bool arrowsMoveSomething() const noexcept { return stepRecording || itemSelection.has_value(); }
 
     /** Clicking something that doesn't take the keyboard focus, such as Play or the staves, leaves
         the focus where it was, rather than giving it to the first control that would take it.

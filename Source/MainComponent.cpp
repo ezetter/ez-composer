@@ -656,6 +656,16 @@ MainComponent::MainComponent (juce::PropertiesFile& settingsToUse)
     staffViewport.setScrollBarsShown (true, true);
     addAndMakeVisible (staffViewport);
 
+    // Recording a step at a time, or with notes selected, the arrow keys move the marker or the
+    // notes, rather than scrolling the staves, whatever has the focus.
+    for (auto* viewport : { &staffViewport, &scorePageViewport })
+        viewport->onKeyPressed = [this, viewport] (const juce::KeyPress& key)
+        {
+            const auto arrow = key.isKeyCode (juce::KeyPress::leftKey) || key.isKeyCode (juce::KeyPress::rightKey)
+                            || key.isKeyCode (juce::KeyPress::upKey) || key.isKeyCode (juce::KeyPress::downKey);
+            return arrow && arrowsMoveSomething() && keyPressed (key, viewport);
+        };
+
     // Or in its place, the score page, under the notation controls added after it, which go over it
     scorePageViewport.setViewedComponent (&scorePage, false);
     scorePageViewport.setScrollBarsShown (true, true);
