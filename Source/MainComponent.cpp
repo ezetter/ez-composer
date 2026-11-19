@@ -1054,20 +1054,31 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         return true;
     }
 
-    // With notes selected together, the arrow keys move them: left and right a step of the note
-    // length chosen, up and down a line or space, or with Shift, an octave.
-    if (itemSelection.has_value() && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr
+    // With a note selected, or notes selected together, the arrow keys move them: left and
+    // right a step of the note length chosen, up and down a semitone, or with Shift, an octave.
+    if ((itemSelection.has_value() || selectedNote.has_value()) && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr
         && (key.isKeyCode (juce::KeyPress::leftKey) || key.isKeyCode (juce::KeyPress::rightKey)
             || key.isKeyCode (juce::KeyPress::upKey) || key.isKeyCode (juce::KeyPress::downKey)))
     {
-        const auto octave = key.getModifiers().isShiftDown() ? 7 : 1;
+        const auto semitones = (key.getModifiers().isShiftDown() ? 12 : 1) * (key.isKeyCode (juce::KeyPress::upKey) ? 1 : -1);
+        const auto slots = key.isKeyCode (juce::KeyPress::leftKey) ? -getSelectionStep() : getSelectionStep();
+        const auto across = key.isKeyCode (juce::KeyPress::leftKey) || key.isKeyCode (juce::KeyPress::rightKey);
 
-        if (key.isKeyCode (juce::KeyPress::leftKey))
-            moveSelection (-getSelectionStep(), 0);
-        else if (key.isKeyCode (juce::KeyPress::rightKey))
-            moveSelection (getSelectionStep(), 0);
+        if (itemSelection.has_value())
+        {
+            if (across)
+                moveSelection (slots, 0);
+            else
+                moveSelection (0, semitones, true);
+        }
+        else if (across)
+        {
+            moveSelectedNoteBy (slots);
+        }
         else
-            moveSelection (0, key.isKeyCode (juce::KeyPress::upKey) ? octave : -octave);
+        {
+            changeSelectedNotePitch (semitones);
+        }
 
         return true;
     }
@@ -2463,7 +2474,7 @@ int MainComponent::getSelectionStep() const
     return step;
 }
 
-void MainComponent::moveSelection (int slots, int steps)
+void MainComponent::moveSelection (int slots, int steps, bool semitones)
 {
     checkItemSelection();
 
@@ -2472,7 +2483,8 @@ void MainComponent::moveSelection (int slots, int steps)
 
     const auto selection = *itemSelection;
     const auto passage = score.getPassage (selection.part, selection.items);
-    const auto moved = Score::transpose (passage, steps, score.getKey());
+    const auto moved = semitones ? Score::transposeSemitones (passage, steps, score.getKey())
+                                 : Score::transpose (passage, steps, score.getKey());
 
     if (passage.isEmpty() || ! moved.has_value())
         return;
@@ -2683,6 +2695,76 @@ void MainComponent::moveSelectedNoteTo (int midiNote)
     Note moved { staff, note.measure, note.beat, pitch, note.part,
                  score.getNoteLength (note.part, note.staff, note.measure, note.beat),
                  score.isStaccato (note.part, note.staff, note.measure, note.beat) };
+
+    history.beginGesture();
+    score.removeNote (note.part, note.staff, note.measure, note.beat, note.pitch);
+    score.addNote (moved);
+    history.endGesture();
+
+    selectNote (moved);
+}
+
+void MainComponent::changeSelectedNotePitch (int semitones)
+{
+    checkSelectedNote();
+
+    if (! selectedNote.has_value())
+        return;
+
+    const auto note = *selectedNote;
+    const auto midi = note.pitch.getMidiNoteNumber() + semitones;
+
+    if (! juce::isPositiveAndBelow (midi, 128))
+        return;
+
+    // A tuplet's note changes its pitch on the tuplet's staff, as a key played does.
+    if (getSelectedTupletNote().has_value())
+    {
+        moveSelectedNoteTo (midi);
+        return;
+    }
+
+    // A note of its own stays on its staff.
+    Note moved { note.staff, note.measure, note.beat, music::spellMidiNote (score.getKey(), midi), note.part,
+                 score.getNoteLength (note.part, note.staff, note.measure, note.beat),
+                 score.isStaccato (note.part, note.staff, note.measure, note.beat) };
+
+    // Not onto a note of that pitch already there, which it would just disappear into
+    if (const auto& there = score.getNotes (moved.part, moved.staff, moved.measure, moved.beat);
+        std::find (there.begin(), there.end(), moved.pitch) != there.end())
+        return;
+
+    history.beginGesture();
+    score.removeNote (note.part, note.staff, note.measure, note.beat, note.pitch);
+    score.addNote (moved);
+    history.endGesture();
+
+    selectNote (moved);
+}
+
+void MainComponent::moveSelectedNoteBy (int slots)
+{
+    checkSelectedNote();
+
+    if (! selectedNote.has_value() || getSelectedTupletNote().has_value())
+        return;
+
+    const auto note = *selectedNote;
+    const auto slotsPerMeasure = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+    const auto at = note.measure * slotsPerMeasure + (int) std::lround (note.beat * Score::slotsPerBeat) + slots;
+
+    // Not before the start, nor past the end, nor into a measure whose chord has the staff
+    if (at < 0 || at / slotsPerMeasure >= score.getNumMeasures() || score.chordUsesStaff (note.part, at / slotsPerMeasure, note.staff))
+        return;
+
+    Note moved { note.staff, at / slotsPerMeasure, (double) (at % slotsPerMeasure) / Score::slotsPerBeat, note.pitch, note.part,
+                 score.getNoteLength (note.part, note.staff, note.measure, note.beat),
+                 score.isStaccato (note.part, note.staff, note.measure, note.beat) };
+
+    // Not onto a note of its pitch already there, which it would just disappear into
+    if (const auto& there = score.getNotes (moved.part, moved.staff, moved.measure, moved.beat);
+        std::find (there.begin(), there.end(), moved.pitch) != there.end())
+        return;
 
     history.beginGesture();
     score.removeNote (note.part, note.staff, note.measure, note.beat, note.pitch);

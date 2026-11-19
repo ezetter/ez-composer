@@ -263,7 +263,7 @@ private:
     /** Whether the arrow keys move something rather than scrolling: the step-recording marker,
         or the notes selected together.
     */
-    bool arrowsMoveSomething() const noexcept { return stepRecording || itemSelection.has_value(); }
+    bool arrowsMoveSomething() const noexcept { return stepRecording || itemSelection.has_value() || selectedNote.has_value(); }
 
     /** Clicking something that doesn't take the keyboard focus, such as Play or the staves, leaves
         the focus where it was, rather than giving it to the first control that would take it.
@@ -412,7 +412,18 @@ private:
     /** Moves what's selected together on by some 64ths, back if it's negative, and up or down
         by lines and spaces, and selects it where it goes.
     */
-    void moveSelection (int slots, int steps);
+    void moveSelection (int slots, int steps, bool semitones = false);
+
+    /** Moves the note selected on its own up or down by semitones, on its staff, spelled in the
+        key, keeping its length and staccato; or a tuplet's note, on the tuplet's staff.
+    */
+    void changeSelectedNotePitch (int semitones);
+
+    /** Moves the note selected on its own back or on by some 64ths, to where it joins whatever
+        starts there, as a note added there does, keeping its length, pitch and staccato. A
+        tuplet's notes stay where they are.
+    */
+    void moveSelectedNoteBy (int slots);
 
     /** How far the left and right arrow keys move what's selected together, in 64ths: a step
         of the note length chosen without its dot, as clicks place notes, or a beat for a

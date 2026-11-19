@@ -912,6 +912,34 @@ std::optional<Passage> Score::transpose (Passage passage, int steps, music::Key 
     return passage;
 }
 
+std::optional<Passage> Score::transposeSemitones (Passage passage, int semitones, music::Key key)
+{
+    if (semitones == 0)
+        return passage;
+
+    auto fits = true;
+    const auto shift = [&] (music::Pitch& pitch)
+    {
+        const auto midi = pitch.getMidiNoteNumber() + semitones;
+        fits = fits && juce::isPositiveAndBelow (midi, 128);
+
+        if (fits)
+            pitch = music::spellMidiNote (key, midi);
+    };
+
+    for (auto& note : passage.notes)
+        shift (note.pitch);
+
+    for (auto& tuplet : passage.tuplets)
+        for (auto& pitch : tuplet.pitches)
+            shift (pitch);
+
+    if (! fits)
+        return {};
+
+    return passage;
+}
+
 void Score::removeItems (int part, const std::vector<WrittenItem>& items)
 {
     auto changed = false;

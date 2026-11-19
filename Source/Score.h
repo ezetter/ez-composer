@@ -645,6 +645,11 @@ public:
     */
     static std::optional<Passage> transpose (Passage, int steps, music::Key);
 
+    /** A passage with its notes moved up or down by semitones, on their own staves, spelled in
+        the key. Nothing if any would go outside the MIDI notes.
+    */
+    static std::optional<Passage> transposeSemitones (Passage, int semitones, music::Key);
+
     //==============================================================================
     /** The dynamic marked at a point of a part, if there's one there. Each part has its own
         dynamics, written between its staves, on a beat or halfway through one.
