@@ -910,7 +910,7 @@ private:
     std::vector<WrittenItem> boxItems;               // what's in it
     juce::Point<float> boxStart;
     bool pressedToDeselect = false;                  // the mouse went down to let go of what's selected
-    juce::TextButton repeatButton { "Repeat" }, copyButton { "Copy" }, cutButton { "Cut" }, moveButton { "Move" };
+    juce::TextButton repeatButton { "Repeat" }, copyButton { "Copy" }, cutButton { "Cut" }, moveButton { "Edit" };
     bool movingItems = false;                        // dragging moves what's selected
     std::optional<Passage> itemMovePassage;          // what's selected, being dragged
     juce::Point<float> itemMovePress;                // where the mouse went down

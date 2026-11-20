@@ -1054,9 +1054,10 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         return true;
     }
 
-    // With a note selected, or notes selected together, the arrow keys move them: left and
-    // right a step of the note length chosen, up and down a semitone, or with Shift, an octave.
-    if ((itemSelection.has_value() || selectedNote.has_value()) && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr
+    // With a note selected, or notes selected together and Edit on, the arrow keys move them:
+    // left and right a step of the note length chosen, up and down a semitone, or with Shift,
+    // an octave. Until Edit's on, notes selected together can't be changed.
+    if ((isEditingItems() || selectedNote.has_value()) && dynamic_cast<juce::TextEditor*> (originatingComponent) == nullptr
         && (key.isKeyCode (juce::KeyPress::leftKey) || key.isKeyCode (juce::KeyPress::rightKey)
             || key.isKeyCode (juce::KeyPress::upKey) || key.isKeyCode (juce::KeyPress::downKey)))
     {
@@ -1064,7 +1065,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
         const auto slots = key.isKeyCode (juce::KeyPress::leftKey) ? -getSelectionStep() : getSelectionStep();
         const auto across = key.isKeyCode (juce::KeyPress::leftKey) || key.isKeyCode (juce::KeyPress::rightKey);
 
-        if (itemSelection.has_value())
+        if (isEditingItems())
         {
             if (across)
                 moveSelection (slots, 0);
@@ -2305,10 +2306,13 @@ void MainComponent::resumeAddingNotes()
 
 void MainComponent::changeSelectedNoteLength (double beats)
 {
-    // Notes selected together all take the length, each starting where it did. A longer one
-    // takes the place of what it then covers, as a note added does; rests and tuplets stay as
-    // they are.
+    // With Edit on, notes selected together all take the length, each starting where it did.
+    // A longer one takes the place of what it then covers, as a note added does; rests and
+    // tuplets stay as they are. Until Edit's on, they can't be changed.
     checkItemSelection();
+
+    if (itemSelection.has_value() && ! movingItems)
+        return;
 
     if (itemSelection.has_value())
     {

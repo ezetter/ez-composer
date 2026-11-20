@@ -1014,7 +1014,7 @@ void StaffView::updateSelectionActions()
     repeatButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::repeat); };
     copyButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::copy); };
     cutButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::cut); };
-    moveButton.setTooltip ("Turn on to drag the notes selected: across in time, or up and down in pitch");
+    moveButton.setTooltip ("Turn on to change the notes selected: drag them or use the arrow keys to move them in time or pitch, or choose a note length for them");
     moveButton.onClick = [this] { if (onSelectionAction != nullptr) onSelectionAction (SelectionAction::move); };
     moveButton.setToggleState (movingItems, juce::dontSendNotification);
 

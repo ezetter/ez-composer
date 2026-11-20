@@ -263,7 +263,12 @@ private:
     /** Whether the arrow keys move something rather than scrolling: the step-recording marker,
         or the notes selected together.
     */
-    bool arrowsMoveSomething() const noexcept { return stepRecording || itemSelection.has_value() || selectedNote.has_value(); }
+    bool arrowsMoveSomething() const noexcept { return stepRecording || isEditingItems() || selectedNote.has_value(); }
+
+    /** Whether the notes selected together are being edited, with Edit on: moved, or given
+        another length
+    */
+    bool isEditingItems() const noexcept { return itemSelection.has_value() && movingItems; }
 
     /** Clicking something that doesn't take the keyboard focus, such as Play or the staves, leaves
         the focus where it was, rather than giving it to the first control that would take it.
@@ -903,7 +908,7 @@ private:
     std::optional<ItemSelection> itemSelection;      // selected together, to repeat, copy or cut
     std::optional<Passage> clipboard;                // copied or cut last
     bool pasting = false;                            // a click on the staves pastes it
-    bool movingItems = false;                        // dragging moves what's selected together
+    bool movingItems = false;                        // Edit on: what's selected together can be moved, or given another length
     std::vector<Note> lastStepNotes, stepNotes;      // the notes the step before wrote, for tying to, and this one's
     juce::TimedCallback stepKeysTimer { [this] { takeStepKeys(); } };
 
