@@ -34,7 +34,7 @@ juce::StringArray getChordTypeNames()
 const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths()
 {
     constexpr auto beat = Score::slotsPerBeat;
-    static const std::array<std::pair<int, const char*>, 6> lengths { { { 4 * beat, "Whole measure" }, { 2 * beat, "Half notes" }, { beat, "Quarter notes" },
+    static const std::array<std::pair<int, const char*>, 6> lengths { { { 4 * beat, "Whole notes" }, { 2 * beat, "Half notes" }, { beat, "Quarter notes" },
                                                                         { beat / 2, "Eighth notes" }, { beat / 4, "16th notes" }, { beat / 8, "32nd notes" } } };
     return lengths;
 }
@@ -493,21 +493,20 @@ void ChordEditor::update()
                                            "Only block and rolled chords last two."
                                          : "How long the chord lasts: half a measure, leaving the other half for another chord, one, or two");
 
-    // The length chosen, or else the one the chord type gives it, with only lengths that fit in
-    // the chord to choose from: the first, the whole chord, is the whole measure or half of it.
+    // The length the notes are, chosen or as the chord type makes them, with only lengths that
+    // fit in the chord to choose from: whole notes in a 4/4 measure, half notes in half of it.
+    // One that's none of them, such as a block chord held for a 3/4 measure, a dotted half,
+    // shows none chosen.
     const auto chordLength = score.getChordSlots (chord);
     const auto length = score.getChordNoteLength (chord);
     auto selected = 0;
 
-    noteLengthBox.changeItemText (1, style.halfMeasure ? "Half measure" : noteLengths[0].second);
-
     for (size_t i = 0; i < noteLengths.size(); ++i)
     {
         const auto itemLength = noteLengths[i].first;
-        noteLengthBox.setItemEnabled ((int) i + 1, i == 0 || itemLength <= chordLength);
+        noteLengthBox.setItemEnabled ((int) i + 1, itemLength <= chordLength);
 
-        if (style.noteLength.has_value() ? itemLength == *style.noteLength
-                                         : (i == 0 ? length == chordLength : itemLength == length && length != chordLength))
+        if (itemLength == length)
             selected = (int) i + 1;
     }
 
