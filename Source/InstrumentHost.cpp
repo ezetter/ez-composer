@@ -648,8 +648,9 @@ std::vector<InstrumentHost::NoteEvent> InstrumentHost::createNoteEvents (const S
                 // A block or rolled chord, the chord's or the alternate staff's, is spread from the
                 // bottom up as it starts; everything else starts together.
                 const auto* chordPlayed = content.getChordAt (event.onset);
-                const auto spreadAsChord = staff.source == StaffContent::Source::alternate
-                                        || (staff.source == StaffContent::Source::chord && chordPlayed != nullptr && ! music::isMelodic (chordPlayed->style.type));
+                const auto source = staff.getSourceAt (event.onset);
+                const auto spreadAsChord = source == StaffContent::Source::alternate
+                                        || (source == StaffContent::Source::chord && chordPlayed != nullptr && ! music::isMelodic (chordPlayed->style.type));
                 const auto spread = ! spreadAsChord ? 0.0 : event.rolled ? rolledChordSpread : blockChordSpread;
                 auto tones = event.tones;
 

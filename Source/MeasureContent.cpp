@@ -543,7 +543,8 @@ namespace
 
         const auto* next = score.getChord (part, measure + 1);
 
-        if (next == nullptr || ! next->hasNotes() || ! holdsAlternate (chord) || ! holdsAlternate (*next))
+        // On the same staff, so the notes are on the same alternate staff
+        if (next == nullptr || ! next->hasNotes() || next->style.staff != chord.style.staff || ! holdsAlternate (chord) || ! holdsAlternate (*next))
             return false;
 
         const auto sameChord = ! chord.spec.isEmpty() ? next->spec == chord.spec : next->keyboardNotes == chord.keyboardNotes;
@@ -586,7 +587,7 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
     const auto measureLength = score.getBeatsPerMeasure() * Score::slotsPerBeat;
     const auto beatsPerMeasure = score.getBeatsPerMeasure();
 
-    // The measure's chord, or its two halves', each half's on its own: the same staff for both,
+    // The measure's chord, or its two halves', each half's on its own, each on its own staff,
     // with rests in a half without notes
     std::array<std::optional<music::Chord>, 2> notes;
 
@@ -595,15 +596,26 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
 
     if (firstChord != nullptr && (notes[0].has_value() || notes[1].has_value()))
     {
-        const auto chordStaff = firstChord->style.staff;
-        const auto otherStaff = music::getOtherStaff (chordStaff);
-        const auto usesOther = score.chordUsesStaff (part, measure, otherStaff);
-        auto& written = content.staves[(size_t) chordStaff];
-        auto& alternate = content.staves[(size_t) otherStaff];
-        written.source = StaffContent::Source::chord;
-        alternate.source = StaffContent::Source::alternate;
-        filled[(size_t) chordStaff] = true;
-        filled[(size_t) otherStaff] = usesOther;
+        for (auto staff : { Staff::treble, Staff::bass })
+            filled[(size_t) staff] = score.chordUsesStaff (part, measure, staff);
+
+        // Each half's chord is on its staff; the other has the alternate staff's notes, or rests.
+        // A half without notes counts as the other half's for which staff it has.
+        const auto staffOf = [&] (int index)
+        {
+            const auto own = notes[(size_t) index].has_value() ? index : 1 - index;
+            return score.getChord (part, measure, own)->style.staff;
+        };
+
+        for (auto staff : { Staff::treble, Staff::bass })
+        {
+            const auto sourceIn = [&] (int index) { return staffOf (index) == staff ? StaffContent::Source::chord : StaffContent::Source::alternate; };
+            auto& staffContent = content.staves[(size_t) staff];
+            staffContent.source = sourceIn (0);
+
+            if (numChords == 2 && sourceIn (1) != staffContent.source)
+                staffContent.laterSource = std::pair ((double) score.getChordStart (1) / Score::slotsPerBeat, sourceIn (1));
+        }
 
         for (int index = 0; index < numChords; ++index)
         {
@@ -616,14 +628,17 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
             if (! notes[(size_t) index].has_value())
             {
                 // A half without a chord is rests, on both staves.
-                addRests (written.events, from, from + span, beatsPerMeasure);
-
-                if (usesOther)
-                    addRests (alternate.events, from, from + span, beatsPerMeasure);
+                for (auto staff : { Staff::treble, Staff::bass })
+                    if (filled[(size_t) staff])
+                        addRests (content.staves[(size_t) staff].events, from, from + span, beatsPerMeasure);
 
                 continue;
             }
 
+            const auto chordStaff = measureChord.style.staff;
+            const auto otherStaff = music::getOtherStaff (chordStaff);
+            auto& written = content.staves[(size_t) chordStaff];
+            auto& alternate = content.staves[(size_t) otherStaff];
             const auto& chord = *notes[(size_t) index];
             content.chords.push_back ({ chord, measureChord.style, onset, beats, index });
 
@@ -631,34 +646,42 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
             written.events.insert (written.events.end(), chordContent.events.begin(), chordContent.events.end());
             written.tiedNotes.insert (written.tiedNotes.end(), chordContent.tiedNotes.begin(), chordContent.tiedNotes.end());
 
-            if (! usesOther)
+            if (! filled[(size_t) otherStaff])
                 continue;
 
             // Held for the whole chord, from its start. With all its notes taken out by hand, it's
             // a rest, rather than the quarter notes it hides: a whole-measure rest for a chord
-            // lasting the measure.
+            // lasting the measure. Without an alternate staff, it's rests, where the other half's
+            // chord has that staff.
             // In a rhythm with notes on both staves, the other staff's go as its notes do.
             const auto& rhythm = measureChord.style.rhythm;
             const auto rolled = score.getAlternateStaff (part) == music::AlternateStaff::rolledChord;
             auto tones = score.getAlternateTones (part, measure, index);
 
             if (! tones.empty() && rhythm.has_value() && rhythm->hasNotes (otherStaff) && rhythm->hasNotes (chordStaff))
+            {
                 alternate = getRhythmContent (score, layOutRhythm (rhythm->staves[(size_t) otherStaff], measureLength, measureChord.rhythmMeasure),
                                               StaffContent::Source::alternate, [&] (int) { return tones; }, rolled);
+            }
             else if (! tones.empty())
+            {
                 alternate.events.push_back ({ onset, numChords == 2 ? getDurationForBeats (beats) : getFullMeasureDuration (beatsPerMeasure),
                                               std::move (tones), rolled, false });
+            }
             else if (numChords == 2)
+            {
                 addRests (alternate.events, from, from + span, beatsPerMeasure);
+            }
             else
+            {
                 alternate.events.push_back ({ 0.0, Duration::whole, {}, false, true });
+            }
         }
 
         // The chord's own content says how close its notes are; two halves need room for both.
-        setNotesPerBeat (written);
-
-        if (usesOther)
-            setNotesPerBeat (alternate);
+        for (auto staff : { Staff::treble, Staff::bass })
+            if (filled[(size_t) staff])
+                setNotesPerBeat (content.staves[(size_t) staff]);
 
         // Held on into the next measure, the alternate staff's notes with it. A root or octave is
         // held on into the next measure too when it has the same chord, even if the chord's
@@ -667,14 +690,15 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
 
         if (score.isChordTiedOver (part, measure))
         {
-            for (auto staff : { chordStaff, otherStaff })
+            for (auto staff : { Staff::treble, Staff::bass })
                 if (filled[(size_t) staff])
                     tieOver (content.staves[(size_t) staff], beatsPerMeasure);
         }
         else if (const auto* last = score.getChord (part, measure, lastIndex);
-                 usesOther && last != nullptr && last->hasNotes() && isAlternateTiedOver (score, part, measure, lastIndex, *last))
+                 last != nullptr && last->hasNotes() && filled[(size_t) music::getOtherStaff (last->style.staff)]
+                 && isAlternateTiedOver (score, part, measure, lastIndex, *last))
         {
-            tieOver (content.staves[(size_t) otherStaff], beatsPerMeasure);
+            tieOver (content.staves[(size_t) music::getOtherStaff (last->style.staff)], beatsPerMeasure);
         }
 
         // Held on from the measure before, a rolled chord isn't rolled again.

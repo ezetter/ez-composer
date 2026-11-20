@@ -1303,12 +1303,12 @@ std::optional<StaffView::ChordNote> StaffView::findMovableChordNoteAt (juce::Poi
     // arpeggio or Random chord writes on its own staff
     const auto spot = getNoteAt (point);
 
-    if (! spot.has_value() || score.getChord (part, spot->measure) == nullptr || score.getChord (part, spot->measure)->style.staff != spot->staff)
+    if (! spot.has_value() || score.getChord (part, spot->measure) == nullptr)
         return {};
 
     const auto& content = measureLayouts[(size_t) spot->measure].content.staves[(size_t) spot->staff];
 
-    if (content.source != StaffContent::Source::chord)
+    if (content.source == StaffContent::Source::notes)
         return {};
 
     // Each of a measure's two chords counts its own notes, and only an arpeggio's or Random chord's move.
@@ -1318,7 +1318,8 @@ std::optional<StaffView::ChordNote> StaffView::findMovableChordNoteAt (juce::Poi
 
     for (const auto& event : content.events)
     {
-        if (event.isRest())
+        // Only the chord's own notes, not the alternate staff's in the other half
+        if (event.isRest() || content.getSourceAt (event.onset) != StaffContent::Source::chord)
             continue;
 
         const auto chordIndex = score.getChordIndexAt (part, spot->measure, event.onset);
@@ -1782,8 +1783,8 @@ void StaffView::updateLayout()
 
             const auto& content = layout.content.staves[(size_t) staff];
             const auto& chords = layout.content.chords;
-            const auto melodic = content.source == StaffContent::Source::chord
-                              && std::any_of (chords.begin(), chords.end(), [] (const auto& played) { return music::isMelodic (played.style.type); });
+            const auto melodic = std::any_of (chords.begin(), chords.end(), [staff] (const auto& played)
+                                              { return played.style.staff == staff && music::isMelodic (played.style.type); });
 
             for (const auto& event : content.events)
             {
@@ -5098,7 +5099,12 @@ void StaffView::clickNote (const Note& note)
         // In a measure with two chords, it's the chord in the half clicked.
         const auto existing = findNoteUnder (note);
         const auto chordIndex = score.getChordIndexAt (part, note.measure, note.beat);
-        const auto style = score.getChord (part, note.measure, chordIndex)->style;
+        auto style = score.getChord (part, note.measure, chordIndex)->style;
+
+        // A half without notes yet starts on the staff clicked.
+        if (! score.getChord (part, note.measure, chordIndex)->hasNotes())
+            style.staff = note.staff;
+
         const music::KeyboardNote clicked { existing ? existing->midi : note.pitch.getMidiNoteNumber(),
                                             existing ? existing->pitch.getSpelling() : note.pitch.getSpelling() };
 

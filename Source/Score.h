@@ -288,8 +288,8 @@ struct ChordStyle
     int measures = 1;
 
     /** Whether the chord lasts half a measure, as chosen in the chord window, rather than one or
-        two. Its measure then has two chords, one in each half, on the same staff, each with its
-        own numeral, chord type and note length. Such a chord isn't written in a rhythm.
+        two. Its measure then has two chords, one in each half, each with its own numeral, chord
+        type, note length and staff. Such a chord isn't written in a rhythm.
     */
     bool halfMeasure = false;
 
@@ -1061,7 +1061,7 @@ private:
     /** How many measures a chord takes in its rhythm, or one without one */
     int getRhythmMeasureCount (const MeasureChord&) const;
 
-    /** Keeps a measure's chords as they can be: two halves, on the same staff, or one chord, and
+    /** Keeps a measure's chords as they can be: two halves, each on its own staff, or one chord, and
         each as its type and length allow. One's Random order is made again, if it's asked for.
     */
     void tidyChord (Measure&, int reshuffleIndex = -1);

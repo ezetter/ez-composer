@@ -35,6 +35,18 @@ struct StaffContent
     enum class Source { notes, chord, alternate };
 
     Source source = Source::notes;
+
+    /** Where a measure's two halves have chords on different staves, what the staff is from
+        halfway, by when that is, in beats: the chord's on one half and the alternate staff's,
+        or rests, on the other.
+    */
+    std::optional<std::pair<double, Source>> laterSource;
+
+    /** What the staff has at a point in the measure, in beats */
+    Source getSourceAt (double beat) const noexcept
+    {
+        return laterSource.has_value() && beat >= laterSource->first - 1.0e-9 ? laterSource->second : source;
+    }
     std::vector<StaffEvent> events;     // in time order
     int notesPerBeat = 1;               // 2 for eighths, 4 for 16ths, 8 for 32nds and 16 for 64ths
 

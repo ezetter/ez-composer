@@ -1720,8 +1720,7 @@ void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> 
         sendSynchronousChangeMessage();
     };
 
-    // A chord without a rhythm only, and the chords going in halves on the same staff, so each
-    // writes the other's staff as well
+    // A chord without a rhythm only, in halves, each on its own staff
     if (chord.has_value() && chord->style.halfMeasure)
     {
         chord->style.rhythm.reset();
@@ -1765,13 +1764,6 @@ void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> 
             // The first chord given notes in the measure goes in the other half too, to start with.
             if (! hadNotes && chord->hasNotes() && (! other.has_value() || ! other->hasNotes()))
                 other = *chord;
-
-            // Both halves are on the same staff.
-            if (other.has_value() && other->style.staff != chord->style.staff)
-            {
-                other->style.staff = chord->style.staff;
-                other->alternateNotes.reset();
-            }
 
             tidyChord (here);
             return finished();
@@ -2034,11 +2026,16 @@ std::optional<music::Chord> Score::getChordNotes (const MeasureChord& chord) con
 
 bool Score::chordUsesStaff (int part, int measure, Staff staff) const
 {
-    // A measure's two halves are on the same staff.
+    // A measure's two halves can be on different staves, and then both staves are the chords',
+    // each with rests in the half whose chord isn't on it, or the alternate staff's notes.
     const auto& target = getMeasure (part, measure);
+    const auto alternate = getAlternateStaff (part) != music::AlternateStaff::none;
 
-    return target.chord.has_value() && target.hasChordNotes()
-        && (target.chord->style.staff == staff || getAlternateStaff (part) != music::AlternateStaff::none);
+    for (const auto* chord : { &target.chord, &target.secondChord })
+        if (chord->has_value() && (*chord)->hasNotes() && ((*chord)->style.staff == staff || alternate))
+            return true;
+
+    return false;
 }
 
 void Score::toggleChordNote (int part, int measure, int midiNote, const ChordStyle& styleForNewChord, int index)
@@ -2051,6 +2048,10 @@ void Score::toggleChordNote (int part, int measure, int midiNote, const ChordSty
 
     if (! slot.has_value())
         slot = MeasureChord { {}, {}, styleForNewChord, {}, {} };
+
+    // A half without notes yet takes the staff its first note's clicked on.
+    if (! slot->hasNotes())
+        slot->style.staff = styleForNewChord.staff;
 
     toggleChordNote (*slot, midiNote);
     tidyChord (target);
@@ -2254,7 +2255,7 @@ void Score::copyChords (int fromPart, int toPart)
 
 void Score::tidyChord (Measure& measure, int reshuffleIndex)
 {
-    // A chord lasting half the measure has another in the other half, on the same staff, and a
+    // A chord lasting half the measure has another in the other half, on its own staff, and a
     // second half has a first, with rests if it has nothing else.
     if (! measure.chord.has_value() && measure.secondChord.has_value())
         measure.chord = MeasureChord { {}, {}, measure.secondChord->style, {}, {} };
@@ -2265,7 +2266,6 @@ void Score::tidyChord (Measure& measure, int reshuffleIndex)
             measure.secondChord = measure.chord;
 
         measure.secondChord->style.halfMeasure = true;
-        measure.secondChord->style.staff = measure.chord->style.staff;
     }
     else
     {
@@ -2278,8 +2278,9 @@ void Score::tidyChord (Measure& measure, int reshuffleIndex)
 
     // The chords replace the quarter notes on their staff. The ones on the alternate staff are
     // only hidden, since the alternate staff can be turned off for a whole part at once.
-    if (measure.hasChordNotes())
-        measure.clearNotes (measure.chord->style.staff);
+    for (const auto* chord : { &measure.chord, &measure.secondChord })
+        if (chord->has_value() && (*chord)->hasNotes())
+            measure.clearNotes ((*chord)->style.staff);
 
     tidyOneChord (*measure.chord, reshuffleIndex == 0);
 
