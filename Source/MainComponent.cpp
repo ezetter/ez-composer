@@ -2305,6 +2305,30 @@ void MainComponent::resumeAddingNotes()
 
 void MainComponent::changeSelectedNoteLength (double beats)
 {
+    // Notes selected together all take the length, each starting where it did. A longer one
+    // takes the place of what it then covers, as a note added does; rests and tuplets stay as
+    // they are.
+    checkItemSelection();
+
+    if (itemSelection.has_value())
+    {
+        const auto selection = *itemSelection;
+        const auto wasMoving = movingItems;
+
+        history.beginGesture();
+
+        for (const auto& item : selection.items)
+            if (item.kind == WrittenItem::Kind::note && score.hasItem (selection.part, item))
+                score.addNote ({ item.staff, item.measure, item.beat, item.pitch, selection.part, beats,
+                                 score.isStaccato (selection.part, item.staff, item.measure, item.beat) });
+
+        history.endGesture();
+
+        checkItemSelection();
+        setMovingItems (wasMoving);
+        return;
+    }
+
     checkSelectedNote();
 
     // A tuplet's notes keep the tuplet's length.
