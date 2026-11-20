@@ -232,11 +232,11 @@ SavedProgression getProgression (const Score& score, int part)
 
     for (int measure = 0; measure < score.getNumMeasures(); ++measure)
     {
-        // A measure with two chords, each lasting half of it, gives both, one after the other, each
-        // a chord of its own.
-        if (score.hasTwoChords (part, measure))
+        // A measure with two or three chords, each lasting half or a third of it, gives them all,
+        // one after another, each a chord of its own.
+        if (score.hasSeveralChords (part, measure))
         {
-            for (auto index : { 0, 1 })
+            for (int index = 0; index < score.getNumChords (part, measure); ++index)
                 if (const auto* half = score.getChord (part, measure, index); half != nullptr && half->hasNotes())
                     progression.chords.push_back ({ half->spec, half->keyboardNotes, half->style.staff, 1 });
 

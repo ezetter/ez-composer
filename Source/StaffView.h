@@ -928,7 +928,13 @@ private:
     bool hoverHintHidden = false;       // after a click, until the pointer moves to another spot
     std::optional<int> selectedMeasure;
     juce::OwnedArray<juce::TextButton> chordButtons;    // one above each measure
-    juce::OwnedArray<juce::TextButton> secondChordButtons;     // and above the second half of each with two chords
+    juce::OwnedArray<juce::TextButton> secondChordButtons;     // and above the second half or third of each with several chords
+    juce::OwnedArray<juce::TextButton> thirdChordButtons;      // and above the last third of each with three
+
+    juce::OwnedArray<juce::TextButton>& getChordButtons (int chordIndex) noexcept
+    {
+        return chordIndex == 2 ? thirdChordButtons : chordIndex == 1 ? secondChordButtons : chordButtons;
+    }
     int selectedChordIndex = 0;                         // of the selected measure's chords, the one being edited
     std::optional<int> playingBeat;     // counted from the start of the score
     std::optional<double> stepMarker;   // where the next step recorded goes, in beats from the start of the score

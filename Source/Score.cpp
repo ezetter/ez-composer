@@ -214,7 +214,7 @@ void Score::followKeyChange()
     {
         for (auto& measure : part.measures)
         {
-            for (auto* chord : { &measure.chord, &measure.secondChord })
+            for (auto* chord : measure.getChords())
             {
                 if (chord->has_value() && (*chord)->keyboardNotes.has_value())
                 {
@@ -268,7 +268,7 @@ void Score::setAlternateStaff (int part, music::AlternateStaff newAlternateStaff
 
     // Notes set by hand were for the old alternate staff.
     for (auto& measure : target.measures)
-        for (auto* chord : { &measure.chord, &measure.secondChord })
+        for (auto* chord : measure.getChords())
             if (chord->has_value())
                 (*chord)->alternateNotes.reset();
 
@@ -1598,23 +1598,44 @@ int Score::getVelocity (int part, int measure, double beat) const
 //==============================================================================
 const MeasureChord* Score::getChord (int part, int measure, int index) const
 {
-    const auto& chord = getMeasure (part, measure).getChord (index);
+    const auto& target = getMeasure (part, measure);
+
+    if (! juce::isPositiveAndBelow (index, getNumChords (target)))
+        return nullptr;
+
+    const auto& chord = target.getChord (index);
     return chord.has_value() ? &*chord : nullptr;
 }
 
-bool Score::hasTwoChords (int part, int measure) const
+bool Score::canDivide (int division) const noexcept
 {
-    return getMeasure (part, measure).secondChord.has_value();
+    return division == 1 || (division == 2 && beatsPerMeasure % 2 == 0) || (division == 3 && beatsPerMeasure == 3);
+}
+
+int Score::getDivision (const MeasureChord& chord) const noexcept
+{
+    return canDivide (chord.style.division) ? chord.style.division : 1;
+}
+
+int Score::getNumChords (const Measure& measure) const noexcept
+{
+    return measure.chord.has_value() ? getDivision (*measure.chord) : 1;
+}
+
+int Score::getNumChords (int part, int measure) const
+{
+    return getNumChords (getMeasure (part, measure));
 }
 
 int Score::getChordIndexAt (int part, int measure, double beat) const
 {
-    return hasTwoChords (part, measure) && toSlot (beat) >= getChordStart (1) ? 1 : 0;
+    const auto numChords = getNumChords (part, measure);
+    return juce::jlimit (0, numChords - 1, toSlot (beat) / (getSlotsPerMeasure() / numChords));
 }
 
 int Score::getChordSlots (const MeasureChord& chord) const
 {
-    return chord.style.halfMeasure ? getSlotsPerMeasure() / 2 : getSlotsPerMeasure();
+    return getSlotsPerMeasure() / getDivision (chord);
 }
 
 void Score::setChord (int part, int measure, std::optional<MeasureChord> chord, int index)
@@ -1686,10 +1707,11 @@ int Score::putChord (int part, int firstMeasure, const MeasureChord& chord, int 
     {
         auto& target = getMeasure (part, firstMeasure + i);
         target.chord = chord;
-        target.chord->style.halfMeasure = false;        // lasting the measure, in place of any halves it had
+        target.chord->style.division = 1;        // lasting the measure, in place of any halves or thirds it had
         target.chord->rhythmMeasure = i % rhythmMeasures;
         target.chord->tiedToNext = tied && i + 1 < count;
         target.secondChord.reset();
+        target.thirdChord.reset();
         tidyChord (target);
     }
 
@@ -1720,8 +1742,8 @@ void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> 
         sendSynchronousChangeMessage();
     };
 
-    // A chord without a rhythm only, in halves, each on its own staff
-    if (chord.has_value() && chord->style.halfMeasure)
+    // A chord without a rhythm only, in halves or thirds, each on its own staff
+    if (chord.has_value() && chord->style.isDivided())
     {
         chord->style.rhythm.reset();
         chord->style.measures = 1;
@@ -1731,47 +1753,56 @@ void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> 
 
     auto& here = getMeasure (part, firstMeasure);
 
-    // One of a measure's two halves
-    if (here.secondChord.has_value())
+    // One of a measure's halves or thirds, even ones kept for a time signature they fit
+    if (here.chord.has_value() && here.chord->style.isDivided())
     {
-        index = juce::jlimit (0, 1, index);
+        const auto parts = here.chord->style.division;
+        index = juce::jlimit (0, parts - 1, index);
         auto& slot = here.getChord (index);
-        auto& other = here.getChord (1 - index);
         const auto hadNotes = slot.has_value() && slot->hasNotes();
+        const MeasureChord* withNotes = nullptr;
+
+        for (int i = 0; i < parts; ++i)
+            if (i != index && here.getChord (i).has_value() && here.getChord (i)->hasNotes() && withNotes == nullptr)
+                withNotes = &*here.getChord (i);
 
         if (! chord.has_value())
         {
-            // Its half is left with rests, or with nothing in the other half either, the measure has no chord.
-            if (! other.has_value() || ! other->hasNotes())
-            {
-                here.chord.reset();
-                here.secondChord.reset();
-            }
+            // Its part is left with rests, or with nothing in the others either, the measure has no chord.
+            if (withNotes == nullptr)
+                here.clearChords();
             else
-            {
-                slot = MeasureChord { {}, {}, other->style, {}, {} };
-            }
+                slot = MeasureChord { {}, {}, withNotes->style, {}, {} };
 
             tidyChord (here);
             untieOrphanedChord (part, firstMeasure + 1);
             return finished();
         }
 
-        if (chord->style.halfMeasure)
+        if (chord->style.division == parts)
         {
             slot = *chord;
 
-            // The first chord given notes in the measure goes in the other half too, to start with.
-            if (! hadNotes && chord->hasNotes() && (! other.has_value() || ! other->hasNotes()))
-                other = *chord;
+            // The first chord given notes in the measure goes in the others too, to start with.
+            if (! hadNotes && chord->hasNotes() && withNotes == nullptr)
+                for (int i = 0; i < parts; ++i)
+                    here.getChord (i) = *chord;
 
             tidyChord (here);
             return finished();
         }
 
-        // Lasting a measure or two, in place of both halves, and of whatever the next measure has
-        here.chord.reset();
-        here.secondChord.reset();
+        // Divided another way, it's in all of them, to start with.
+        if (chord->style.isDivided())
+        {
+            here.clearChords();
+            here.chord = *chord;
+            tidyChord (here);
+            return finished();
+        }
+
+        // Lasting a measure or two, in place of all of them, and of whatever the next measure has
+        here.clearChords();
         putChord (part, firstMeasure, *chord, 1);
         return finished();
     }
@@ -1782,15 +1813,15 @@ void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> 
     const auto wasTied = oldCount > 1 && isChordTiedOver (part, first) && oldChord->style.measures <= 1;
     const auto wasTwoMeasures = oldChord != nullptr && oldChord->style.measures > 1;
 
-    // Lasting half a measure, each of the measures it was in has it in both halves, each a chord of
-    // its own, to be changed on its own.
-    if (chord.has_value() && chord->style.halfMeasure)
+    // Lasting half or a third of a measure, each of the measures it was in has it in each half
+    // or third, each a chord of its own, to be changed on its own.
+    if (chord.has_value() && chord->style.isDivided())
     {
         for (auto i = 0; i < oldCount; ++i)
         {
             auto& target = getMeasure (part, first + i);
+            target.clearChords();
             target.chord = *chord;
-            target.secondChord = *chord;
             tidyChord (target);
         }
 
@@ -1816,8 +1847,7 @@ void Score::writeChord (int part, int firstMeasure, std::optional<MeasureChord> 
         }
         else
         {
-            target.chord.reset();
-            target.secondChord.reset();
+            target.clearChords();
         }
     }
 
@@ -1846,31 +1876,31 @@ std::vector<int> Score::getChordsReplacedBy (int part, int measure, int index, c
                   && other->alternateNotes == reference.alternateNotes && other->movedNotes == reference.movedNotes);
     };
 
-    const auto addMeasure = [&] (int m, bool bothHalves, int skipIndex)
+    const auto addMeasure = [&] (int m, int skipIndex)
     {
         if (! juce::isPositiveAndBelow (m, getNumMeasures()))
             return;
 
         const auto& target = getMeasure (part, m);
 
-        for (auto i : { 0, 1 })
-            if ((bothHalves || i != skipIndex) && isOther (target.getChord (i)) && (measures.empty() || measures.back() != m))
+        for (int i = 0; i < getNumChords (target); ++i)
+            if (i != skipIndex && isOther (target.getChord (i)) && (measures.empty() || measures.back() != m))
                 measures.push_back (m);
     };
 
-    if (chord.style.halfMeasure)
+    if (chord.style.isDivided())
         return measures;
 
     const auto rhythmMeasures = chord.style.rhythm.has_value() ? ::getRhythmMeasureCount (*chord.style.rhythm, getSlotsPerMeasure()) : 1;
     const auto newCount = juce::jmax (rhythmMeasures, chord.style.measures);
 
-    // From one of two halves, the other half, and the measures after it now takes
-    if (hasTwoChords (part, measure))
+    // From one of several in its measure, the others, and the measures after it now takes
+    if (hasSeveralChords (part, measure))
     {
-        addMeasure (measure, false, index);
+        addMeasure (measure, index);
 
         for (auto m = measure + 1; m < measure + newCount; ++m)
-            addMeasure (m, true, -1);
+            addMeasure (m, -1);
 
         return measures;
     }
@@ -1878,7 +1908,7 @@ std::vector<int> Score::getChordsReplacedBy (int part, int measure, int index, c
     const auto [first, oldCount] = getChordSpan (part, measure);
 
     for (auto m = first + oldCount; m < first + juce::jmax (oldCount, newCount); ++m)
-        addMeasure (m, true, -1);
+        addMeasure (m, -1);
 
     return measures;
 }
@@ -1899,7 +1929,7 @@ std::pair<int, int> Score::getChordSpan (int part, int measure, int index) const
 {
     const auto* chord = getChord (part, measure, index);
 
-    if (chord == nullptr || chord->style.halfMeasure)
+    if (chord == nullptr || chord->style.isDivided())
         return { measure, 1 };
 
     // Tied over from one measure to the next, it's the same chord in all of them.
@@ -1964,8 +1994,7 @@ bool Score::chordsWouldReplace (int part, int firstMeasure, int count, Staff sta
 void Score::replaceChordWithNotes (int part, int measure, const std::vector<Note>& notes)
 {
     auto& target = getMeasure (part, measure);
-    target.chord.reset();
-    target.secondChord.reset();
+    target.clearChords();
     target.clearNotes (Staff::treble);
     target.clearNotes (Staff::bass);
 
@@ -2031,8 +2060,8 @@ bool Score::chordUsesStaff (int part, int measure, Staff staff) const
     const auto& target = getMeasure (part, measure);
     const auto alternate = getAlternateStaff (part) != music::AlternateStaff::none;
 
-    for (const auto* chord : { &target.chord, &target.secondChord })
-        if (chord->has_value() && (*chord)->hasNotes() && ((*chord)->style.staff == staff || alternate))
+    for (int index = 0; index < getNumChords (target); ++index)
+        if (const auto& chord = target.getChord (index); chord.has_value() && chord->hasNotes() && (chord->style.staff == staff || alternate))
             return true;
 
     return false;
@@ -2042,7 +2071,7 @@ void Score::toggleChordNote (int part, int measure, int midiNote, const ChordSty
 {
     // A chord in several measures, as its rhythm takes, changes in all of them.
     auto& target = getMeasure (part, measure);
-    index = target.secondChord.has_value() ? juce::jlimit (0, 1, index) : 0;
+    index = juce::jlimit (0, getNumChords (target) - 1, index);
     const auto [first, count] = getChordSpan (part, measure, index);
     auto& slot = target.getChord (index);
 
@@ -2093,7 +2122,7 @@ void Score::toggleChordNote (MeasureChord& chord, int midiNote) const
 void Score::toggleAlternateNote (int part, int measure, const music::KeyboardNote& note, int index)
 {
     auto& target = getMeasure (part, measure);
-    index = target.secondChord.has_value() ? juce::jlimit (0, 1, index) : 0;
+    index = juce::jlimit (0, getNumChords (target) - 1, index);
     const auto span = getChordSpan (part, measure, index);
     auto& slot = target.getChord (index);
 
@@ -2146,7 +2175,7 @@ std::vector<music::Tone> Score::getAlternateTones (int part, int measure, int in
 void Score::reshuffle (int part, int measure, int index)
 {
     // A chord in several measures, as its rhythm takes, goes in the same new order in all of them.
-    index = hasTwoChords (part, measure) ? juce::jlimit (0, 1, index) : 0;
+    index = juce::jlimit (0, getNumChords (part, measure) - 1, index);
     const auto [first, count] = getChordSpan (part, measure, index);
     auto& target = getMeasure (part, first);
 
@@ -2240,9 +2269,10 @@ void Score::copyChords (int fromPart, int toPart)
         measure.clearNotes (Staff::bass);
         measure.chord = from.measures[m].chord;
         measure.secondChord = from.measures[m].secondChord;
+        measure.thirdChord = from.measures[m].thirdChord;
 
         // Notes set by hand were for the other part's alternate staff.
-        for (auto* chord : { &measure.chord, &measure.secondChord })
+        for (auto* chord : measure.getChords())
             if (chord->has_value() && from.alternateStaff != to.alternateStaff)
                 (*chord)->alternateNotes.reset();
 
@@ -2255,37 +2285,47 @@ void Score::copyChords (int fromPart, int toPart)
 
 void Score::tidyChord (Measure& measure, int reshuffleIndex)
 {
-    // A chord lasting half the measure has another in the other half, on its own staff, and a
-    // second half has a first, with rests if it has nothing else.
-    if (! measure.chord.has_value() && measure.secondChord.has_value())
-        measure.chord = MeasureChord { {}, {}, measure.secondChord->style, {}, {} };
+    // A chord lasting half or a third of the measure has others after it, each on its own
+    // staff, and a later one has a first, with rests if it has nothing else.
+    if (! measure.chord.has_value())
+        for (auto* later : { &measure.secondChord, &measure.thirdChord })
+            if (later->has_value() && ! measure.chord.has_value())
+                measure.chord = MeasureChord { {}, {}, (*later)->style, {}, {} };
 
-    if (measure.chord.has_value() && measure.chord->style.halfMeasure)
-    {
-        if (! measure.secondChord.has_value())
-            measure.secondChord = measure.chord;
+    const auto division = measure.chord.has_value() ? juce::jlimit (1, Measure::maxChords, measure.chord->style.division) : 1;
 
-        measure.secondChord->style.halfMeasure = true;
-    }
-    else
+    if (measure.chord.has_value())
+        measure.chord->style.division = division;
+
+    for (int index = 1; index < Measure::maxChords; ++index)
     {
-        // Lasting the measure, it has no second half.
-        measure.secondChord.reset();
+        auto& later = measure.getChord (index);
+
+        if (index >= division)
+        {
+            // Lasting longer, there's no room for it.
+            later.reset();
+            continue;
+        }
+
+        if (! later.has_value())
+            later = measure.chord;
+
+        later->style.division = division;
     }
 
     if (! measure.chord.has_value())
         return;
 
     // The chords replace the quarter notes on their staff. The ones on the alternate staff are
-    // only hidden, since the alternate staff can be turned off for a whole part at once.
-    for (const auto* chord : { &measure.chord, &measure.secondChord })
-        if (chord->has_value() && (*chord)->hasNotes())
-            measure.clearNotes ((*chord)->style.staff);
+    // only hidden, since the alternate staff can be turned off for a whole part at once. Ones
+    // kept for a time signature they fit don't.
+    for (int index = 0; index < getNumChords (measure); ++index)
+        if (const auto& chord = measure.getChord (index); chord.has_value() && chord->hasNotes())
+            measure.clearNotes (chord->style.staff);
 
-    tidyOneChord (*measure.chord, reshuffleIndex == 0);
-
-    if (measure.secondChord.has_value())
-        tidyOneChord (*measure.secondChord, reshuffleIndex == 1);
+    for (int index = 0; index < division; ++index)
+        tidyOneChord (*measure.getChord (index), reshuffleIndex == index);
 }
 
 void Score::tidyOneChord (MeasureChord& chord, bool reshuffleRandomOrder)
@@ -2293,8 +2333,8 @@ void Score::tidyOneChord (MeasureChord& chord, bool reshuffleRandomOrder)
     if (! chord.hasNotes())
         return;
 
-    // Lasting half a measure, it lasts one, and isn't in a rhythm.
-    if (chord.style.halfMeasure)
+    // Lasting half or a third of a measure, it lasts one, and isn't in a rhythm.
+    if (chord.style.isDivided())
     {
         chord.style.rhythm.reset();
         chord.style.measures = 1;
@@ -2374,7 +2414,8 @@ namespace
     // 25: tuplets of 2 to 10 notes
     // 26: everything by 64th note, rather than by 32nd, so notes can be 64ths
     // 28: chords lasting half a measure, two to a measure
-    constexpr int formatVersion = 28;
+    // 29: chords lasting a third of a 3/4 measure, three to a measure
+    constexpr int formatVersion = 29;
 
     juce::var notesToJSON (const std::vector<music::KeyboardNote>& notes)
     {
@@ -2708,8 +2749,8 @@ juce::var Score::toJSON (bool withPartIds) const
         if (chord.style.measures > 1)
             chordObject->setProperty ("measures", chord.style.measures);
 
-        if (chord.style.halfMeasure)
-            chordObject->setProperty ("halfMeasure", true);
+        if (chord.style.isDivided())
+            chordObject->setProperty ("division", chord.style.division);
 
         juce::Array<juce::var> order;
 
@@ -2874,9 +2915,12 @@ juce::var Score::toJSON (bool withPartIds) const
         if (measure.chord.has_value())
             measureObject->setProperty ("chord", chordToJSON (*measure.chord));
 
-        // The second half's, from version 28
+        // The second half's or third's, from version 28, and the last third's, from version 29
         if (measure.secondChord.has_value())
             measureObject->setProperty ("secondChord", chordToJSON (*measure.secondChord));
+
+        if (measure.thirdChord.has_value())
+            measureObject->setProperty ("thirdChord", chordToJSON (*measure.thirdChord));
 
         return juce::var (measureObject);
     };
@@ -3131,8 +3175,9 @@ juce::Result Score::loadJSON (const juce::var& json)
             chord.tiedToNext = (bool) c.getProperty ("tiedToNext", false);
             chord.style.measures = readInt (c.getProperty ("measures", {}), 1, 2, 1);
 
-            // Lasting half a measure, from version 28
-            chord.style.halfMeasure = (bool) c.getProperty ("halfMeasure", false);
+            // Lasting half a measure, from version 28, or a third, from version 29
+            chord.style.division = c.hasProperty ("division") ? readInt (c.getProperty ("division", {}), 1, Measure::maxChords, 1)
+                                                              : (bool) c.getProperty ("halfMeasure", false) ? 2 : 1;
 
                 return chord;
             };
@@ -3146,6 +3191,9 @@ juce::Result Score::loadJSON (const juce::var& json)
             // The second half's, from version 28
             if (const auto& c = item.getProperty ("secondChord", {}); c.isObject() && measure.chord.has_value())
                 measure.secondChord = readChord (c);
+
+            if (const auto& c = item.getProperty ("thirdChord", {}); c.isObject() && measure.chord.has_value())
+                measure.thirdChord = readChord (c);
 
             loaded.push_back (std::move (measure));
         }
@@ -3211,7 +3259,7 @@ juce::Result Score::loadJSON (const juce::var& json)
     if (minor && readInt (json.getProperty ("version", {}), 1, 1000, 1) == 11)
         for (auto& part : parts)
             for (auto& measure : part.measures)
-                for (auto* chord : { &measure.chord, &measure.secondChord })
+                for (auto* chord : measure.getChords())
                     if (chord->has_value() && ! (*chord)->spec.isEmpty())
                         (*chord)->spec.degree = ((*chord)->spec.degree + 2) % 7;
     beatsPerMeasure = readInt (json.getProperty ("beatsPerMeasure", {}), 2, maxBeatsPerMeasure, 4);

@@ -13,7 +13,7 @@ namespace
     constexpr int buttonHeight = 28;
 
     // The chord length box's items
-    constexpr int halfMeasureId = 1, oneMeasureId = 2, twoMeasuresId = 3;
+    constexpr int halfMeasureId = 1, oneMeasureId = 2, twoMeasuresId = 3, thirdMeasureId = 4;
 
     const auto& noteLengths = getChordNoteLengths();
 
@@ -31,12 +31,17 @@ juce::StringArray getChordTypeNames()
     return { "Block chord", "Arpeggio (asc)", "Arpeggio (desc)", "Random", "Rolled chord" };
 }
 
-const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths()
+const std::array<std::pair<int, const char*>, 7>& getChordNoteLengths()
 {
     constexpr auto beat = Score::slotsPerBeat;
-    static const std::array<std::pair<int, const char*>, 6> lengths { { { 4 * beat, "Whole notes" }, { 2 * beat, "Half notes" }, { beat, "Quarter notes" },
+    static const std::array<std::pair<int, const char*>, 7> lengths { { { 4 * beat, "Whole notes" }, { 3 * beat, "Dotted half notes" }, { 2 * beat, "Half notes" }, { beat, "Quarter notes" },
                                                                         { beat / 2, "Eighth notes" }, { beat / 4, "16th notes" }, { beat / 8, "32nd notes" } } };
     return lengths;
+}
+
+bool canChooseChordNoteLength (int noteLength, int chordLength)
+{
+    return noteLength == 3 * Score::slotsPerBeat ? noteLength == chordLength : noteLength <= chordLength;
 }
 
 ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit, int chordIndexToEdit, const ChordStyle& styleForNewChord,
@@ -174,13 +179,12 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     // Choosing Random picks a new random order, even if the chord's Random already.
     chordTypeBox.onChange = [this] { chooseChordType (chordTypeBox.getSelectedId()); };
     chordTypeBox.onItemChosen = [this] (int itemId) { chooseChordType (itemId); };
-    // How long the chord lasts: half a measure, leaving the other half for another chord, one, or two
+    // How long the chord lasts: half a measure, leaving the other half for another chord, or in
+    // 3/4 a third, leaving two thirds for two more, one, or two. The items are those the time
+    // signature has, each time it's shown.
     chordLengthLabel.setText ("Chord length", juce::dontSendNotification);
     chordLengthLabel.setFont (juce::FontOptions (13.0f));
     chordLengthLabel.setBorderSize ({});
-    chordLengthBox.addItem ("Half measure", halfMeasureId);
-    chordLengthBox.addItem ("One measure", oneMeasureId);
-    chordLengthBox.addItem ("Two measures", twoMeasuresId);
     chordLengthBox.onChange = [this] { chooseChordLength (chordLengthBox.getSelectedId()); };
 
     // How long the notes are: a block or rolled chord is repeated in notes this long until the
@@ -188,9 +192,6 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     noteLengthLabel.setText ("Note length", juce::dontSendNotification);
     noteLengthLabel.setFont (juce::FontOptions (13.0f));
     noteLengthLabel.setBorderSize ({});
-
-    for (size_t i = 0; i < noteLengths.size(); ++i)
-        noteLengthBox.addItem (noteLengths[i].second, (int) i + 1);
 
     noteLengthBox.onChange = [this]
     {
@@ -257,24 +258,35 @@ ChordEditor::~ChordEditor()
 
 juce::String ChordEditor::getTitle() const
 {
-    const auto twoChords = measure < score.getNumMeasures() && score.hasTwoChords (part, measure);
+    const auto numChords = measure < score.getNumMeasures() ? score.getNumChords (part, measure) : 1;
+    const auto partName = numChords == 2 ? (chordIndex == 0 ? "First half" : "Second half")
+                                         : chordIndex == 0 ? "First third" : chordIndex == 1 ? "Second third" : "Last third";
 
     return "Chord" + controls::fromUTF8 (" \xc2\xb7 Instrument ") + juce::String (part + 1)
          + controls::fromUTF8 (" \xc2\xb7 Measure ") + juce::String (measure + 1)
-         + (twoChords ? controls::fromUTF8 (" \xc2\xb7 ") + (chordIndex == 0 ? "First half" : "Second half") : juce::String());
+         + (numChords > 1 ? controls::fromUTF8 (" \xc2\xb7 ") + partName : juce::String());
 }
 
 void ChordEditor::loadChord()
 {
-    // The second half's chord, while the measure has two
-    if (chordIndex == 1 && ! score.hasTwoChords (part, measure))
+    // A later half's or third's chord, while the measure has it
+    if (chordIndex >= score.getNumChords (part, measure))
         chordIndex = 0;
 
     // A measure without a chord keeps the style chosen for its new one.
     if (const auto* existing = score.getChord (part, measure, chordIndex))
+    {
         chord = *existing;
+    }
     else
+    {
         chord = MeasureChord { {}, {}, chord.style, {}, {} };
+
+        // Halves chosen last in 4/4, or thirds in 3/4, don't carry over to a time signature
+        // they don't fit.
+        if (! score.canDivide (chord.style.division))
+            chord.style.division = 1;
+    }
 }
 
 void ChordEditor::toggleNote (int midiNote)
@@ -317,7 +329,7 @@ void ChordEditor::edit (const std::function<void (MeasureChord&)>& change)
     // Every change goes straight into the score, which sends it back here to show, in as many
     // measures as its rhythm takes. Lasting a measure or two, it's the measure's only chord.
     const auto writtenIndex = chordIndex;
-    chordIndex = newChord.style.halfMeasure ? chordIndex : 0;
+    chordIndex = newChord.style.isDivided() ? chordIndex : 0;
     score.writeChord (part, measure, newChord, writtenIndex);
 }
 
@@ -325,7 +337,7 @@ void ChordEditor::chooseChordLength (int itemId)
 {
     const auto change = [itemId] (MeasureChord& c)
     {
-        c.style.halfMeasure = itemId == halfMeasureId;
+        c.style.division = itemId == halfMeasureId ? 2 : itemId == thirdMeasureId ? 3 : 1;
         c.style.measures = itemId == twoMeasuresId ? 2 : 1;
 
         // Lasting two measures, it's held over both.
@@ -357,12 +369,13 @@ void ChordEditor::chooseChordLength (int itemId)
                      + (numbers.size() > 1 ? numbers.joinIntoString (", ", 0, numbers.size() - 1) + " and " + numbers[numbers.size() - 1] : numbers[0]);
     const auto length = itemId == twoMeasuresId ? "two measures" : "one measure";
     const auto sameMeasure = replaced.size() == 1 && replaced.front() == measure;
+    const auto others = score.getNumChords (part, measure) > 2 ? "the other chords in " : "the other chord in ";
 
     juce::AlertWindow::showAsync (juce::MessageBoxOptions()
                                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
                                       .withTitle ("Replace the other chords?")
                                       .withMessage (juce::String ("Making this chord last ") + length + " takes the place of "
-                                                    + (sameMeasure ? "the other chord in " + where + ", which is different from it."
+                                                    + (sameMeasure ? others + where + ", which are different from it."
                                                                    : "the chords in " + where + ", which are different from it.")
                                                     + " Undo brings them back.")
                                       .withButton ("Replace")
@@ -481,30 +494,51 @@ void ChordEditor::update()
     bassButton.setToggleState (style.staff == Staff::bass, juce::dontSendNotification);
     chordTypeBox.setSelectedId ((int) style.type + 1, juce::dontSendNotification);
 
-    // Half a measure, one, or two, which only a block or rolled chord can last, held over them.
-    // A rhythm says how many measures it lasts.
+    // Half a measure in 2/4 or 4/4, or a third in 3/4, one, or two, which only a block or rolled
+    // chord can last, held over them. A rhythm says how many measures it lasts.
     const auto melodic = music::isMelodic (style.type);
+    const auto division = score.getDivision (chord);
+    chordLengthBox.clear (juce::dontSendNotification);
+
+    if (score.canDivide (2))
+        chordLengthBox.addItem ("Half measure", halfMeasureId);
+
+    if (score.canDivide (3))
+        chordLengthBox.addItem ("Third of a measure", thirdMeasureId);
+
+    chordLengthBox.addItem ("One measure", oneMeasureId);
+    chordLengthBox.addItem ("Two measures", twoMeasuresId);
     chordLengthBox.setItemEnabled (halfMeasureId, ! style.rhythm.has_value());
+    chordLengthBox.setItemEnabled (thirdMeasureId, ! style.rhythm.has_value());
     chordLengthBox.setItemEnabled (twoMeasuresId, ! melodic && ! style.rhythm.has_value());
-    chordLengthBox.setSelectedId (style.halfMeasure ? halfMeasureId : style.measures > 1 ? twoMeasuresId : oneMeasureId, juce::dontSendNotification);
+    chordLengthBox.setSelectedId (division == 2 ? halfMeasureId : division == 3 ? thirdMeasureId : style.measures > 1 ? twoMeasuresId : oneMeasureId,
+                                  juce::dontSendNotification);
     chordLengthBox.setEnabled (! style.rhythm.has_value());
     chordLengthBox.setTooltip (style.rhythm.has_value() ? "The rhythm says how many measures the chord lasts. Choose No Rhythm to choose a length."
-                               : melodic ? "How long the chord lasts: half a measure, leaving the other half for another chord, or one. "
-                                           "Only block and rolled chords last two."
-                                         : "How long the chord lasts: half a measure, leaving the other half for another chord, one, or two");
+                               : melodic ? juce::String ("How long the chord lasts: ") + (score.canDivide (3) ? "a third of a measure, leaving the rest for two more chords, or one. "
+                                                                                                             : "half a measure, leaving the other half for another chord, or one. ")
+                                           + "Only block and rolled chords last two."
+                                         : juce::String ("How long the chord lasts: ") + (score.canDivide (3) ? "a third of a measure, leaving the rest for two more chords, one, or two"
+                                                                                                             : "half a measure, leaving the other half for another chord, one, or two"));
 
     // The length the notes are, chosen or as the chord type makes them, with only lengths that
-    // fit in the chord to choose from: whole notes in a 4/4 measure, half notes in half of it.
-    // One that's none of them, such as a block chord held for a 3/4 measure, a dotted half,
-    // shows none chosen.
+    // fit in the chord to choose from: whole notes in a 4/4 measure, half notes in half of it,
+    // and dotted halves only in a 3/4 measure, which they fill.
     const auto chordLength = score.getChordSlots (chord);
     const auto length = score.getChordNoteLength (chord);
     auto selected = 0;
+    noteLengthBox.clear (juce::dontSendNotification);
 
     for (size_t i = 0; i < noteLengths.size(); ++i)
     {
         const auto itemLength = noteLengths[i].first;
-        noteLengthBox.setItemEnabled ((int) i + 1, itemLength <= chordLength);
+
+        // Dotted halves are only listed where they fill the chord.
+        if (itemLength == 3 * Score::slotsPerBeat && itemLength != chordLength)
+            continue;
+
+        noteLengthBox.addItem (noteLengths[i].second, (int) i + 1);
+        noteLengthBox.setItemEnabled ((int) i + 1, canChooseChordNoteLength (itemLength, chordLength));
 
         if (itemLength == length)
             selected = (int) i + 1;
@@ -537,9 +571,9 @@ void ChordEditor::update()
                               : style.measures > 1 ? "A chord lasting two measures is held over both. Choose One measure to choose a length."
                                                    : "How long the chord's notes are: block and rolled chords play again in them, the others a note at a time");
 
-    // A chord lasting half a measure isn't written in a rhythm.
-    rhythmBox.setEnabled (! style.halfMeasure);
-    rhythmBox.setTooltip (style.halfMeasure ? "A chord lasting half a measure isn't written in a rhythm. Choose One measure for its length to choose one."
+    // A chord lasting half or a third of a measure isn't written in a rhythm.
+    rhythmBox.setEnabled (division == 1);
+    rhythmBox.setTooltip (division > 1 ? "A chord lasting part of a measure isn't written in a rhythm. Choose One measure for its length to choose one."
                                             : "A saved rhythm for the chord's notes to go in, in place of the note length, in as many measures as it takes");
 
 
@@ -586,9 +620,9 @@ void ChordEditor::update()
     }
 
     const auto* existing = score.getChord (part, measure, chordIndex);
-    removeButton.setEnabled (existing != nullptr && (existing->hasNotes() || ! existing->style.halfMeasure));
+    removeButton.setEnabled (existing != nullptr && (existing->hasNotes() || score.getDivision (*existing) == 1));
     removeButton.setTooltip (! removeButton.isEnabled() ? "There's no chord here to take out"
-                             : style.halfMeasure ? "Take the chord out of its half of the measure, leaving rests, and the window open for a new one"
+                             : division > 1 ? "Take the chord out of its part of the measure, leaving rests, and the window open for a new one"
                                                  : "Take the chord out of the measure, leaving the window open for a new one");
     resized();
 }

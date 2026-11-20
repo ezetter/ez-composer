@@ -373,7 +373,7 @@ ApplyProgressionPanel::ApplyProgressionPanel (const std::vector<SavedProgression
     for (size_t i = 0; i < noteLengths.size(); ++i)
     {
         lengthBox.addItem (noteLengths[i].second, (int) i + 2);
-        lengthBox.setItemEnabled ((int) i + 2, i == 0 || noteLengths[i].first <= beatsPerMeasure * Score::slotsPerBeat);
+        lengthBox.setItemEnabled ((int) i + 2, canChooseChordNoteLength (noteLengths[i].first, beatsPerMeasure * Score::slotsPerBeat));
 
         if (style.noteLength == noteLengths[i].first)
             lengthBox.setSelectedId ((int) i + 2, juce::dontSendNotification);

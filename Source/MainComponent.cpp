@@ -3174,7 +3174,7 @@ void MainComponent::editChord (int part, int measure, int chordIndex)
 
     // A chord in several measures, as its rhythm takes, is edited where it starts. One lasting
     // half a measure is just in its half.
-    chordIndex = score.hasTwoChords (part, measure) ? juce::jlimit (0, 1, chordIndex) : 0;
+    chordIndex = juce::jlimit (0, score.getNumChords (part, measure) - 1, chordIndex);
     measure = score.getChordSpan (part, measure, chordIndex).first;
 
     auto editor = std::make_unique<ChordEditor> (score, part, measure, chordIndex, lastChordStyle, savedRhythms.getAll());

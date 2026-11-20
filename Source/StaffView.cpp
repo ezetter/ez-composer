@@ -5606,10 +5606,11 @@ void StaffView::updateChordButtons()
     // On a line, there are none after it.
     const auto numMeasures = juce::jmin (score.getNumMeasures(), (int) measureLayouts.size(), getShownMeasures().getEnd());
 
-    // One over each measure, and another over the second half of a measure with two chords
-    for (auto chordIndex : { 0, 1 })
+    // One over each measure, and others over the second half, or second and last thirds, of a
+    // measure with several chords
+    for (int chordIndex = 0; chordIndex < Score::maxChordsPerMeasure; ++chordIndex)
     {
-        auto& buttons = chordIndex == 0 ? chordButtons : secondChordButtons;
+        auto& buttons = getChordButtons (chordIndex);
 
         while (buttons.size() > numMeasures)
             buttons.removeLast();
@@ -5635,38 +5636,49 @@ void StaffView::updateChordButtons()
         }
     }
 
-    // Each button sits just over its measure's chord name, or for two chords, over its half.
+    // Each button sits just over its measure's chord name, or for several chords, over its part.
     const auto top = getStaffTop (Staff::treble) - getChordButtonOffset() * staffSpace;
 
     for (int measure = 0; measure < numMeasures; ++measure)
     {
         const auto& layout = measureLayouts[(size_t) measure];
-        const auto twoChords = score.hasTwoChords (part, measure);
+        const auto numChords = score.getNumChords (part, measure);
+        const auto several = numChords > 1;
         const auto shown = chordControlsShown && getShownMeasures().contains (measure);
-        const auto halfway = getOnsetX (measure, (double) score.getChordStart (1) / Score::slotsPerBeat) - 0.5f * layout.beatWidth;
 
-        for (auto chordIndex : { 0, 1 })
+        // Where each part starts, half a beat before its first beat, as the measure's notes are
+        // centred in their beats
+        const auto partEdge = [&] (int index)
         {
-            auto* button = (chordIndex == 0 ? chordButtons : secondChordButtons)[measure];
+            return index == 0 ? layout.x
+                 : index >= numChords ? layout.x + layout.width
+                                      : getOnsetX (measure, (double) score.getChordStart (index, numChords) / Score::slotsPerBeat) - 0.5f * layout.beatWidth;
+        };
+
+        for (int chordIndex = 0; chordIndex < Score::maxChordsPerMeasure; ++chordIndex)
+        {
+            auto* button = getChordButtons (chordIndex)[measure];
             const auto* chord = score.getChord (part, measure, chordIndex);
             const auto hasChord = chord != nullptr && chord->hasNotes();
-            const auto half = juce::String (chordIndex == 0 ? "the first half of " : "the second half of ");
+            const auto partName = juce::String (numChords == 2 ? (chordIndex == 0 ? "the first half of " : "the second half of ")
+                                                               : chordIndex == 0 ? "the first third of "
+                                                               : chordIndex == 1 ? "the second third of " : "the last third of ");
 
-            if (chordIndex == 1 && ! twoChords)
+            if (chordIndex >= numChords)
             {
                 button->setVisible (false);
                 continue;
             }
 
-            const auto left = ! twoChords ? layout.x : chordIndex == 0 ? layout.x : halfway;
-            const auto right = ! twoChords ? (layout.x + layout.width) : chordIndex == 0 ? halfway : (layout.x + layout.width);
-            const auto room = right - left - (twoChords ? 0.6f : 1.2f) * staffSpace;
+            const auto left = partEdge (chordIndex);
+            const auto right = partEdge (chordIndex + 1);
+            const auto room = right - left - (several ? 0.6f : 1.2f) * staffSpace;
             const auto width = juce::jmax (0.0f, juce::jmin (room, 90.0f));
 
-            button->setButtonText (hasChord ? (twoChords && width < 64.0f ? "Edit" : "Edit Chord") : (twoChords && width < 64.0f ? "Add" : "Add Chord"));
-            button->setTooltip (twoChords ? (hasChord ? "Edit the chord in " : "Add a chord to ") + half + "measure " + juce::String (measure + 1)
-                                          : (hasChord ? "Edit the chord in measure " : "Add a chord to measure ") + juce::String (measure + 1));
-            button->setToggleState (measure == selectedMeasure && chordIndex == (twoChords ? selectedChordIndex : 0), juce::dontSendNotification);
+            button->setButtonText (hasChord ? (several && width < 64.0f ? "Edit" : "Edit Chord") : (several && width < 64.0f ? "Add" : "Add Chord"));
+            button->setTooltip (several ? (hasChord ? "Edit the chord in " : "Add a chord to ") + partName + "measure " + juce::String (measure + 1)
+                                        : (hasChord ? "Edit the chord in measure " : "Add a chord to measure ") + juce::String (measure + 1));
+            button->setToggleState (measure == selectedMeasure && chordIndex == (several ? selectedChordIndex : 0), juce::dontSendNotification);
             button->setVisible (shown);
             button->setBounds (juce::Rectangle<float> (left + (right - left - width) / 2.0f, top, width, 2.0f * staffSpace).toNearestInt());
         }

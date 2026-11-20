@@ -287,11 +287,17 @@ struct ChordStyle
     */
     int measures = 1;
 
-    /** Whether the chord lasts half a measure, as chosen in the chord window, rather than one or
-        two. Its measure then has two chords, one in each half, each with its own numeral, chord
-        type, note length and staff. Such a chord isn't written in a rhythm.
+    /** How many chords share the chord's measure, as chosen with its length in the chord window:
+        1 for a chord lasting a measure or two, 2 for one lasting half a measure, in 2/4 or 4/4,
+        and 3 for one lasting a third of a 3/4 measure. Each has its own numeral, chord type,
+        note length and staff. Such a chord isn't written in a rhythm. In a time signature they
+        don't fit, the measure shows its first chord, lasting the measure, and the others are kept
+        for when they fit again.
     */
-    bool halfMeasure = false;
+    int division = 1;
+
+    /** Whether it shares its measure with other chords */
+    bool isDivided() const noexcept { return division > 1; }
 
     /** Whether a chord written this way in several measures, one after another, is tied over from
         each to the next: a block chord with its note length left to its type, or a block or
@@ -299,7 +305,7 @@ struct ChordStyle
     */
     bool canTieOver() const noexcept
     {
-        return ! rhythm.has_value() && ! halfMeasure
+        return ! rhythm.has_value() && ! isDivided()
             && ((type == music::ChordType::block && ! noteLength.has_value())
                 || (measures > 1 && (type == music::ChordType::block || type == music::ChordType::rolled)));
     }
@@ -357,6 +363,7 @@ class Score : public juce::ChangeBroadcaster
 {
 public:
     static constexpr int maxBeatsPerMeasure = 4;
+    static constexpr int maxChordsPerMeasure = 3;      // thirds of a 3/4 measure
 
     /** Notes start on 64th notes: on a beat, or a number of 64ths through one. Positions and
         lengths are counted in these slots, a 64th each.
@@ -759,26 +766,38 @@ public:
     void writePerformance (Score&) const;
 
     //==============================================================================
-    /** The measure's chord, or null if it doesn't have one. A measure whose chords last half a
-        measure has two, the first half's, index 0, and the second's, index 1.
+    /** The measure's chord, or null if it doesn't have one. A measure whose chords last half or
+        a third of it has two or three, in order: the first's index 0, the second's 1, and the
+        third's 2. One kept for a time signature it fits isn't there till then.
     */
     const MeasureChord* getChord (int part, int measure, int index = 0) const;
 
-    /** Whether a measure has two chords, each lasting half of it. */
-    bool hasTwoChords (int part, int measure) const;
+    /** How many chords a measure has, one after another: 1, or 2 halves, or 3 thirds. */
+    int getNumChords (int part, int measure) const;
 
-    /** Which of a measure's chords is playing at a beat: 1 in the second half of a measure with
-        two, and otherwise 0.
+    /** Whether a measure has two or three chords, each lasting part of it */
+    bool hasSeveralChords (int part, int measure) const { return getNumChords (part, measure) > 1; }
+
+    /** How many chords share a measure with one dividing it so in the time signature: its
+        division, or 1, if they don't fit
     */
+    int getDivision (const MeasureChord&) const noexcept;
+
+    /** Whether measures can be divided into so many chords in the time signature: halves in 2/4
+        and 4/4, thirds in 3/4
+    */
+    bool canDivide (int division) const noexcept;
+
+    /** Which of a measure's chords is playing at a beat: 0 for the first, 1 for the second... */
     int getChordIndexAt (int part, int measure, double beat) const;
 
-    /** How long a chord lasts in its measure, in 64ths: half the measure, or all of it. */
+    /** How long a chord lasts in its measure, in 64ths: all of it, half or a third. */
     int getChordSlots (const MeasureChord&) const;
 
-    /** Where one of a measure's chords starts, in 64ths from the start of the measure: the
-        second of two halfway through it.
+    /** Where one of a measure's chords starts, in 64ths from the start of the measure, of so
+        many sharing it
     */
-    int getChordStart (int index) const noexcept { return index == 1 ? getSlotsPerMeasure() / 2 : 0; }
+    int getChordStart (int index, int numChords) const noexcept { return index * getSlotsPerMeasure() / juce::jmax (1, numChords); }
 
     /** Sets or removes a measure's chord, or one of its two halves'. A chord with notes replaces
         the quarter notes on its staff, and hides the ones on the alternate staff, if there is one.
@@ -953,16 +972,32 @@ private:
         std::array<std::optional<music::Dynamic>, maxSlotsPerMeasure> dynamics;      // by 64th note, for both staves
         std::array<std::optional<HairpinStart>, maxSlotsPerMeasure> hairpins;      // starting at each 64th
         std::array<juce::uint8, maxSlotsPerMeasure> pedalMarks {};                 // at each 64th: pedalUp, then pedalDown, or neither
-        std::optional<MeasureChord> chord;          // the measure's, or its first half's
-        std::optional<MeasureChord> secondChord;    // the second half's, when the first lasts half the measure
+        std::optional<MeasureChord> chord;          // the measure's, or its first half's or third's
+        std::optional<MeasureChord> secondChord;    // the second half's or third's, when the first lasts half or a third of the measure
+        std::optional<MeasureChord> thirdChord;     // the last third's, when the first lasts a third
 
-        std::optional<MeasureChord>& getChord (int index) noexcept { return index == 1 ? secondChord : chord; }
-        const std::optional<MeasureChord>& getChord (int index) const noexcept { return index == 1 ? secondChord : chord; }
+        static constexpr int maxChords = maxChordsPerMeasure;
 
-        /** Whether either of its chords has notes */
+        std::optional<MeasureChord>& getChord (int index) noexcept { return index == 2 ? thirdChord : index == 1 ? secondChord : chord; }
+        const std::optional<MeasureChord>& getChord (int index) const noexcept { return index == 2 ? thirdChord : index == 1 ? secondChord : chord; }
+
+        /** All three, in order, whether they're there or not */
+        std::array<std::optional<MeasureChord>*, maxChords> getChords() noexcept { return { &chord, &secondChord, &thirdChord }; }
+        std::array<const std::optional<MeasureChord>*, maxChords> getChords() const noexcept { return { &chord, &secondChord, &thirdChord }; }
+
+        /** Whether any of its chords has notes */
         bool hasChordNotes() const
         {
-            return (chord.has_value() && chord->hasNotes()) || (secondChord.has_value() && secondChord->hasNotes());
+            const auto chords = getChords();
+            return std::any_of (chords.begin(), chords.end(), [] (const auto* c) { return c->has_value() && (*c)->hasNotes(); });
+        }
+
+        /** Takes out all its chords */
+        void clearChords() noexcept
+        {
+            chord.reset();
+            secondChord.reset();
+            thirdChord.reset();
         }
 
         /** A tuplet, where it starts: its notes' length in 64ths, their pitches and whether they're staccato */
@@ -1061,7 +1096,10 @@ private:
     /** How many measures a chord takes in its rhythm, or one without one */
     int getRhythmMeasureCount (const MeasureChord&) const;
 
-    /** Keeps a measure's chords as they can be: two halves, each on its own staff, or one chord, and
+    /** How many of a measure's chords show in the time signature */
+    int getNumChords (const Measure&) const noexcept;
+
+    /** Keeps a measure's chords as they can be: two halves or three thirds, each on its own staff, or one chord, and
         each as its type and length allow. One's Random order is made again, if it's asked for.
     */
     void tidyChord (Measure&, int reshuffleIndex = -1);

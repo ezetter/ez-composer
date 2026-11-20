@@ -17,7 +17,12 @@ juce::StringArray getChordTypeNames();
     names. A whole note is as long as the measure, whatever the time signature: a dotted half in
     3/4. Dotted notes aren't among them.
 */
-const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths();
+const std::array<std::pair<int, const char*>, 7>& getChordNoteLengths();
+
+/** Whether a chord's notes can be a length, in 64ths, in a chord lasting so many: any that fits,
+    but dotted halves only for a chord lasting one, a 3/4 measure
+*/
+bool canChooseChordNoteLength (int noteLength, int chordLength);
 
 /** The progression panel's note length item for a block or rolled chord lasting two measures, tied over */
 constexpr int twoMeasuresItemId = 100;

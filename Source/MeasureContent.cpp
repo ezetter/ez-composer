@@ -583,27 +583,33 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
     MeasureContent content;
     std::array<bool, 2> filled { false, false };
     const auto* firstChord = score.getChord (part, measure);
-    const auto numChords = score.hasTwoChords (part, measure) ? 2 : 1;
+    const auto numChords = score.getNumChords (part, measure);
     const auto measureLength = score.getBeatsPerMeasure() * Score::slotsPerBeat;
     const auto beatsPerMeasure = score.getBeatsPerMeasure();
 
     // The measure's chord, or its two halves', each half's on its own, each on its own staff,
     // with rests in a half without notes
-    std::array<std::optional<music::Chord>, 2> notes;
+    std::array<std::optional<music::Chord>, Score::maxChordsPerMeasure> notes;
 
     for (int index = 0; index < numChords; ++index)
         notes[(size_t) index] = score.getChordNotes (part, measure, index);
 
-    if (firstChord != nullptr && (notes[0].has_value() || notes[1].has_value()))
+    if (firstChord != nullptr && std::any_of (notes.begin(), notes.end(), [] (const auto& n) { return n.has_value(); }))
     {
         for (auto staff : { Staff::treble, Staff::bass })
             filled[(size_t) staff] = score.chordUsesStaff (part, measure, staff);
 
-        // Each half's chord is on its staff; the other has the alternate staff's notes, or rests.
-        // A half without notes counts as the other half's for which staff it has.
+        // Each part's chord is on its staff; the other has the alternate staff's notes, or rests.
+        // A part without notes counts as the nearest one with notes for which staff it has.
         const auto staffOf = [&] (int index)
         {
-            const auto own = notes[(size_t) index].has_value() ? index : 1 - index;
+            auto own = index;
+
+            for (int distance = 1; ! notes[(size_t) own].has_value() && distance < numChords; ++distance)
+                for (auto other : { index - distance, index + distance })
+                    if (juce::isPositiveAndBelow (other, numChords) && notes[(size_t) other].has_value() && ! notes[(size_t) own].has_value())
+                        own = other;
+
             return score.getChord (part, measure, own)->style.staff;
         };
 
@@ -613,21 +619,22 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
             auto& staffContent = content.staves[(size_t) staff];
             staffContent.source = sourceIn (0);
 
-            if (numChords == 2 && sourceIn (1) != staffContent.source)
-                staffContent.laterSource = std::pair ((double) score.getChordStart (1) / Score::slotsPerBeat, sourceIn (1));
+            for (int index = 1; index < numChords; ++index)
+                if (sourceIn (index) != sourceIn (index - 1))
+                    staffContent.laterSources.push_back ({ (double) score.getChordStart (index, numChords) / Score::slotsPerBeat, sourceIn (index) });
         }
 
         for (int index = 0; index < numChords; ++index)
         {
             const auto& measureChord = *score.getChord (part, measure, index);
-            const auto from = score.getChordStart (index);
-            const auto span = numChords == 2 ? measureLength / 2 : measureLength;
+            const auto from = score.getChordStart (index, numChords);
+            const auto span = measureLength / numChords;
             const auto onset = (double) from / Score::slotsPerBeat;
             const auto beats = (double) span / Score::slotsPerBeat;
 
             if (! notes[(size_t) index].has_value())
             {
-                // A half without a chord is rests, on both staves.
+                // A half or third without a chord is rests, on both staves.
                 for (auto staff : { Staff::treble, Staff::bass })
                     if (filled[(size_t) staff])
                         addRests (content.staves[(size_t) staff].events, from, from + span, beatsPerMeasure);
@@ -665,10 +672,10 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
             }
             else if (! tones.empty())
             {
-                alternate.events.push_back ({ onset, numChords == 2 ? getDurationForBeats (beats) : getFullMeasureDuration (beatsPerMeasure),
+                alternate.events.push_back ({ onset, numChords > 1 ? getDurationForBeats (beats) : getFullMeasureDuration (beatsPerMeasure),
                                               std::move (tones), rolled, false });
             }
-            else if (numChords == 2)
+            else if (numChords > 1)
             {
                 addRests (alternate.events, from, from + span, beatsPerMeasure);
             }

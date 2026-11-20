@@ -36,16 +36,22 @@ struct StaffContent
 
     Source source = Source::notes;
 
-    /** Where a measure's two halves have chords on different staves, what the staff is from
-        halfway, by when that is, in beats: the chord's on one half and the alternate staff's,
-        or rests, on the other.
+    /** Where a measure's halves or thirds have chords on different staves, what the staff has
+        from where each changes, by when that is, in beats: the chord's in some, and the
+        alternate staff's, or rests, in the others.
     */
-    std::optional<std::pair<double, Source>> laterSource;
+    std::vector<std::pair<double, Source>> laterSources;
 
     /** What the staff has at a point in the measure, in beats */
     Source getSourceAt (double beat) const noexcept
     {
-        return laterSource.has_value() && beat >= laterSource->first - 1.0e-9 ? laterSource->second : source;
+        auto result = source;
+
+        for (const auto& [from, later] : laterSources)
+            if (beat >= from - 1.0e-9)
+                result = later;
+
+        return result;
     }
     std::vector<StaffEvent> events;     // in time order
     int notesPerBeat = 1;               // 2 for eighths, 4 for 16ths, 8 for 32nds and 16 for 64ths
