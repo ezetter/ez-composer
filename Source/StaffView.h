@@ -405,11 +405,15 @@ public:
     int getContentWidth() const;
     int getContentHeight() const;
 
-    /** Outlines a measure as selected, e.g. while its chord is being edited, or none. */
-    void setSelectedMeasure (std::optional<int>);
+    /** Outlines a measure as selected, e.g. while its chord is being edited, or none, and shows
+        the button for the chord being edited, of a measure's two halves, as on.
+    */
+    void setSelectedMeasure (std::optional<int>, int chordIndex = 0);
 
-    /** Called when a measure's Add Chord or Edit Chord button is clicked. */
-    std::function<void (int measure)> onChordButtonClicked;
+    /** Called when a measure's Add Chord or Edit Chord button is clicked: its only one, 0, or
+        for a measure with two chords, the first half's, 0, or the second's, 1.
+    */
+    std::function<void (int measure, int chordIndex)> onChordButtonClicked;
 
     /** The note that clicking at this point would add, if any. */
     std::optional<Note> getNoteAt (juce::Point<float>) const;
@@ -550,6 +554,7 @@ private:
                           const std::vector<float>& noteheadLefts, float noteheadWidth) const;
     void drawRollSign (juce::Graphics&, float right, float top, float bottom) const;
     void drawLabels (juce::Graphics&, int measure) const;
+    void drawChordLabels (juce::Graphics&, int measure, const MeasureContent::ChordPlayed&) const;
     void drawHoverNote (juce::Graphics&) const;
 
     /** A faint notehead, for a note that a click or a drag would put there. */
@@ -580,7 +585,7 @@ private:
         octave, such as one moved there or an arpeggio's octave at the top, the chord's note of the
         same name.
     */
-    int getChordToneOf (int measure, int midiNote) const;
+    int getChordToneOf (int measure, double beat, int midiNote) const;
 
     /** Moves one of a chord's notes to another of its notes, leaving the others where they are. */
     void moveChordNote (const ChordNote&, int midiNote);
@@ -719,7 +724,7 @@ private:
     std::optional<double> getHeldNoteEnd (Staff, int measure, double beat) const;
 
     /** Whether a measure has a Random chord with notes. */
-    bool hasRandomChord (int measure) const;
+    bool hasRandomChord (int measure, double beat) const;
 
     /** How far up a staff a point is, in lines and spaces from its bottom line. */
     float getLinesAndSpacesUp (Staff, float y) const;
@@ -923,6 +928,8 @@ private:
     bool hoverHintHidden = false;       // after a click, until the pointer moves to another spot
     std::optional<int> selectedMeasure;
     juce::OwnedArray<juce::TextButton> chordButtons;    // one above each measure
+    juce::OwnedArray<juce::TextButton> secondChordButtons;     // and above the second half of each with two chords
+    int selectedChordIndex = 0;                         // of the selected measure's chords, the one being edited
     std::optional<int> playingBeat;     // counted from the start of the score
     std::optional<double> stepMarker;   // where the next step recorded goes, in beats from the start of the score
 

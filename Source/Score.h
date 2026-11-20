@@ -287,13 +287,19 @@ struct ChordStyle
     */
     int measures = 1;
 
+    /** Whether the chord lasts half a measure, as chosen in the chord window, rather than one or
+        two. Its measure then has two chords, one in each half, on the same staff, each with its
+        own numeral, chord type and note length. Such a chord isn't written in a rhythm.
+    */
+    bool halfMeasure = false;
+
     /** Whether a chord written this way in several measures, one after another, is tied over from
         each to the next: a block chord with its note length left to its type, or a block or
         rolled chord lasting two measures.
     */
     bool canTieOver() const noexcept
     {
-        return ! rhythm.has_value()
+        return ! rhythm.has_value() && ! halfMeasure
             && ((type == music::ChordType::block && ! noteLength.has_value())
                 || (measures > 1 && (type == music::ChordType::block || type == music::ChordType::rolled)));
     }
@@ -753,13 +759,31 @@ public:
     void writePerformance (Score&) const;
 
     //==============================================================================
-    /** The measure's chord, or null if it doesn't have one. */
-    const MeasureChord* getChord (int part, int measure) const;
-
-    /** Sets or removes a measure's chord. A chord with notes replaces the quarter notes on its
-        staff, and hides the ones on the alternate staff, if there is one.
+    /** The measure's chord, or null if it doesn't have one. A measure whose chords last half a
+        measure has two, the first half's, index 0, and the second's, index 1.
     */
-    void setChord (int part, int measure, std::optional<MeasureChord>);
+    const MeasureChord* getChord (int part, int measure, int index = 0) const;
+
+    /** Whether a measure has two chords, each lasting half of it. */
+    bool hasTwoChords (int part, int measure) const;
+
+    /** Which of a measure's chords is playing at a beat: 1 in the second half of a measure with
+        two, and otherwise 0.
+    */
+    int getChordIndexAt (int part, int measure, double beat) const;
+
+    /** How long a chord lasts in its measure, in 64ths: half the measure, or all of it. */
+    int getChordSlots (const MeasureChord&) const;
+
+    /** Where one of a measure's chords starts, in 64ths from the start of the measure: the
+        second of two halfway through it.
+    */
+    int getChordStart (int index) const noexcept { return index == 1 ? getSlotsPerMeasure() / 2 : 0; }
+
+    /** Sets or removes a measure's chord, or one of its two halves'. A chord with notes replaces
+        the quarter notes on its staff, and hides the ones on the alternate staff, if there is one.
+    */
+    void setChord (int part, int measure, std::optional<MeasureChord>, int index = 0);
 
     /** Sets a part's chords one after another, from one measure on, as setChord() does, each in
         so many measures, or as many as its rhythm takes, if that's more, the rhythm starting again
@@ -773,19 +797,32 @@ public:
     /** How many measures chords take, one after another, as setChords() writes them */
     int getChordsLength (const std::vector<MeasureChord>&, int measuresPerChord = 1, const std::vector<int>& chordMeasures = {}) const;
 
-    /** Sets the chord that starts in a measure, as the chord window does: with a rhythm that
-        takes more than one measure, in as many, one after another, adding measures at the end,
-        in every part, if they're needed; and one tied over several measures in all of them,
-        still tied, if it can be. The measures it was in that it no longer takes are left
-        without one. With none, takes it out of all the measures it was in.
+    /** Sets the chord that starts in a measure, or in one of its halves, as the chord window
+        does: with a rhythm that takes more than one measure, in as many, one after another,
+        adding measures at the end, in every part, if they're needed; and one tied over several
+        measures in all of them, still tied, if it can be. With none, takes it out of all the
+        measures it was in, or leaves its half with rests, or with nothing in the other half
+        either, leaves the measure without a chord.
+
+        Its length can change. Made shorter, the measures or halves it no longer takes keep it,
+        each as a chord of its own, as long as it is now; so does the other half, for the first
+        chord given notes in a measure split in two. Made longer, it takes the place of the
+        chords in the halves or measures it takes now.
     */
-    void writeChord (int part, int firstMeasure, std::optional<MeasureChord>);
+    void writeChord (int part, int firstMeasure, std::optional<MeasureChord>, int index = 0);
+
+    /** Whether writing a chord in place of one of a measure's chords, as writeChord() does, would
+        take out other chords with notes, in the other half or in measures it now takes, that
+        aren't the same as the one it replaces. The measures with them, in order.
+    */
+    std::vector<int> getChordsReplacedBy (int part, int measure, int index, const MeasureChord&) const;
 
     /** The measures the chord in a measure is in, as the first and how many: those its rhythm
         takes, from the first of them, as far as they all have it, or those it's tied over from
-        and to; or just the measure. Changing the chord changes it in all of them.
+        and to; or just the measure, for one lasting half of it. Changing the chord changes it in
+        all of them.
     */
-    std::pair<int, int> getChordSpan (int part, int measure) const;
+    std::pair<int, int> getChordSpan (int part, int measure, int index = 0) const;
 
     /** Whether a measure's chord is tied over to the next measure's, which has the same chord,
         written the same way, so they're one chord.
@@ -805,12 +842,12 @@ public:
     void replaceChordWithNotes (int part, int measure, const std::vector<Note>&);
 
     /** The notes and names of a measure's chord in the current key, if it has any notes. */
-    std::optional<music::Chord> getChordNotes (int part, int measure) const;
+    std::optional<music::Chord> getChordNotes (int part, int measure, int index = 0) const;
 
     /** How long a chord's notes are written, in 64ths, in this time signature: the length chosen
-        for it, if it fits in a measure, or the longest that does. Without one chosen, a block or
-        rolled chord lasts the measure, and the others' notes are quarters, or eighths or 16ths if
-        there are too many notes for quarters to fit.
+        for it, if it fits in the chord, or the longest that does. Without one chosen, a block or
+        rolled chord lasts the chord, a measure or half of one, and the others' notes are
+        quarters, or eighths or 16ths if there are too many notes for quarters to fit.
     */
     int getChordNoteLength (const MeasureChord&) const;
 
@@ -825,21 +862,22 @@ public:
     /** Whether a measure's chord puts notes on a staff, as the chord or the alternate staff. */
     bool chordUsesStaff (int part, int measure, Staff) const;
 
-    /** Adds a note to a measure's chord, or takes it out if it's already there, as setting the
-        chord's notes on the piano does. A measure without a chord gets one in the given style.
+    /** Adds a note to a measure's chord, or one of its halves', or takes it out if it's already
+        there, as setting the chord's notes on the piano does. A measure without a chord gets one
+        in the given style.
     */
-    void toggleChordNote (int part, int measure, int midiNote, const ChordStyle& styleForNewChord);
+    void toggleChordNote (int part, int measure, int midiNote, const ChordStyle& styleForNewChord, int index = 0);
 
     /** Adds a note to the notes a measure's chord puts on its alternate staff, or takes it out if
         it's already there. From then on the alternate staff keeps these notes, until the chord changes.
     */
-    void toggleAlternateNote (int part, int measure, const music::KeyboardNote&);
+    void toggleAlternateNote (int part, int measure, const music::KeyboardNote&, int index = 0);
 
     /** The notes a measure's chord puts on its alternate staff. */
-    std::vector<music::Tone> getAlternateTones (int part, int measure) const;
+    std::vector<music::Tone> getAlternateTones (int part, int measure, int index = 0) const;
 
     /** Picks a new order for a measure's chord to play its notes in, if it's a Random chord. */
-    void reshuffle (int part, int measure);
+    void reshuffle (int part, int measure, int index = 0);
 
     //==============================================================================
     /** Whether a part has any quarter notes, even ones hidden by the time signature or the
@@ -915,7 +953,17 @@ private:
         std::array<std::optional<music::Dynamic>, maxSlotsPerMeasure> dynamics;      // by 64th note, for both staves
         std::array<std::optional<HairpinStart>, maxSlotsPerMeasure> hairpins;      // starting at each 64th
         std::array<juce::uint8, maxSlotsPerMeasure> pedalMarks {};                 // at each 64th: pedalUp, then pedalDown, or neither
-        std::optional<MeasureChord> chord;
+        std::optional<MeasureChord> chord;          // the measure's, or its first half's
+        std::optional<MeasureChord> secondChord;    // the second half's, when the first lasts half the measure
+
+        std::optional<MeasureChord>& getChord (int index) noexcept { return index == 1 ? secondChord : chord; }
+        const std::optional<MeasureChord>& getChord (int index) const noexcept { return index == 1 ? secondChord : chord; }
+
+        /** Whether either of its chords has notes */
+        bool hasChordNotes() const
+        {
+            return (chord.has_value() && chord->hasNotes()) || (secondChord.has_value() && secondChord->hasNotes());
+        }
 
         /** A tuplet, where it starts: its notes' length in 64ths, their pitches and whether they're staccato */
         struct TupletNotes
@@ -1012,7 +1060,17 @@ private:
 
     /** How many measures a chord takes in its rhythm, or one without one */
     int getRhythmMeasureCount (const MeasureChord&) const;
-    void tidyChord (Measure&, bool reshuffleRandomOrder = false);
+
+    /** Keeps a measure's chords as they can be: two halves, on the same staff, or one chord, and
+        each as its type and length allow. One's Random order is made again, if it's asked for.
+    */
+    void tidyChord (Measure&, int reshuffleIndex = -1);
+    void tidyOneChord (MeasureChord&, bool reshuffleRandomOrder);
+
+    /** A measure's chord made to last a measure again, and not tied, when the measure before it
+        that it was tied over from, or that it lasted two measures with, has another chord now.
+    */
+    void untieOrphanedChord (int part, int measure);
 
     /** After the key changes: chords follow their numerals, and notes set on the piano keep
         their pitches, described again in the new key.

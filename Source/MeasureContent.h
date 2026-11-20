@@ -48,9 +48,21 @@ struct StaffContent
 /** Everything written in a measure, worked out from the score. */
 struct MeasureContent
 {
+    /** One of the measure's chords with notes, and when it plays */
+    struct ChordPlayed
+    {
+        music::Chord chord;
+        ChordStyle style;
+        double onset = 0.0;     // in beats from the start of the measure
+        double beats = 4.0;     // how long it lasts: the measure, or half of it
+        int index = 0;          // which of the measure's chords it is: 1 for the second half's
+    };
+
     std::array<StaffContent, 2> staves;
-    std::optional<music::Chord> chord;
-    ChordStyle chordStyle;
+    std::vector<ChordPlayed> chords;     // the measure's chord, or its two halves', those with notes
+
+    /** The chord playing at a beat, if there's one with notes then. */
+    const ChordPlayed* getChordAt (double beat) const;
 };
 
 /** What one part has in one measure. */
@@ -58,9 +70,9 @@ MeasureContent getMeasureContent (const Score&, int part, int measure);
 
 /** The notes an arpeggio's or Random chord's notes can be moved to with the Edit tool, in order of
     pitch: the chord's own, in every octave. None for a block or rolled chord, or a measure
-    without a chord.
+    without a chord. For a measure with two chords, the first half's, or the second's.
 */
-std::vector<music::Tone> getChordNoteChoices (const Score&, int part, int measure);
+std::vector<music::Tone> getChordNoteChoices (const Score&, int part, int measure, int index = 0);
 
 /** A chord written as one note filling the measure: a whole note in 4/4, a dotted half in 3/4
     and a half in 2/4.

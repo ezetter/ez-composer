@@ -19,27 +19,35 @@ juce::StringArray getChordTypeNames();
 */
 const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths();
 
-/** The note length menus' item for a block or rolled chord lasting two measures, tied over */
+/** The progression panel's note length item for a block or rolled chord lasting two measures, tied over */
 constexpr int twoMeasuresItemId = 100;
 
-/** Defines the chord in one measure, with the same settings as the Chord Progression Builder's
-    chord panels, plus the clef and chord type it's written with.
+/** Defines the chord in one measure, or in one half of a measure with two, with the same settings
+    as the Chord Progression Builder's chord panels, plus the clef and chord type it's written
+    with, and how long it lasts: half a measure, one, or two.
 
-    Every change goes straight into the score, as it's made. Remove Chord takes the measure's
+    Every change goes straight into the score, as it's made. Making the chord longer, so it takes
+    the place of other chords that are different from it, asks first. Remove Chord takes the
     chord out.
 */
 class ChordEditor final : public juce::Component,
                           private juce::ChangeListener
 {
 public:
-    /** Edits the chord starting in a measure of one part, or starts a new one there in the given
-        style, with the saved rhythms to choose from for it.
+    /** Edits the chord starting in a measure of one part, or in one of its halves, 0 or 1, if it
+        has two, or starts a new one there in the given style, with the saved rhythms to choose
+        from for it.
     */
-    ChordEditor (Score&, int part, int measure, const ChordStyle& styleForNewChord, std::vector<Rhythm> savedRhythms = {});
+    ChordEditor (Score&, int part, int measure, int chordIndex, const ChordStyle& styleForNewChord, std::vector<Rhythm> savedRhythms = {});
     ~ChordEditor() override;
 
     int getPart() const noexcept { return part; }
     int getMeasure() const noexcept { return measure; }
+
+    /** Which of the measure's chords is being edited: 0, or for the second half of a measure with
+        two, 1. Made to last a measure or two, it's 0.
+    */
+    int getChordIndex() const noexcept { return chordIndex; }
 
     /** The measure's chord, or the new one it would get, with the style chosen for it. */
     const MeasureChord& getChord() const noexcept { return chord; }
@@ -70,11 +78,17 @@ private:
 
     /** Makes the chord the type chosen, and a Random chord's order new, even if it was Random already. */
     void chooseChordType (int itemId);
+
+    /** Makes the chord last half a measure, one or two, asking first if that takes the place of
+        other chords.
+    */
+    void chooseChordLength (int itemId);
     void finish();
 
     Score& score;
     const int part;
     const int measure;
+    int chordIndex = 0;
     MeasureChord chord;
 
     juce::Label title;
@@ -86,6 +100,8 @@ private:
     std::array<juce::TextButton, 2> susButtons;     // sus2 and sus4, toggled on or off, under the added note
     juce::TextButton trebleButton { "Treble clef" }, bassButton { "Bass clef" };
     controls::ReselectableComboBox chordTypeBox;     // beside the title
+    juce::Label chordLengthLabel;
+    juce::ComboBox chordLengthBox;          // how long the chord lasts: half a measure, one or two
     juce::Label noteLengthLabel;
     juce::ComboBox noteLengthBox;           // how long the chord's notes are
     juce::Label rhythmLabel;

@@ -1563,7 +1563,7 @@ void MainComponent::configureView (StaffView& view)
         if (itemSelection.has_value() && itemSelection->part != view.getPart() && ! pasting)
             clearItemSelection();
     };
-    view.onChordButtonClicked = [this, &view] (int measure) { editChord (view.getPart(), measure); };
+    view.onChordButtonClicked = [this, &view] (int measure, int chordIndex) { editChord (view.getPart(), measure, chordIndex); };
 
     // An eraser stroke is undone in one go, however much it takes out.
     view.onEraseStarted = [this] { history.beginGesture(); };
@@ -1629,7 +1629,8 @@ void MainComponent::configureView (StaffView& view)
     view.setMeasureSelection (selectedMeasures);
     view.setMovingMeasures (moveMeasuresButton.getToggleState());
     view.setSelectedMeasure (getChordEditor() != nullptr && getChordEditor()->getPart() == view.getPart() ? std::optional (getChordEditor()->getMeasure())
-                                                                                                          : std::nullopt);
+                                                                                                          : std::nullopt,
+                             getChordEditor() != nullptr ? getChordEditor()->getChordIndex() : 0);
 
     if (placingScale)
         view.setScalePlacement (lastScale);
@@ -3132,7 +3133,7 @@ void MainComponent::saveVolumes()
     }
 }
 
-void MainComponent::editChord (int part, int measure)
+void MainComponent::editChord (int part, int measure, int chordIndex)
 {
     // One chord is edited at a time. The window stays where it was, if it's open already.
     std::optional<juce::Point<int>> position;
@@ -3143,16 +3144,25 @@ void MainComponent::editChord (int part, int measure)
     closeChordEditor();
     setActivePart (part);
 
-    // A chord in several measures, as its rhythm takes, is edited where it starts.
-    measure = score.getChordSpan (part, measure).first;
+    // A chord in several measures, as its rhythm takes, is edited where it starts. One lasting
+    // half a measure is just in its half.
+    chordIndex = score.hasTwoChords (part, measure) ? juce::jlimit (0, 1, chordIndex) : 0;
+    measure = score.getChordSpan (part, measure, chordIndex).first;
 
-    auto editor = std::make_unique<ChordEditor> (score, part, measure, lastChordStyle, savedRhythms.getAll());
+    auto editor = std::make_unique<ChordEditor> (score, part, measure, chordIndex, lastChordStyle, savedRhythms.getAll());
     auto* editorPointer = editor.get();
 
     editor->onChordChanged = [this, editorPointer]
     {
         lastChordStyle = editorPointer->getChord().style;
         showHeldNotes();
+
+        // Made to last a measure, or split in two, it may be another of the measure's chords now.
+        if (chordWindow != nullptr && &chordWindow->getEditor() == editorPointer)
+        {
+            chordWindow->setName (editorPointer->getTitle());
+            showChordBeingEdited();
+        }
     };
 
     editor->onFinished = [this, editorPointer]
@@ -3183,14 +3193,23 @@ void MainComponent::editChord (int part, int measure)
     chordWindow->setTopLeftPosition (position.value_or (sidebarArea.getTopLeft() + juce::Point<int> (8, 8)));
     chordWindow->setVisible (true);
 
-    staffSystems.views[(size_t) part]->setSelectedMeasure (measure);
-
-    if (scorePage.getPart() == part)
-        for (auto& line : scorePage.lines)
-            line->setSelectedMeasure (measure);
-
+    showChordBeingEdited();
     scrollToMeasure (measure);
     showHeldNotes();
+}
+
+void MainComponent::showChordBeingEdited()
+{
+    const auto* editor = getChordEditor();
+
+    if (editor == nullptr || ! juce::isPositiveAndBelow (editor->getPart(), (int) staffSystems.views.size()))
+        return;
+
+    staffSystems.views[(size_t) editor->getPart()]->setSelectedMeasure (editor->getMeasure(), editor->getChordIndex());
+
+    if (scorePage.getPart() == editor->getPart())
+        for (auto& line : scorePage.lines)
+            line->setSelectedMeasure (editor->getMeasure(), editor->getChordIndex());
 }
 
 ChordEditor* MainComponent::getChordEditor() const

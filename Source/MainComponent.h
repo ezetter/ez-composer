@@ -562,7 +562,11 @@ private:
     /** Opens the chord window for a measure of a part, to add a chord or edit the one it has.
         The part becomes the active one.
     */
-    void editChord (int part, int measure);
+    /** Opens the chord window for a measure's chord, or one of its two halves', 0 or 1. */
+    void editChord (int part, int measure, int chordIndex = 0);
+
+    /** Shows the measure, and the half, whose chord is being edited, as selected. */
+    void showChordBeingEdited();
 
     /** The chord being edited, if the chord window is open. */
     ChordEditor* getChordEditor() const;

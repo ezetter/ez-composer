@@ -1303,8 +1303,7 @@ std::optional<StaffView::ChordNote> StaffView::findMovableChordNoteAt (juce::Poi
     // arpeggio or Random chord writes on its own staff
     const auto spot = getNoteAt (point);
 
-    if (! spot.has_value() || getChordNoteChoices (score, part, spot->measure).empty()
-        || score.getChord (part, spot->measure)->style.staff != spot->staff)
+    if (! spot.has_value() || score.getChord (part, spot->measure) == nullptr || score.getChord (part, spot->measure)->style.staff != spot->staff)
         return {};
 
     const auto& content = measureLayouts[(size_t) spot->measure].content.staves[(size_t) spot->staff];
@@ -1312,17 +1311,22 @@ std::optional<StaffView::ChordNote> StaffView::findMovableChordNoteAt (juce::Poi
     if (content.source != StaffContent::Source::chord)
         return {};
 
+    // Each of a measure's two chords counts its own notes, and only an arpeggio's or Random chord's move.
     std::optional<ChordNote> found;
     auto nearestDistance = 1.4f * staffSpace;
-    auto index = 0;
+    std::array<int, 2> indices {};
 
     for (const auto& event : content.events)
     {
         if (event.isRest())
             continue;
 
+        const auto chordIndex = score.getChordIndexAt (part, spot->measure, event.onset);
+        auto& index = indices[(size_t) chordIndex];
+
         if (const auto distance = std::abs (point.x - getEventX (spot->measure, event));
-            distance <= nearestDistance && event.tones.front().pitch.step == spot->pitch.step)
+            distance <= nearestDistance && event.tones.front().pitch.step == spot->pitch.step
+            && ! getChordNoteChoices (score, part, spot->measure, chordIndex).empty())
         {
             found = ChordNote { { spot->staff, spot->measure, event.onset, event.tones.front().pitch, part, getBeats (event.duration) }, index };
             nearestDistance = distance;
@@ -1345,7 +1349,7 @@ std::optional<music::Tone> StaffView::getChordNoteTarget (const ChordNote& chord
     std::optional<music::Tone> nearest;
     auto nearestDistance = std::numeric_limits<float>::max();
 
-    for (const auto& choice : getChordNoteChoices (score, part, chordNote.note.measure))
+    for (const auto& choice : getChordNoteChoices (score, part, chordNote.note.measure, score.getChordIndexAt (part, chordNote.note.measure, chordNote.note.beat)))
     {
         const auto choicePosition = choice.pitch.step - getBottomLineStep (staff);
 
@@ -1365,10 +1369,10 @@ std::optional<music::Tone> StaffView::getChordNoteTarget (const ChordNote& chord
     return nearest;
 }
 
-int StaffView::getChordToneOf (int measure, int midiNote) const
+int StaffView::getChordToneOf (int measure, double beat, int midiNote) const
 {
     // The chord's note itself, or the first of the same name
-    const auto chord = score.getChordNotes (part, measure);
+    const auto chord = score.getChordNotes (part, measure, score.getChordIndexAt (part, measure, beat));
 
     if (! chord.has_value())
         return midiNote;
@@ -1386,17 +1390,20 @@ int StaffView::getChordToneOf (int measure, int midiNote) const
 
 void StaffView::moveChordNote (const ChordNote& chordNote, int midiNote)
 {
-    const auto* chord = score.getChord (part, chordNote.note.measure);
+    const auto measure = chordNote.note.measure;
+    const auto chordIndex = score.getChordIndexAt (part, measure, chordNote.note.beat);
+    const auto* chord = score.getChord (part, measure, chordIndex);
 
     if (chord == nullptr)
         return;
 
-    // The notes the chord writes, as they are, with the one moved
-    const auto content = getMeasureContent (score, part, chordNote.note.measure);
+    // The notes the chord writes, as they are, with the one moved: in a measure with two chords,
+    // those of the half it's in
+    const auto content = getMeasureContent (score, part, measure);
     std::vector<int> notes;
 
     for (const auto& event : content.staves[(size_t) chord->style.staff].events)
-        if (! event.isRest())
+        if (! event.isRest() && score.getChordIndexAt (part, measure, event.onset) == chordIndex)
             notes.push_back (event.tones.front().midi);
 
     if (! juce::isPositiveAndBelow (chordNote.index, (int) notes.size()))
@@ -1406,7 +1413,7 @@ void StaffView::moveChordNote (const ChordNote& chordNote, int midiNote)
 
     auto moved = *chord;
     moved.movedNotes = std::move (notes);
-    score.setChord (part, chordNote.note.measure, moved);
+    score.setChord (part, measure, moved, chordIndex);
 }
 
 std::optional<Note> StaffView::getMoveTarget (const Note& note, juce::Point<float> point) const
@@ -1645,10 +1652,12 @@ void StaffView::setTitle (const juce::String& newTitle)
     repaint();
 }
 
-void StaffView::setSelectedMeasure (std::optional<int> measure)
+void StaffView::setSelectedMeasure (std::optional<int> measure, int chordIndex)
 {
-    if (measure == selectedMeasure)
+    if (measure == selectedMeasure && chordIndex == selectedChordIndex)
         return;
+
+    selectedChordIndex = chordIndex;
 
     if (selectedMeasure.has_value() && *selectedMeasure < (int) measureLayouts.size())
         repaint (getMeasureBox (*selectedMeasure).toNearestInt().expanded (2));
@@ -1772,7 +1781,9 @@ void StaffView::updateLayout()
                 break;
 
             const auto& content = layout.content.staves[(size_t) staff];
-            const auto melodic = content.source == StaffContent::Source::chord && music::isMelodic (layout.content.chordStyle.type);
+            const auto& chords = layout.content.chords;
+            const auto melodic = content.source == StaffContent::Source::chord
+                              && std::any_of (chords.begin(), chords.end(), [] (const auto& played) { return music::isMelodic (played.style.type); });
 
             for (const auto& event : content.events)
             {
@@ -2916,7 +2927,7 @@ void StaffView::drawStaff (juce::Graphics& g, int measure, Staff staff) const
             }
 
             // A Random chord's notes are taken out one at a time, so only the one under the pointer is red.
-            const auto onItsOwn = content.source == StaffContent::Source::notes || hasRandomChord (measure);
+            const auto onItsOwn = content.source == StaffContent::Source::notes || hasRandomChord (measure, notes[i].onset);
             const auto isHovered = highlightedPosition.has_value()
                                 && (! onItsOwn || juce::exactlyEqual (notes[i].onset, (double) hoverNote->beat));
             drawNote (g, staff, notes[i], rolled[i], isHovered ? highlightedPosition : std::nullopt, removalColour);
@@ -3228,19 +3239,25 @@ void StaffView::drawRollSign (juce::Graphics& g, float right, float top, float b
 
 void StaffView::drawLabels (juce::Graphics& g, int measure) const
 {
+    // Each of the measure's chords, the measure's or its two halves', has its own.
+    for (const auto& played : measureLayouts[(size_t) measure].content.chords)
+        drawChordLabels (g, measure, played);
+}
+
+void StaffView::drawChordLabels (juce::Graphics& g, int measure, const MeasureContent::ChordPlayed& played) const
+{
     const auto& content = measureLayouts[(size_t) measure].content;
-
-    if (! content.chord.has_value())
-        return;
-
-    const auto& chord = *content.chord;
-    const auto& chordStaff = content.staves[(size_t) content.chordStyle.staff];
-
-    if (chordStaff.events.empty())
-        return;
+    const auto& chord = played.chord;
+    const auto& events = content.staves[(size_t) played.style.staff].events;
 
     // Both labels are centred on the chord's first note.
-    const auto x = getEventX (measure, chordStaff.events.front());
+    const auto first = std::find_if (events.begin(), events.end(), [&played] (const StaffEvent& event)
+                                     { return ! event.isRest() && event.onset >= played.onset - 1.0e-9; });
+
+    if (first == events.end())
+        return;
+
+    const auto x = getEventX (measure, *first);
 
     if (chord.symbol.isNotEmpty())
     {
@@ -3304,12 +3321,17 @@ std::optional<music::Tone> StaffView::findNoteUnder (const Note& note) const
     if (! juce::isPositiveAndBelow (note.measure, (int) measureLayouts.size()))
         return {};
 
-    // A chord's notes count wherever they are in the measure; a quarter note only on its own beat.
+    // A chord's notes count wherever they are in the chord, the measure or its half; a quarter
+    // note only on its own beat.
     const auto& content = measureLayouts[(size_t) note.measure].content.staves[(size_t) note.staff];
+    const auto chordIndex = score.getChordIndexAt (part, note.measure, note.beat);
 
     for (const auto& event : content.events)
     {
         if (content.source == StaffContent::Source::notes && ! juce::exactlyEqual (event.onset, (double) note.beat))
+            continue;
+
+        if (content.source != StaffContent::Source::notes && score.getChordIndexAt (part, note.measure, event.onset) != chordIndex)
             continue;
 
         for (const auto& tone : event.tones)
@@ -4780,9 +4802,9 @@ void StaffView::mouseUp (const juce::MouseEvent& e)
     }
 }
 
-bool StaffView::hasRandomChord (int measure) const
+bool StaffView::hasRandomChord (int measure, double beat) const
 {
-    const auto* chord = score.getChord (part, measure);
+    const auto* chord = score.getChord (part, measure, score.getChordIndexAt (part, measure, beat));
     return chord != nullptr && chord->hasNotes() && chord->style.type == music::ChordType::random;
 }
 
@@ -4970,7 +4992,7 @@ std::optional<Note> StaffView::getNoteToClickAt (juce::Point<float> point) const
     auto note = getNoteAt (point);
 
     // A Random chord's notes are each taken out on their own, so it's the one under the point.
-    if (note.has_value() && hasRandomChord (note->measure) && score.chordUsesStaff (part, note->measure, note->staff))
+    if (note.has_value() && hasRandomChord (note->measure, note->beat) && score.chordUsesStaff (part, note->measure, note->staff))
         if (const auto onset = findWrittenNoteOnset (*note, point.x))
             note->beat = *onset;
 
@@ -5057,7 +5079,7 @@ void StaffView::clickNote (const Note& note)
 {
     // In a measure with a Random chord, clicking one of its notes takes out just that note: the
     // chord goes, and its other notes stay as they are, as notes of their own.
-    if (hasRandomChord (note.measure) && score.chordUsesStaff (part, note.measure, note.staff))
+    if (hasRandomChord (note.measure, note.beat) && score.chordUsesStaff (part, note.measure, note.staff))
     {
         for (const auto& event : measureLayouts[(size_t) note.measure].content.staves[(size_t) note.staff].events)
             for (const auto& tone : event.tones)
@@ -5073,25 +5095,27 @@ void StaffView::clickNote (const Note& note)
     // clicking anywhere else adds a note to them.
     if (score.chordUsesStaff (part, note.measure, note.staff))
     {
+        // In a measure with two chords, it's the chord in the half clicked.
         const auto existing = findNoteUnder (note);
-        const auto* chord = score.getChord (part, note.measure);
+        const auto chordIndex = score.getChordIndexAt (part, note.measure, note.beat);
+        const auto style = score.getChord (part, note.measure, chordIndex)->style;
         const music::KeyboardNote clicked { existing ? existing->midi : note.pitch.getMidiNoteNumber(),
                                             existing ? existing->pitch.getSpelling() : note.pitch.getSpelling() };
 
-        if (note.staff == chord->style.staff)
-            score.toggleChordNote (part, note.measure, existing ? getChordToneOf (note.measure, clicked.midi) : clicked.midi, chord->style);
+        if (note.staff == style.staff)
+            score.toggleChordNote (part, note.measure, existing ? getChordToneOf (note.measure, note.beat, clicked.midi) : clicked.midi, style, chordIndex);
         else
-            score.toggleAlternateNote (part, note.measure, clicked);
+            score.toggleAlternateNote (part, note.measure, clicked, chordIndex);
 
         // Clicked with another sharp or flat, the note's changed to it: taken out, and the new one put in.
         if (existing.has_value() && existing->pitch.alter != note.pitch.alter)
         {
             const music::KeyboardNote changed { note.pitch.getMidiNoteNumber(), note.pitch.getSpelling() };
 
-            if (note.staff == chord->style.staff)
-                score.toggleChordNote (part, note.measure, changed.midi, chord->style);
+            if (note.staff == style.staff)
+                score.toggleChordNote (part, note.measure, changed.midi, style, chordIndex);
             else
-                score.toggleAlternateNote (part, note.measure, changed);
+                score.toggleAlternateNote (part, note.measure, changed, chordIndex);
         }
     }
     // Clicking one of a tuplet's notes selects it.
@@ -5257,16 +5281,18 @@ void StaffView::eraseAt (juce::Point<float> point)
     {
         const auto& note = *found.note;
 
-        if (hasRandomChord (note.measure) && score.chordUsesStaff (part, note.measure, note.staff))
+        if (hasRandomChord (note.measure, note.beat) && score.chordUsesStaff (part, note.measure, note.staff))
             writeOutRandomChordWithout (note.measure, note.staff, note.beat, found.tone->midi);
         else if (score.getTuplet (part, note.staff, note.measure, note.beat).has_value())
             score.removeTuplet (part, note.staff, note.measure, note.beat);       // all together, as it's played
         else if (! score.chordUsesStaff (part, note.measure, note.staff))
             score.removeNote (part, note.staff, note.measure, note.beat, note.pitch);
-        else if (const auto* chord = score.getChord (part, note.measure); chord != nullptr && chord->style.staff == note.staff)
-            score.toggleChordNote (part, note.measure, getChordToneOf (note.measure, found.tone->midi), chord->style);
+        else if (const auto chordIndex = score.getChordIndexAt (part, note.measure, note.beat);
+                 score.getChord (part, note.measure, chordIndex) != nullptr && score.getChord (part, note.measure, chordIndex)->style.staff == note.staff)
+            score.toggleChordNote (part, note.measure, getChordToneOf (note.measure, note.beat, found.tone->midi),
+                                   score.getChord (part, note.measure, chordIndex)->style, chordIndex);
         else
-            score.toggleAlternateNote (part, note.measure, { found.tone->midi, found.tone->pitch.getSpelling() });
+            score.toggleAlternateNote (part, note.measure, { found.tone->midi, found.tone->pitch.getSpelling() }, chordIndex);
     }
 }
 
@@ -5574,45 +5600,70 @@ void StaffView::updateChordButtons()
     // On a line, there are none after it.
     const auto numMeasures = juce::jmin (score.getNumMeasures(), (int) measureLayouts.size(), getShownMeasures().getEnd());
 
-    while (chordButtons.size() > numMeasures)
-        chordButtons.removeLast();
-
-    while (chordButtons.size() < numMeasures)
+    // One over each measure, and another over the second half of a measure with two chords
+    for (auto chordIndex : { 0, 1 })
     {
-        const auto measure = chordButtons.size();
-        auto* button = chordButtons.add (std::make_unique<juce::TextButton>());
-        button->setWantsKeyboardFocus (false);
-        button->setColour (juce::TextButton::buttonColourId, paperColour);
-        button->setColour (juce::TextButton::buttonOnColourId, selectionColour.withAlpha (0.15f));
-        button->setColour (juce::TextButton::textColourOffId, selectionColour);
-        button->setColour (juce::TextButton::textColourOnId, selectionColour);
-        button->onClick = [this, measure]
-        {
-            if (onClicked != nullptr)
-                onClicked();
+        auto& buttons = chordIndex == 0 ? chordButtons : secondChordButtons;
 
-            if (onChordButtonClicked != nullptr)
-                onChordButtonClicked (measure);
-        };
-        addAndMakeVisible (button);
+        while (buttons.size() > numMeasures)
+            buttons.removeLast();
+
+        while (buttons.size() < numMeasures)
+        {
+            const auto measure = buttons.size();
+            auto* button = buttons.add (std::make_unique<juce::TextButton>());
+            button->setWantsKeyboardFocus (false);
+            button->setColour (juce::TextButton::buttonColourId, paperColour);
+            button->setColour (juce::TextButton::buttonOnColourId, selectionColour.withAlpha (0.15f));
+            button->setColour (juce::TextButton::textColourOffId, selectionColour);
+            button->setColour (juce::TextButton::textColourOnId, selectionColour);
+            button->onClick = [this, measure, chordIndex]
+            {
+                if (onClicked != nullptr)
+                    onClicked();
+
+                if (onChordButtonClicked != nullptr)
+                    onChordButtonClicked (measure, chordIndex);
+            };
+            addChildComponent (button);
+        }
     }
 
-    // Each button sits just over its measure's chord name.
+    // Each button sits just over its measure's chord name, or for two chords, over its half.
     const auto top = getStaffTop (Staff::treble) - getChordButtonOffset() * staffSpace;
 
     for (int measure = 0; measure < numMeasures; ++measure)
     {
-        auto* button = chordButtons[measure];
         const auto& layout = measureLayouts[(size_t) measure];
-        const auto* chord = score.getChord (part, measure);
-        const auto hasChord = chord != nullptr && chord->hasNotes();
-        const auto width = juce::jmin (layout.width - 1.2f * staffSpace, 90.0f);
+        const auto twoChords = score.hasTwoChords (part, measure);
+        const auto shown = chordControlsShown && getShownMeasures().contains (measure);
+        const auto halfway = getOnsetX (measure, (double) score.getChordStart (1) / Score::slotsPerBeat) - 0.5f * layout.beatWidth;
 
-        button->setButtonText (hasChord ? "Edit Chord" : "Add Chord");
-        button->setTooltip ((hasChord ? "Edit the chord in measure " : "Add a chord to measure ") + juce::String (measure + 1));
-        button->setToggleState (measure == selectedMeasure, juce::dontSendNotification);
-        button->setVisible (chordControlsShown && getShownMeasures().contains (measure));
-        button->setBounds (juce::Rectangle<float> (layout.x + (layout.width - width) / 2.0f, top, width, 2.0f * staffSpace).toNearestInt());
+        for (auto chordIndex : { 0, 1 })
+        {
+            auto* button = (chordIndex == 0 ? chordButtons : secondChordButtons)[measure];
+            const auto* chord = score.getChord (part, measure, chordIndex);
+            const auto hasChord = chord != nullptr && chord->hasNotes();
+            const auto half = juce::String (chordIndex == 0 ? "the first half of " : "the second half of ");
+
+            if (chordIndex == 1 && ! twoChords)
+            {
+                button->setVisible (false);
+                continue;
+            }
+
+            const auto left = ! twoChords ? layout.x : chordIndex == 0 ? layout.x : halfway;
+            const auto right = ! twoChords ? (layout.x + layout.width) : chordIndex == 0 ? halfway : (layout.x + layout.width);
+            const auto room = right - left - (twoChords ? 0.6f : 1.2f) * staffSpace;
+            const auto width = juce::jmax (0.0f, juce::jmin (room, 90.0f));
+
+            button->setButtonText (hasChord ? (twoChords && width < 64.0f ? "Edit" : "Edit Chord") : (twoChords && width < 64.0f ? "Add" : "Add Chord"));
+            button->setTooltip (twoChords ? (hasChord ? "Edit the chord in " : "Add a chord to ") + half + "measure " + juce::String (measure + 1)
+                                          : (hasChord ? "Edit the chord in measure " : "Add a chord to measure ") + juce::String (measure + 1));
+            button->setToggleState (measure == selectedMeasure && chordIndex == (twoChords ? selectedChordIndex : 0), juce::dontSendNotification);
+            button->setVisible (shown);
+            button->setBounds (juce::Rectangle<float> (left + (right - left - width) / 2.0f, top, width, 2.0f * staffSpace).toNearestInt());
+        }
     }
 
     // The buttons for the notes selected follow them.

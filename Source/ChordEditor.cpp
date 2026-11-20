@@ -12,6 +12,9 @@ namespace
     constexpr int padding = 16;
     constexpr int buttonHeight = 28;
 
+    // The chord length box's items
+    constexpr int halfMeasureId = 1, oneMeasureId = 2, twoMeasuresId = 3;
+
     const auto& noteLengths = getChordNoteLengths();
 
     /** Drops a chord's 7th or 9th, and its 3rd inversion, which only 7th chords have. */
@@ -36,10 +39,12 @@ const std::array<std::pair<int, const char*>, 6>& getChordNoteLengths()
     return lengths;
 }
 
-ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit, const ChordStyle& styleForNewChord, std::vector<Rhythm> rhythms)
+ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit, int chordIndexToEdit, const ChordStyle& styleForNewChord,
+                          std::vector<Rhythm> rhythms)
     : score (scoreToEdit),
       part (partToEdit),
       measure (measureToEdit),
+      chordIndex (chordIndexToEdit),
       savedRhythms (std::move (rhythms))
 {
     chord.style = styleForNewChord;
@@ -169,25 +174,28 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     // Choosing Random picks a new random order, even if the chord's Random already.
     chordTypeBox.onChange = [this] { chooseChordType (chordTypeBox.getSelectedId()); };
     chordTypeBox.onItemChosen = [this] (int itemId) { chooseChordType (itemId); };
+    // How long the chord lasts: half a measure, leaving the other half for another chord, one, or two
+    chordLengthLabel.setText ("Chord length", juce::dontSendNotification);
+    chordLengthLabel.setFont (juce::FontOptions (13.0f));
+    chordLengthLabel.setBorderSize ({});
+    chordLengthBox.addItem ("Half measure", halfMeasureId);
+    chordLengthBox.addItem ("One measure", oneMeasureId);
+    chordLengthBox.addItem ("Two measures", twoMeasuresId);
+    chordLengthBox.onChange = [this] { chooseChordLength (chordLengthBox.getSelectedId()); };
+
     // How long the notes are: a block or rolled chord is repeated in notes this long until the
-    // measure's full, and the others have a note this long for each note they play.
+    // chord's full, and the others have a note this long for each note they play.
     noteLengthLabel.setText ("Note length", juce::dontSendNotification);
     noteLengthLabel.setFont (juce::FontOptions (13.0f));
     noteLengthLabel.setBorderSize ({});
 
-    // Two measures first, the longest, then the measure and shorter
-    noteLengthBox.addItem ("Two measures", twoMeasuresItemId);
-
     for (size_t i = 0; i < noteLengths.size(); ++i)
         noteLengthBox.addItem (noteLengths[i].second, (int) i + 1);
 
-    noteLengthBox.setTooltip ("How long the chord's notes are: block and rolled chords play again in them, the others a note at a time");
     noteLengthBox.onChange = [this]
     {
-        if (noteLengthBox.getSelectedId() == twoMeasuresItemId)
-            edit ([] (MeasureChord& c) { c.style.noteLength.reset(); c.style.measures = 2; });
-        else if (const auto index = noteLengthBox.getSelectedId() - 1; juce::isPositiveAndBelow (index, (int) noteLengths.size()))
-            edit ([index] (MeasureChord& c) { c.style.noteLength = noteLengths[(size_t) index].first; c.style.measures = 1; });
+        if (const auto index = noteLengthBox.getSelectedId() - 1; juce::isPositiveAndBelow (index, (int) noteLengths.size()))
+            edit ([index] (MeasureChord& c) { c.style.noteLength = noteLengths[(size_t) index].first; });
     };
 
     // Or a saved rhythm, in place of the note length
@@ -218,7 +226,7 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
     keyboardNotesLabel.setJustificationType (juce::Justification::topLeft);
 
     doneButton.setTooltip ("Close the window (Return or Esc). Every change is in the score already.");
-    removeButton.onClick = [this] { score.writeChord (part, measure, std::nullopt); };
+    removeButton.onClick = [this] { score.writeChord (part, measure, std::nullopt, chordIndex); };
 
     // Return or Escape closes the window, as well as Done.
     doneButton.addShortcut (juce::KeyPress (juce::KeyPress::returnKey));
@@ -233,7 +241,7 @@ ChordEditor::ChordEditor (Score& scoreToEdit, int partToEdit, int measureToEdit,
              &numeralBox, &addedNoteBox,
              &positionButtons[0], &positionButtons[1], &positionButtons[2], &positionButtons[3],
              &octaveButtons[0], &octaveButtons[1], &octaveButtons[2], &trebleButton, &bassButton,
-             &chordTypeBox, &noteLengthLabel, &noteLengthBox, &rhythmLabel, &rhythmBox,
+             &chordTypeBox, &chordLengthLabel, &chordLengthBox, &noteLengthLabel, &noteLengthBox, &rhythmLabel, &rhythmBox,
              &nameLabel, &notesLabel, &fitLabel, &keyboardNotesLabel, &removeButton, &doneButton })
         addAndMakeVisible (component);
 
@@ -249,14 +257,21 @@ ChordEditor::~ChordEditor()
 
 juce::String ChordEditor::getTitle() const
 {
+    const auto twoChords = measure < score.getNumMeasures() && score.hasTwoChords (part, measure);
+
     return "Chord" + controls::fromUTF8 (" \xc2\xb7 Instrument ") + juce::String (part + 1)
-         + controls::fromUTF8 (" \xc2\xb7 Measure ") + juce::String (measure + 1);
+         + controls::fromUTF8 (" \xc2\xb7 Measure ") + juce::String (measure + 1)
+         + (twoChords ? controls::fromUTF8 (" \xc2\xb7 ") + (chordIndex == 0 ? "First half" : "Second half") : juce::String());
 }
 
 void ChordEditor::loadChord()
 {
+    // The second half's chord, while the measure has two
+    if (chordIndex == 1 && ! score.hasTwoChords (part, measure))
+        chordIndex = 0;
+
     // A measure without a chord keeps the style chosen for its new one.
-    if (const auto* existing = score.getChord (part, measure))
+    if (const auto* existing = score.getChord (part, measure, chordIndex))
         chord = *existing;
     else
         chord = MeasureChord { {}, {}, chord.style, {}, {} };
@@ -300,8 +315,70 @@ void ChordEditor::edit (const std::function<void (MeasureChord&)>& change)
         newChord.alternateNotes.reset();
 
     // Every change goes straight into the score, which sends it back here to show, in as many
-    // measures as its rhythm takes.
-    score.writeChord (part, measure, newChord);
+    // measures as its rhythm takes. Lasting a measure or two, it's the measure's only chord.
+    const auto writtenIndex = chordIndex;
+    chordIndex = newChord.style.halfMeasure ? chordIndex : 0;
+    score.writeChord (part, measure, newChord, writtenIndex);
+}
+
+void ChordEditor::chooseChordLength (int itemId)
+{
+    const auto change = [itemId] (MeasureChord& c)
+    {
+        c.style.halfMeasure = itemId == halfMeasureId;
+        c.style.measures = itemId == twoMeasuresId ? 2 : 1;
+
+        // Lasting two measures, it's held over both.
+        if (c.style.measures > 1)
+            c.style.noteLength.reset();
+    };
+
+    auto newChord = chord;
+    change (newChord);
+
+    if (newChord.style == chord.style)
+        return;
+
+    const auto replaced = score.getChordsReplacedBy (part, measure, chordIndex, newChord);
+
+    if (replaced.empty())
+    {
+        edit (change);
+        return;
+    }
+
+    // Other chords would be lost, so it asks first.
+    juce::StringArray numbers;
+
+    for (auto m : replaced)
+        numbers.add (juce::String (m + 1));
+
+    const auto where = (replaced.size() == 1 ? "measure " : "measures ")
+                     + (numbers.size() > 1 ? numbers.joinIntoString (", ", 0, numbers.size() - 1) + " and " + numbers[numbers.size() - 1] : numbers[0]);
+    const auto length = itemId == twoMeasuresId ? "two measures" : "one measure";
+    const auto sameMeasure = replaced.size() == 1 && replaced.front() == measure;
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle ("Replace the other chords?")
+                                      .withMessage (juce::String ("Making this chord last ") + length + " takes the place of "
+                                                    + (sameMeasure ? "the other chord in " + where + ", which is different from it."
+                                                                   : "the chords in " + where + ", which are different from it.")
+                                                    + " Undo brings them back.")
+                                      .withButton ("Replace")
+                                      .withButton ("Cancel")
+                                      .withAssociatedComponent (this),
+                                  [safeThis = juce::Component::SafePointer (this), change] (int result)
+                                  {
+                                      if (safeThis == nullptr)
+                                          return;
+
+                                      // Replace is 1, and Cancel 0, which leaves the length as it was.
+                                      if (result == 1)
+                                          safeThis->edit (change);
+                                      else
+                                          safeThis->update();
+                                  });
 }
 
 void ChordEditor::chooseChordType (int itemId)
@@ -311,8 +388,8 @@ void ChordEditor::chooseChordType (int itemId)
     if (type != chord.style.type || ! chord.movedNotes.empty())
         edit ([type] (MeasureChord& c) { c.style.type = type; });
 
-    if (type == music::ChordType::random && score.getChord (part, measure) != nullptr && chord.hasNotes())
-        score.reshuffle (part, measure);
+    if (type == music::ChordType::random && score.getChord (part, measure, chordIndex) != nullptr && chord.hasNotes())
+        score.reshuffle (part, measure, chordIndex);
 }
 
 void ChordEditor::finish()
@@ -404,25 +481,37 @@ void ChordEditor::update()
     bassButton.setToggleState (style.staff == Staff::bass, juce::dontSendNotification);
     chordTypeBox.setSelectedId ((int) style.type + 1, juce::dontSendNotification);
 
-    // The length chosen, or else the one the chord type gives it, with only lengths that fit in a
-    // measure to choose from
-    const auto measureLength = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+    // Half a measure, one, or two, which only a block or rolled chord can last, held over them.
+    // A rhythm says how many measures it lasts.
+    const auto melodic = music::isMelodic (style.type);
+    chordLengthBox.setItemEnabled (halfMeasureId, ! style.rhythm.has_value());
+    chordLengthBox.setItemEnabled (twoMeasuresId, ! melodic && ! style.rhythm.has_value());
+    chordLengthBox.setSelectedId (style.halfMeasure ? halfMeasureId : style.measures > 1 ? twoMeasuresId : oneMeasureId, juce::dontSendNotification);
+    chordLengthBox.setEnabled (! style.rhythm.has_value());
+    chordLengthBox.setTooltip (style.rhythm.has_value() ? "The rhythm says how many measures the chord lasts. Choose No Rhythm to choose a length."
+                               : melodic ? "How long the chord lasts: half a measure, leaving the other half for another chord, or one. "
+                                           "Only block and rolled chords last two."
+                                         : "How long the chord lasts: half a measure, leaving the other half for another chord, one, or two");
+
+    // The length chosen, or else the one the chord type gives it, with only lengths that fit in
+    // the chord to choose from: the first, the whole chord, is the whole measure or half of it.
+    const auto chordLength = score.getChordSlots (chord);
     const auto length = score.getChordNoteLength (chord);
     auto selected = 0;
+
+    noteLengthBox.changeItemText (1, style.halfMeasure ? "Half measure" : noteLengths[0].second);
 
     for (size_t i = 0; i < noteLengths.size(); ++i)
     {
         const auto itemLength = noteLengths[i].first;
-        noteLengthBox.setItemEnabled ((int) i + 1, i == 0 || itemLength <= measureLength);
+        noteLengthBox.setItemEnabled ((int) i + 1, i == 0 || itemLength <= chordLength);
 
         if (style.noteLength.has_value() ? itemLength == *style.noteLength
-                                         : (i == 0 ? length == measureLength : itemLength == length && length != measureLength))
+                                         : (i == 0 ? length == chordLength : itemLength == length && length != chordLength))
             selected = (int) i + 1;
     }
 
-    // Two measures, only for a block or rolled chord, which is held over them
-    noteLengthBox.setItemEnabled (twoMeasuresItemId, ! music::isMelodic (style.type));
-    noteLengthBox.setSelectedId (style.measures > 1 ? twoMeasuresItemId : selected, juce::dontSendNotification);
+    noteLengthBox.setSelectedId (selected, juce::dontSendNotification);
 
     // A rhythm says how long the notes are instead. The chord's own is among those to choose
     // from, even if it isn't saved, or a saved one by its name is different now.
@@ -444,9 +533,15 @@ void ChordEditor::update()
     const auto chosen = style.rhythm.has_value() ? std::find (rhythmChoices.begin(), rhythmChoices.end(), *style.rhythm) : rhythmChoices.end();
     rhythmBox.setSelectedId (chosen != rhythmChoices.end() ? (int) std::distance (rhythmChoices.begin(), chosen) + 2 : 1, juce::dontSendNotification);
 
-    noteLengthBox.setEnabled (! style.rhythm.has_value());
+    noteLengthBox.setEnabled (! style.rhythm.has_value() && style.measures == 1);
     noteLengthBox.setTooltip (style.rhythm.has_value() ? "The rhythm says how long the chord's notes are. Choose No Rhythm to choose a length."
-                                                       : "How long the chord's notes are: block and rolled chords play again in them, the others a note at a time");
+                              : style.measures > 1 ? "A chord lasting two measures is held over both. Choose One measure to choose a length."
+                                                   : "How long the chord's notes are: block and rolled chords play again in them, the others a note at a time");
+
+    // A chord lasting half a measure isn't written in a rhythm.
+    rhythmBox.setEnabled (! style.halfMeasure);
+    rhythmBox.setTooltip (style.halfMeasure ? "A chord lasting half a measure isn't written in a rhythm. Choose One measure for its length to choose one."
+                                            : "A saved rhythm for the chord's notes to go in, in place of the note length, in as many measures as it takes");
 
 
     // The chord's tones, as the builder's chord tones table lists them
@@ -491,9 +586,11 @@ void ChordEditor::update()
         keyboardNotesLabel.setText ("Set on the keyboard: " + names.joinIntoString (" "), juce::dontSendNotification);
     }
 
-    removeButton.setEnabled (score.getChord (part, measure) != nullptr);
-    removeButton.setTooltip (removeButton.isEnabled() ? "Take the chord out of the measure, leaving the window open for a new one"
-                                                      : "There's no chord in the measure to take out");
+    const auto* existing = score.getChord (part, measure, chordIndex);
+    removeButton.setEnabled (existing != nullptr && (existing->hasNotes() || ! existing->style.halfMeasure));
+    removeButton.setTooltip (! removeButton.isEnabled() ? "There's no chord here to take out"
+                             : style.halfMeasure ? "Take the chord out of its half of the measure, leaving rests, and the window open for a new one"
+                                                 : "Take the chord out of the measure, leaving the window open for a new one");
     resized();
 }
 
@@ -507,7 +604,7 @@ int ChordEditor::getIdealHeight() const
     // Enough for the keyboard notes too, which only show some of the time.
     return padding + rowHeight + gap
          + 3 * (rowHeight + gap) + 4 * (segmentHeight + gap)
-         + sectionGap - gap + rowHeight + gap + rowHeight
+         + sectionGap - gap + rowHeight + gap + rowHeight + gap + rowHeight
          + sectionGap + 3 * infoLineHeight + 34
          + sectionGap + buttonHeight + padding;
 }
@@ -571,6 +668,10 @@ void ChordEditor::resized()
     layOutSegments (clefs);
 
     bounds.removeFromTop (sectionGap - gap);
+    auto chordLengthRow = bounds.removeFromTop (rowHeight);
+    chordLengthLabel.setBounds (chordLengthRow.removeFromLeft (86));
+    chordLengthBox.setBounds (chordLengthRow);
+    bounds.removeFromTop (gap);
     auto lengthRow = bounds.removeFromTop (rowHeight);
     noteLengthLabel.setBounds (lengthRow.removeFromLeft (86));
     noteLengthBox.setBounds (lengthRow);

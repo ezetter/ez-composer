@@ -242,13 +242,15 @@ namespace
         return content;
     }
 
-    StaffContent getChordContent (const Score& score, const music::Chord& chord, const MeasureChord& measureChord)
+    /** A chord's notes, from one 64th of the measure for so many: the whole measure, or half of it. */
+    StaffContent getChordContent (const Score& score, const music::Chord& chord, const MeasureChord& measureChord, int from, int span)
     {
         StaffContent content;
         content.source = StaffContent::Source::chord;
 
         const auto beats = score.getBeatsPerMeasure();
         const auto measureLength = beats * Score::slotsPerBeat;
+        const auto end = from + span;
         const auto length = score.getChordNoteLength (measureChord);
         const auto type = measureChord.style.type;
         const auto add = [&] (int slot, std::vector<music::Tone> tones, int slots, bool rolled)
@@ -302,21 +304,21 @@ namespace
 
         if (! music::isMelodic (type))
         {
-            // As long as its note length, from the start of the measure, so it lines up with the
-            // first beat of anything on the other staff, and again until the measure's full: the
-            // whole measure, unless a shorter length's been chosen.
-            auto slot = 0;
+            // As long as its note length, from the start of the measure, or of its half, so it
+            // lines up with the first beat of anything on the other staff, and again until it's
+            // full: the whole measure, or half, unless a shorter length's been chosen.
+            auto slot = from;
 
-            for (; slot + length <= measureLength; slot += length)
+            for (; slot + length <= end; slot += length)
                 add (slot, chord.tones, length, type == music::ChordType::rolled);
 
-            addRests (content.events, slot, measureLength, beats);
+            addRests (content.events, slot, end, beats);
             setNotesPerBeat (content);
             return content;
         }
 
-        // Single notes of the note length, one after another until the measure's full
-        const auto room = measureLength / length;
+        // Single notes of the note length, one after another until it's full
+        const auto room = span / length;
         std::vector<music::Tone> sequence;
 
         if (type == music::ChordType::random)
@@ -339,7 +341,7 @@ namespace
         if (auto moved = getMovedNotes (chord, measureChord, sequence.size()))
             sequence = std::move (*moved);
 
-        auto slot = 0;
+        auto slot = from;
 
         for (const auto& tone : sequence)
         {
@@ -347,7 +349,7 @@ namespace
             slot += length;
         }
 
-        addRests (content.events, slot, measureLength, beats);
+        addRests (content.events, slot, end, beats);
         setNotesPerBeat (content);
         return content;
     }
@@ -530,9 +532,9 @@ namespace
     /** Whether a measure's root or octave on the alternate staff is held on into the next: the next
         has the same chord, the same numeral, however it's written, or the same notes set on the
         piano, for one without a numeral, with the same notes on the alternate staff, both held
-        for the measure
+        for their chords. For a measure with two chords, it's its second half's that's held on.
     */
-    bool isAlternateTiedOver (const Score& score, int part, int measure, const MeasureChord& chord)
+    bool isAlternateTiedOver (const Score& score, int part, int measure, int index, const MeasureChord& chord)
     {
         const auto alternate = score.getAlternateStaff (part);
 
@@ -545,7 +547,7 @@ namespace
             return false;
 
         const auto sameChord = ! chord.spec.isEmpty() ? next->spec == chord.spec : next->keyboardNotes == chord.keyboardNotes;
-        const auto tones = getMidiNotes (score.getAlternateTones (part, measure));
+        const auto tones = getMidiNotes (score.getAlternateTones (part, measure, index));
 
         return sameChord && ! tones.empty() && tones == getMidiNotes (score.getAlternateTones (part, measure + 1));
     }
@@ -566,65 +568,120 @@ namespace
     }
 }
 
+const MeasureContent::ChordPlayed* MeasureContent::getChordAt (double beat) const
+{
+    for (const auto& played : chords)
+        if (beat >= played.onset - 1.0e-9 && beat < played.onset + played.beats - 1.0e-9)
+            return &played;
+
+    return nullptr;
+}
+
 MeasureContent getMeasureContent (const Score& score, int part, int measure)
 {
     MeasureContent content;
     std::array<bool, 2> filled { false, false };
+    const auto* firstChord = score.getChord (part, measure);
+    const auto numChords = score.hasTwoChords (part, measure) ? 2 : 1;
+    const auto measureLength = score.getBeatsPerMeasure() * Score::slotsPerBeat;
+    const auto beatsPerMeasure = score.getBeatsPerMeasure();
 
-    if (const auto* measureChord = score.getChord (part, measure))
+    // The measure's chord, or its two halves', each half's on its own: the same staff for both,
+    // with rests in a half without notes
+    std::array<std::optional<music::Chord>, 2> notes;
+
+    for (int index = 0; index < numChords; ++index)
+        notes[(size_t) index] = score.getChordNotes (part, measure, index);
+
+    if (firstChord != nullptr && (notes[0].has_value() || notes[1].has_value()))
     {
-        if (auto chord = score.getChordNotes (part, measure))
+        const auto chordStaff = firstChord->style.staff;
+        const auto otherStaff = music::getOtherStaff (chordStaff);
+        const auto usesOther = score.chordUsesStaff (part, measure, otherStaff);
+        auto& written = content.staves[(size_t) chordStaff];
+        auto& alternate = content.staves[(size_t) otherStaff];
+        written.source = StaffContent::Source::chord;
+        alternate.source = StaffContent::Source::alternate;
+        filled[(size_t) chordStaff] = true;
+        filled[(size_t) otherStaff] = usesOther;
+
+        for (int index = 0; index < numChords; ++index)
         {
-            const auto& style = measureChord->style;
-            content.chord = chord;
-            content.chordStyle = style;
+            const auto& measureChord = *score.getChord (part, measure, index);
+            const auto from = score.getChordStart (index);
+            const auto span = numChords == 2 ? measureLength / 2 : measureLength;
+            const auto onset = (double) from / Score::slotsPerBeat;
+            const auto beats = (double) span / Score::slotsPerBeat;
 
-            content.staves[(size_t) style.staff] = getChordContent (score, *chord, *measureChord);
-            filled[(size_t) style.staff] = true;
-
-            const auto otherStaff = music::getOtherStaff (style.staff);
-
-            if (score.chordUsesStaff (part, measure, otherStaff))
+            if (! notes[(size_t) index].has_value())
             {
-                // Held for the whole measure, from the downbeat, like the chord. With all its notes
-                // taken out by hand, it's a whole-measure rest, rather than the quarter notes it hides.
-                auto& alternate = content.staves[(size_t) otherStaff];
-                alternate.source = StaffContent::Source::alternate;
+                // A half without a chord is rests, on both staves.
+                addRests (written.events, from, from + span, beatsPerMeasure);
 
-                // In a rhythm with notes on both staves, the other staff's go as its notes do.
-                const auto& rhythm = measureChord->style.rhythm;
-                const auto rolled = score.getAlternateStaff (part) == music::AlternateStaff::rolledChord;
+                if (usesOther)
+                    addRests (alternate.events, from, from + span, beatsPerMeasure);
 
-                if (auto tones = score.getAlternateTones (part, measure); ! tones.empty() && rhythm.has_value() && rhythm->hasNotes (otherStaff) && rhythm->hasNotes (style.staff))
-                    alternate = getRhythmContent (score, layOutRhythm (rhythm->staves[(size_t) otherStaff], score.getBeatsPerMeasure() * Score::slotsPerBeat, measureChord->rhythmMeasure),
-                                                  StaffContent::Source::alternate, [&] (int) { return tones; }, rolled);
-                else if (! tones.empty())
-                    alternate.events.push_back ({ 0.0, getFullMeasureDuration (score.getBeatsPerMeasure()), std::move (tones), rolled, false });
-                else
-                    alternate.events.push_back ({ 0.0, Duration::whole, {}, false, true });
-                filled[(size_t) otherStaff] = true;
+                continue;
             }
 
-            // Held on into the next measure, the alternate staff's notes with it. A root or octave is
-            // held on into the next measure too when it has the same chord, even if the chord's
-            // played again.
-            if (score.isChordTiedOver (part, measure))
-            {
-                for (auto staff : { style.staff, otherStaff })
-                    if (filled[(size_t) staff])
-                        tieOver (content.staves[(size_t) staff], score.getBeatsPerMeasure());
-            }
-            else if (filled[(size_t) otherStaff] && isAlternateTiedOver (score, part, measure, *measureChord))
-            {
-                tieOver (content.staves[(size_t) otherStaff], score.getBeatsPerMeasure());
-            }
+            const auto& chord = *notes[(size_t) index];
+            content.chords.push_back ({ chord, measureChord.style, onset, beats, index });
 
-            // Held on from the measure before, a rolled chord isn't rolled again.
-            if (measure > 0 && score.isChordTiedOver (part, measure - 1))
-                for (auto& staffContent : content.staves)
-                    if (! staffContent.events.empty())
-                        staffContent.events.front().rolled = false;
+            const auto chordContent = getChordContent (score, chord, measureChord, from, span);
+            written.events.insert (written.events.end(), chordContent.events.begin(), chordContent.events.end());
+            written.tiedNotes.insert (written.tiedNotes.end(), chordContent.tiedNotes.begin(), chordContent.tiedNotes.end());
+
+            if (! usesOther)
+                continue;
+
+            // Held for the whole chord, from its start. With all its notes taken out by hand, it's
+            // a rest, rather than the quarter notes it hides: a whole-measure rest for a chord
+            // lasting the measure.
+            // In a rhythm with notes on both staves, the other staff's go as its notes do.
+            const auto& rhythm = measureChord.style.rhythm;
+            const auto rolled = score.getAlternateStaff (part) == music::AlternateStaff::rolledChord;
+            auto tones = score.getAlternateTones (part, measure, index);
+
+            if (! tones.empty() && rhythm.has_value() && rhythm->hasNotes (otherStaff) && rhythm->hasNotes (chordStaff))
+                alternate = getRhythmContent (score, layOutRhythm (rhythm->staves[(size_t) otherStaff], measureLength, measureChord.rhythmMeasure),
+                                              StaffContent::Source::alternate, [&] (int) { return tones; }, rolled);
+            else if (! tones.empty())
+                alternate.events.push_back ({ onset, numChords == 2 ? getDurationForBeats (beats) : getFullMeasureDuration (beatsPerMeasure),
+                                              std::move (tones), rolled, false });
+            else if (numChords == 2)
+                addRests (alternate.events, from, from + span, beatsPerMeasure);
+            else
+                alternate.events.push_back ({ 0.0, Duration::whole, {}, false, true });
         }
+
+        // The chord's own content says how close its notes are; two halves need room for both.
+        setNotesPerBeat (written);
+
+        if (usesOther)
+            setNotesPerBeat (alternate);
+
+        // Held on into the next measure, the alternate staff's notes with it. A root or octave is
+        // held on into the next measure too when it has the same chord, even if the chord's
+        // played again.
+        const auto lastIndex = numChords - 1;
+
+        if (score.isChordTiedOver (part, measure))
+        {
+            for (auto staff : { chordStaff, otherStaff })
+                if (filled[(size_t) staff])
+                    tieOver (content.staves[(size_t) staff], beatsPerMeasure);
+        }
+        else if (const auto* last = score.getChord (part, measure, lastIndex);
+                 usesOther && last != nullptr && last->hasNotes() && isAlternateTiedOver (score, part, measure, lastIndex, *last))
+        {
+            tieOver (content.staves[(size_t) otherStaff], beatsPerMeasure);
+        }
+
+        // Held on from the measure before, a rolled chord isn't rolled again.
+        if (measure > 0 && score.isChordTiedOver (part, measure - 1))
+            for (auto& staffContent : content.staves)
+                if (! staffContent.events.empty())
+                    staffContent.events.front().rolled = false;
     }
 
     const auto keyAlterations = music::getKeyAlterations (score.getKey());
@@ -636,14 +693,14 @@ MeasureContent getMeasureContent (const Score& score, int part, int measure)
     return content;
 }
 
-std::vector<music::Tone> getChordNoteChoices (const Score& score, int part, int measure)
+std::vector<music::Tone> getChordNoteChoices (const Score& score, int part, int measure, int index)
 {
-    const auto* measureChord = score.getChord (part, measure);
+    const auto* measureChord = score.getChord (part, measure, index);
 
     if (measureChord == nullptr || ! music::isMelodic (measureChord->style.type))
         return {};
 
-    if (const auto chord = score.getChordNotes (part, measure))
+    if (const auto chord = score.getChordNotes (part, measure, index))
         return getNoteChoices (*chord);
 
     return {};
